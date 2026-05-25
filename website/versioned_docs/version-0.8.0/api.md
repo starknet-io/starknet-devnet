@@ -16,11 +16,11 @@ Due to how Devnet internally works, the method `starknet_getStorageProof` is not
 
 Devnet also provides a proof-related extension method `starknet_proveTransaction`. For supported modes, behavior, and usage examples, check [Transaction proofs and proof modes](./proofs).
 
-Since JSON-RPC v0.6.0, to find out which JSON-RPC version is supported by which Devnet version, check out the [releases page](https://github.com/0xspaceshard/starknet-devnet/releases).
+Since JSON-RPC v0.6.0, to find out which JSON-RPC version is supported by which Devnet version, check out the [releases page](https://github.com/starknet-io/starknet-devnet/releases).
 
 ### Devnet API
 
-Devnet has many additional features available via JSON-RPC. The RPC methods are documented throughout the documentation in their corresponding pages, but are also aggregated [here](https://github.com/0xSpaceShard/starknet-devnet/blob/main/website/static/devnet_api.json).
+Devnet has many additional features available via JSON-RPC. The RPC methods are documented throughout the documentation in their corresponding pages, but are also aggregated [here](https://github.com/starknet-io/starknet-devnet/blob/main/website/static/devnet_api.json).
 
 #### Healthcheck
 
@@ -43,7 +43,7 @@ Connected (press CTRL+C to quit)
 
 ## Interacting with Devnet in JavaScript and TypeScript
 
-To spawn Devnet and interact with it using the [Devnet API](#devnet-api), you can use [`starknet-devnet-js`](https://github.com/0xSpaceShard/starknet-devnet-js/). This can be especially useful in achieving [L1-L2 communication](./postman.md).
+To spawn Devnet and interact with it using the [Devnet API](#devnet-api), you can use [`starknet-devnet-js`](https://github.com/starknet-io/starknet-devnet-js/). This can be especially useful in achieving [L1-L2 communication](./postman.md).
 
 To interact with Devnet using the [Starknet API](#starknet-api), use [starknet.js](https://www.starknetjs.com/).
 

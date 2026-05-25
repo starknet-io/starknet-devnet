@@ -51,7 +51,7 @@ impl SetGasPrice for BackgroundDevnet {
 /// 2. Set the gas values.
 /// 3. Execute simulateTransactions again and check gas fees.
 ///
-/// Chain ID assertion justified in: https://github.com/0xSpaceShard/starknet-devnet/pull/551#discussion_r1682755696
+/// Chain ID assertion justified in: https://github.com/starknet-io/starknet-devnet/pull/551#discussion_r1682755696
 ///
 /// Note to test maintainer: the usual way of adapting this test to a new Starknet version is to
 /// repeatedly run it and hardcode new hex fee values.

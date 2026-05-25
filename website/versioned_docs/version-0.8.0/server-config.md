@@ -61,7 +61,7 @@ If, however, you need to customize the limits, you may rely on the following CLI
 - `--maximum-contract-bytecode-size <FELTS>`
 - `--maximum-sierra-length <FELTS>`
 
-The default upper limits configured in Devnet can be found [among constants](https://github.com/0xSpaceShard/starknet-devnet/blob/main/crates/starknet-devnet-core/src/constants.rs#L121).
+The default upper limits configured in Devnet can be found [among constants](https://github.com/starknet-io/starknet-devnet/blob/main/crates/starknet-devnet-core/src/constants.rs#L121).
 
 ## API
 

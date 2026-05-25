@@ -12,14 +12,14 @@ members = [
 panic = "unwind"
 
 [workspace.package]
-authors = ["0xSpaceShard"]
+authors = ["starknet-io"]
 edition = "2021"
-repository = "https://github.com/0xSpaceShard/starknet-devnet"
+repository = "https://github.com/starknet-io/starknet-devnet"
 license-file = "LICENSE"
-homepage = "https://0xspaceshard.github.io/starknet-devnet"
+homepage = "https://starknet-io.github.io/starknet-devnet"
 description = "A local testnet for Starknet"
 readme = "README.md"
-documentation = "https://0xspaceshard.github.io/starknet-devnet/docs/intro"
+documentation = "https://starknet-io.github.io/starknet-devnet/docs/intro"
 
 exclude = [".github/**", ".devcontainer/**", ".circleci/**"]
 
@@ -125,7 +125,7 @@ ring = "0.17.14"
 alloy = { version = "1.1.1" }
 eyre = "0.6"
 
-# Changed from 0.10 to 0.10.72 as suggested by Dependabot: https://github.com/0xSpaceShard/starknet-devnet/security/dependabot/53
+# Changed from 0.10 to 0.10.72 as suggested by Dependabot: https://github.com/starknet-io/starknet-devnet/security/dependabot/53
 openssl = { version = "0.10.72", features = ["vendored"] }
 
 parking_lot = "0.12.3"
@@ -144,5 +144,5 @@ listeners = "0.2.1"
 parity-scale-codec = "=3.7.5"
 parity-scale-codec-derive = "=3.7.5"
 
-# https://app.circleci.com/pipelines/github/0xSpaceShard/starknet-devnet/3033/workflows/3f93463c-7550-432b-8868-9bb0bf96dc10/jobs/5012
+# https://app.circleci.com/pipelines/github/starknet-io/starknet-devnet/3033/workflows/3f93463c-7550-432b-8868-9bb0bf96dc10/jobs/5012
 cargo-platform = "=0.1.8"

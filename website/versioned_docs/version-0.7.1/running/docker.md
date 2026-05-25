@@ -40,7 +40,7 @@ Commits to the `main` branch of this repository are mostly available as images t
 $ docker pull shardlabs/starknet-devnet-rs:<COMMIT_HASH>
 ```
 
-If a fix has been merged into the `main` branch of Devnet's code repository, you can access it before its inclusion in an official release. Just inspect the [`main` commit list](https://github.com/0xSpaceShard/starknet-devnet/commits/main) and copy the full SHA digest of the commit containing the fix (or preferably the latest commit) which has a green check ✔️ symbol next to the commit date (which indicates the image indeed exists). Some revisions may not have a corresponding Docker image, but these are not supposed to be bugfixes.
+If a fix has been merged into the `main` branch of Devnet's code repository, you can access it before its inclusion in an official release. Just inspect the [`main` commit list](https://github.com/starknet-io/starknet-devnet/commits/main) and copy the full SHA digest of the commit containing the fix (or preferably the latest commit) which has a green check ✔️ symbol next to the commit date (which indicates the image indeed exists). Some revisions may not have a corresponding Docker image, but these are not supposed to be bugfixes.
 
 ### Zero-seeded set of accounts
 

@@ -2,7 +2,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
-const GITHUB_REPO_URL = 'https://github.com/0xSpaceShard/starknet-devnet';
+const GITHUB_REPO_URL = 'https://github.com/starknet-io/starknet-devnet';
 
 const config: Config = {
   title: 'Starknet Devnet',
@@ -10,7 +10,7 @@ const config: Config = {
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
-  url: 'https://0xspaceshard.github.io',
+  url: 'https://starknet-io.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/starknet-devnet/',
@@ -18,7 +18,7 @@ const config: Config = {
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: '0xSpaceShard', // Usually your GitHub org/user name.
+  organizationName: 'starknet-io', // Usually your GitHub org/user name.
   projectName: 'starknet-devnet', // Usually your repo name.
   deploymentBranch: 'gh-pages',
 
@@ -121,12 +121,12 @@ const config: Config = {
             },
             {
               label: 'starknet-devnet-js',
-              href: 'https://github.com/0xspaceShard/starknet-devnet-js',
+              href: 'https://github.com/starknet-io/starknet-devnet-js',
             },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} SpaceShard. Built with Docusaurus.`,
+      //copyright: `Copyright © ${new Date().getFullYear()} SpaceShard. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

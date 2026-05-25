@@ -12,7 +12,7 @@ Postman is a Starknet utility that allows testing L1-L2 interaction. It is **unr
 
 There are two internal message queues: one for L1->L2 messages, another for L2->L1 messages. When there are messages in a queue, you will need to [flush](#flush) to transmit the messages to their destinations.
 
-You can use [**`starknet-devnet-js`**](https://github.com/0xSpaceShard/starknet-devnet-js) to assist you in the above listed actions. [**This example**](https://github.com/0xSpaceShard/starknet-devnet-js/blob/master/test/l1-l2-postman.test.ts), especially the `it("should exchange messages between L1 and L2")` test case should be of most help. The required contracts are configured and deployed in the `before` block. Alternatively, you can directly send requests to the endpoints specified below.
+You can use [**`starknet-devnet-js`**](https://github.com/starknet-io/starknet-devnet-js) to assist you in the above listed actions. [**This example**](https://github.com/starknet-io/starknet-devnet-js/blob/master/test/l1-l2-postman.test.ts), especially the `it("should exchange messages between L1 and L2")` test case should be of most help. The required contracts are configured and deployed in the `before` block. Alternatively, you can directly send requests to the endpoints specified below.
 
 ## Load
 

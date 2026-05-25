@@ -41,7 +41,7 @@ const FeatureList: FeatureItem[] = [
       <>
         Unlike its{' '}
         <a
-          href="https://0xspaceshard.github.io/starknet-devnet/"
+          href="https:/starknet-io.github.io/starknet-devnet/"
           target="_blank"
           rel="noopener noreferrer"
         >

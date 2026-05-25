@@ -16,7 +16,7 @@ Installing an executable binary is achievable with `cargo install` via [crates.i
 
 ### Remove Pythonic Devnet
 
-If in the past you installed [Pythonic Devnet](https://github.com/0xSpaceShard/starknet-devnet), be sure to remove it to avoid name collision of the old and the new executable - if by no other means, then by `rm $(which starknet-devnet)`.
+If in the past you installed [Pythonic Devnet](https://github.com/starknet-io/starknet-devnet), be sure to remove it to avoid name collision of the old and the new executable - if by no other means, then by `rm $(which starknet-devnet)`.
 
 ### Install from crates.io
 
@@ -30,7 +30,7 @@ $ cargo install starknet-devnet
 - Preferably familiarize yourself with the `cargo install` command ([docs](https://doc.rust-lang.org/cargo/commands/cargo-install.html#dealing-with-the-lockfile)).
 
 ```
-$ cargo install --git https://github.com/0xSpaceShard/starknet-devnet.git --locked
+$ cargo install --git https://github.com/starknet-io/starknet-devnet.git --locked
 ```
 
 ### Install with `asdf`
@@ -83,16 +83,16 @@ $ starknet-devnet
 
 ## Fetch a pre-compiled binary executable
 
-If you want to save time and skip project compilation on installation, since Devnet v0.0.5, the Assets section of each [GitHub release](https://github.com/0xSpaceShard/starknet-devnet/releases) contains a set of platform-specific pre-compiled binary executables. Extract and run with:
+If you want to save time and skip project compilation on installation, since Devnet v0.0.5, the Assets section of each [GitHub release](https://github.com/starknet-io/starknet-devnet/releases) contains a set of platform-specific pre-compiled binary executables. Extract and run with:
 
 ```
-$ curl -sSfL https://github.com/0xSpaceShard/starknet-devnet/releases/download/<VERSION>/<COMPRESSED_ARCHIVE> | tar -xvz -C <TARGET_DIR>
+$ curl -sSfL https://github.com/starknet-io/starknet-devnet/releases/download/<VERSION>/<COMPRESSED_ARCHIVE> | tar -xvz -C <TARGET_DIR>
 $ <TARGET_DIR>/starknet-devnet
 ```
 
 ## Run from source
 
-To install the project from source, after [git-cloning](https://github.com/git-guides/git-clone) the [Devnet repository](https://github.com/0xSpaceShard/starknet-devnet), running the following command will install, build and start Devnet:
+To install the project from source, after [git-cloning](https://github.com/git-guides/git-clone) the [Devnet repository](https://github.com/starknet-io/starknet-devnet), running the following command will install, build and start Devnet:
 
 ```
 $ cargo run

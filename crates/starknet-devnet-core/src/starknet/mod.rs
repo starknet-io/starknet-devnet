@@ -1204,7 +1204,7 @@ impl Starknet {
             BlockStatus::PreConfirmed => "Pre-confirmed block cannot be accepted on L1",
             BlockStatus::AcceptedOnL1 => "Block already accepted on L1",
             BlockStatus::Rejected => {
-                "Rejected blocks should no longer exist; if you see this message, please report a bug at https://github.com/0xSpaceShard/starknet-devnet/issues/new"
+                "Rejected blocks should no longer exist; if you see this message, please report a bug at https://github.com/starknet-io/starknet-devnet/issues/new"
             }
         };
 

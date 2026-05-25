@@ -52,4 +52,4 @@ Each Devnet release targets a specific Starknet protocol version and JSON-RPC sp
   </tbody>
 </table>
 
-For the complete list of releases, including pre-releases and full changelogs, see the [GitHub releases page](https://github.com/0xSpaceShard/starknet-devnet/releases).
+For the complete list of releases, including pre-releases and full changelogs, see the [GitHub releases page](https://github.com/starknet-io/starknet-devnet/releases).
