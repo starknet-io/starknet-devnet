@@ -25,7 +25,7 @@ $ METRICS_HOST=127.0.0.1 METRICS_PORT=8080 starknet-devnet
 If running with Docker:
 
 ```bash
-$ docker run -e METRICS_HOST=0.0.0.0 -e METRICS_PORT=9090 -p 9090:9090 shardlabs/starknet-devnet-rs
+$ docker run -e METRICS_HOST=0.0.0.0 -e METRICS_PORT=9090 -p 9090:9090 starknetfoundation/starknet-devnet-rs
 ```
 
 ## Accessing Metrics

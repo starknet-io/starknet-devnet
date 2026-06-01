@@ -125,7 +125,7 @@ If there is `mydump` inside `/path/to/dumpdir`, you can load it with:
 docker run \
   -p 127.0.0.1:5050:5050 \
   --mount type=bind,source=/path/to/dumpdir,target=/path/to/dumpdir \
-  shardlabs/starknet-devnet-rs \
+  starknetfoundation/starknet-devnet-rs \
   --dump-path /path/to/dumpdir/mydump
 ```
 
@@ -135,6 +135,6 @@ To dump to `/path/to/dumpdir/mydump` on Devnet shutdown, run:
 docker run \
   -p 127.0.0.1:5050:5050 \
   --mount type=bind,source=/path/to/dumpdir,target=/path/to/dumpdir \
-  shardlabs/starknet-devnet-rs \
+  starknetfoundation/starknet-devnet-rs \
   --dump-on exit --dump-path /path/to/dumpdir/mydump
 ```
