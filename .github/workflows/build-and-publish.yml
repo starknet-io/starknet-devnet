@@ -255,7 +255,7 @@ jobs:
 
       - name: Build and publish standard Docker image
         id: build_standard
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -264,10 +264,12 @@ jobs:
           tags: ${{ steps.combined_tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
 
       - name: Build and publish seed0 Docker image
         id: build_seed0
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./seed0.Dockerfile
@@ -278,6 +280,8 @@ jobs:
             BASE_IMAGE=${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:sha-${{ needs.prepare.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
           
       - name: Summarize published images
         run: |
@@ -355,7 +359,7 @@ jobs:
           npm run deploy
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           name: v${{ needs.prepare.outputs.version }}
           tag_name: v${{ needs.prepare.outputs.version }}

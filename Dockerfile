@@ -13,7 +13,11 @@ FROM alpine:3.22
 # Use ca-certificates to allow forking from URLs using https scheme
 RUN apk add --no-cache tini ca-certificates
 
+RUN addgroup -S devnet && adduser -S devnet -G devnet
+
 COPY --from=builder /target/release/starknet-devnet /usr/local/bin/starknet-devnet
+
+USER devnet
 
 # The default port; exposing is beneficial if using Docker GUI
 EXPOSE 5050
