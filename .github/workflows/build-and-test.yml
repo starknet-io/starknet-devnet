@@ -94,12 +94,6 @@ jobs:
         id: config
         uses: ./.github/actions/load-config
 
-      - name: Ensure cargo bin is in PATH
-        run: |
-          if [ -f "$HOME/.cargo/env" ]; then
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          fi
-
       - name: Set up Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
