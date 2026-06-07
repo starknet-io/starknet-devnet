@@ -1,10 +1,21 @@
-FROM rust:1.96-alpine3.23 AS builder
+FROM rust:1.96-alpine3.23 AS chef
+
+RUN apk add --no-cache pkgconfig make musl-dev openssl-dev perl && \
+    cargo install cargo-chef --locked
+
+WORKDIR /app
+
+FROM chef AS planner
 
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN apk update && \
-    apk add --no-cache pkgconfig make musl-dev openssl-dev perl
+FROM chef AS builder
 
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+COPY . .
 RUN cargo build --bin starknet-devnet --release
 
 FROM alpine:3.23
@@ -15,7 +26,7 @@ RUN apk add --no-cache tini ca-certificates
 
 RUN addgroup -S devnet && adduser -S devnet -G devnet
 
-COPY --from=builder /target/release/starknet-devnet /usr/local/bin/starknet-devnet
+COPY --from=builder /app/target/release/starknet-devnet /usr/local/bin/starknet-devnet
 
 USER devnet
 
