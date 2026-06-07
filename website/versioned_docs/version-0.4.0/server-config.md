@@ -21,7 +21,7 @@ $ RUST_LOG=<LEVEL> starknet-devnet
 or if using dockerized Devnet:
 
 ```
-$ docker run -e RUST_LOG=<LEVEL> shardlabs/starknet-devnet-rs
+$ docker run -e RUST_LOG=<LEVEL> starknetfoundation/starknet-devnet-rs
 ```
 
 By default, logging of request and response data is turned off.

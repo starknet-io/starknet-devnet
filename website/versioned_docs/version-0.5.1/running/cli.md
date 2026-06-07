@@ -17,7 +17,7 @@ $ starknet-devnet --help
 Or if using dockerized Devnet:
 
 ```
-$ docker run --rm shardlabs/starknet-devnet-rs --help
+$ docker run --rm starknetfoundation/starknet-devnet-rs --help
 ```
 
 ## Environment variables
@@ -47,7 +47,7 @@ $ docker run \
     -e <VAR1>=<VALUE> \
     -e <VAR2>=<VALUE> \
     ... \
-    shardlabs/starknet-devnet-rs
+    starknetfoundation/starknet-devnet-rs
 ```
 
 ## Load configuration from a file
@@ -85,5 +85,5 @@ ACCOUNTS=3
 Then run:
 
 ```
-$ docker run --env-file .my-env-file shardlabs/starknet-devnet-rs
+$ docker run --env-file .my-env-file starknetfoundation/starknet-devnet-rs
 ```
