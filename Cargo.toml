@@ -82,10 +82,10 @@ ahash = "0.8"
 
 # Starknet dependencies
 starknet-types-core = "=0.2.4"
-starknet_api = { version = "0.18.0-rc.1", features = ["testing"] }
-blockifier = { version = "0.18.0-rc.1" }
+starknet_api = { version = "0.19.0-rc.0", features = ["testing"] }
+blockifier = { version = "0.19.0-rc.0" }
 
-apollo_compilation_utils = { version = "0.18.0-rc.1"}
+apollo_compilation_utils = { version = "0.19.0-rc.0"}
 
 starknet-rs-signers = { version = "0.19.0", package = "starknet-rust-signers" }
 starknet-rs-core = { version = "0.19.0", package = "starknet-rust-core" }
@@ -96,19 +96,19 @@ starknet-rs-contract = { version = "0.19.0", package = "starknet-rust-contract" 
 cairo-vm = "=3.2.0"
 
 # Cairo-lang dependencies
-cairo-lang-starknet-classes = "=2.17.0"
-cairo-lang-compiler = "=2.17.0"
-cairo-lang-casm = "=2.17.0"
-cairo-lang-defs = "=2.17.0"
-cairo-lang-diagnostics = "=2.17.0"
-cairo-lang-filesystem = "=2.17.0"
-cairo-lang-lowering = "=2.17.0"
-cairo-lang-semantic = "=2.17.0"
-cairo-lang-sierra = "=2.17.0"
-cairo-lang-sierra-generator = "=2.17.0"
-cairo-lang-sierra-to-casm = "=2.17.0"
-cairo-lang-syntax = "=2.17.0"
-cairo-lang-utils = "=2.17.0"
+cairo-lang-starknet-classes = "=2.19.0-rc.2"
+cairo-lang-compiler = "=2.19.0-rc.2"
+cairo-lang-casm = "=2.19.0-rc.2"
+cairo-lang-defs = "=2.19.0-rc.2"
+cairo-lang-diagnostics = "=2.19.0-rc.2"
+cairo-lang-filesystem = "=2.19.0-rc.2"
+cairo-lang-lowering = "=2.19.0-rc.2"
+cairo-lang-semantic = "=2.19.0-rc.2"
+cairo-lang-sierra = "=2.19.0-rc.2"
+cairo-lang-sierra-generator = "=2.19.0-rc.2"
+cairo-lang-sierra-to-casm = "=2.19.0-rc.2"
+cairo-lang-syntax = "=2.19.0-rc.2"
+cairo-lang-utils = "=2.19.0-rc.2"
 
 # Inner dependencies
 starknet-types = { version = "0.8.2", path = "crates/starknet-devnet-types", package = "starknet-devnet-types" }
