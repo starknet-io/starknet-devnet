@@ -55,7 +55,7 @@ PROOF_MODE=devnet starknet-devnet
 ```bash
 docker run --rm -p 5050:5050 \
   -e PROOF_MODE=devnet \
-  shardlabs/starknet-devnet-rs
+  starknetfoundation/starknet-devnet-rs
 ```
 
 ## RPC: `starknet_proveTransaction`
