@@ -185,14 +185,19 @@ jobs:
         run: |
           DOCKER_REGISTRY="${{ steps.config.outputs.docker_registry }}"
           DOCKER_NAMESPACE="${{ steps.config.outputs.docker_namespace }}"
+          DOCKER_NAMESPACE_SECONDARY="${{ steps.config.outputs.docker_namespace_secondary }}"
           IMAGE_NAME="${{ steps.config.outputs.image_name }}"
           SHA="${{ needs.prepare.outputs.sha }}"
           
           SHA_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:sha-$SHA"
           SHA_SEED0_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:sha-$SHA-seed0"
+          SHA_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:sha-$SHA"
+          SHA_SEED0_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:sha-$SHA-seed0"
           
           echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
           echo "sha_seed0_tag=$SHA_SEED0_TAG" >> $GITHUB_OUTPUT
+          echo "sha_tag_secondary=$SHA_TAG_SECONDARY" >> $GITHUB_OUTPUT
+          echo "sha_seed0_tag_secondary=$SHA_SEED0_TAG_SECONDARY" >> $GITHUB_OUTPUT
 
       - name: Prepare version tags
         id: version_tags
@@ -200,14 +205,19 @@ jobs:
         run: |
           DOCKER_REGISTRY="${{ steps.config.outputs.docker_registry }}"
           DOCKER_NAMESPACE="${{ steps.config.outputs.docker_namespace }}"
+          DOCKER_NAMESPACE_SECONDARY="${{ steps.config.outputs.docker_namespace_secondary }}"
           IMAGE_NAME="${{ steps.config.outputs.image_name }}"
           VERSION="${{ needs.prepare.outputs.version }}"
           
           VERSION_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:$VERSION"
           VERSION_SEED0_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:$VERSION-seed0"
+          VERSION_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:$VERSION"
+          VERSION_SEED0_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:$VERSION-seed0"
           
           echo "version_tag=$VERSION_TAG" >> $GITHUB_OUTPUT
           echo "version_seed0_tag=$VERSION_SEED0_TAG" >> $GITHUB_OUTPUT
+          echo "version_tag_secondary=$VERSION_TAG_SECONDARY" >> $GITHUB_OUTPUT
+          echo "version_seed0_tag_secondary=$VERSION_SEED0_TAG_SECONDARY" >> $GITHUB_OUTPUT
       
       - name: Prepare latest tags
         id: latest_tags
@@ -215,25 +225,33 @@ jobs:
         run: |
           DOCKER_REGISTRY="${{ steps.config.outputs.docker_registry }}"
           DOCKER_NAMESPACE="${{ steps.config.outputs.docker_namespace }}"
+          DOCKER_NAMESPACE_SECONDARY="${{ steps.config.outputs.docker_namespace_secondary }}"
           IMAGE_NAME="${{ steps.config.outputs.image_name }}"
           
           LATEST_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:latest"
           LATEST_SEED0_TAG="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/$IMAGE_NAME:latest-seed0"
+          LATEST_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:latest"
+          LATEST_SEED0_TAG_SECONDARY="$DOCKER_REGISTRY/$DOCKER_NAMESPACE_SECONDARY/$IMAGE_NAME:latest-seed0"
           
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "latest_seed0_tag=$LATEST_SEED0_TAG" >> $GITHUB_OUTPUT
+          echo "latest_tag_secondary=$LATEST_TAG_SECONDARY" >> $GITHUB_OUTPUT
+          echo "latest_seed0_tag_secondary=$LATEST_SEED0_TAG_SECONDARY" >> $GITHUB_OUTPUT
           
       - name: Combine tags for standard image
         id: combined_tags
         run: |
           TAGS=("${{ steps.sha_tags.outputs.sha_tag }}")
+          TAGS+=("${{ steps.sha_tags.outputs.sha_tag_secondary }}")
           
           if [[ -n "${{ steps.version_tags.outputs.version_tag }}" ]]; then
             TAGS+=("${{ steps.version_tags.outputs.version_tag }}")
+            TAGS+=("${{ steps.version_tags.outputs.version_tag_secondary }}")
           fi
           
           if [[ -n "${{ steps.latest_tags.outputs.latest_tag }}" ]]; then
             TAGS+=("${{ steps.latest_tags.outputs.latest_tag }}")
+            TAGS+=("${{ steps.latest_tags.outputs.latest_tag_secondary }}")
           fi
           
           echo "tags=$(IFS=,; echo "${TAGS[*]}")" >> $GITHUB_OUTPUT
@@ -242,13 +260,16 @@ jobs:
         id: combined_seed0_tags
         run: |
           SEED0_TAGS=("${{ steps.sha_tags.outputs.sha_seed0_tag }}")
+          SEED0_TAGS+=("${{ steps.sha_tags.outputs.sha_seed0_tag_secondary }}")
           
           if [[ -n "${{ steps.version_tags.outputs.version_seed0_tag }}" ]]; then
             SEED0_TAGS+=("${{ steps.version_tags.outputs.version_seed0_tag }}")
+            SEED0_TAGS+=("${{ steps.version_tags.outputs.version_seed0_tag_secondary }}")
           fi
           
           if [[ -n "${{ steps.latest_tags.outputs.latest_seed0_tag }}" ]]; then
             SEED0_TAGS+=("${{ steps.latest_tags.outputs.latest_seed0_tag }}")
+            SEED0_TAGS+=("${{ steps.latest_tags.outputs.latest_seed0_tag_secondary }}")
           fi
           
           echo "tags=$(IFS=,; echo "${SEED0_TAGS[*]}")" >> $GITHUB_OUTPUT
