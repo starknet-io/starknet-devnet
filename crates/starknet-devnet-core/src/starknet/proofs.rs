@@ -1,5 +1,5 @@
 use starknet_api::core::OsChainInfo;
-use starknet_api::transaction::fields::{PROOF_VERSION, VIRTUAL_OS_OUTPUT_VERSION, VIRTUAL_SNOS};
+use starknet_api::transaction::fields::{PROOF_VERSION_V0, VIRTUAL_OS_OUTPUT_VERSION, VIRTUAL_SNOS};
 use starknet_rs_core::types::Felt;
 use starknet_types::felt::ProofFacts;
 use starknet_types::proof::Proof;
@@ -86,7 +86,7 @@ pub fn generate_proof(
     let proof = felt_to_proof(proof_felt);
 
     let last_field = Pedersen::hash_array(&[
-        PROOF_VERSION,
+        PROOF_VERSION_V0,
         VIRTUAL_SNOS,
         *program_hash,
         VIRTUAL_OS_OUTPUT_VERSION,
@@ -98,7 +98,7 @@ pub fn generate_proof(
     ]);
 
     let proof_facts = vec![
-        PROOF_VERSION,
+        PROOF_VERSION_V0,
         VIRTUAL_SNOS,
         *program_hash,
         VIRTUAL_OS_OUTPUT_VERSION,
@@ -455,7 +455,7 @@ mod tests {
         .unwrap();
 
         // Verify proof_facts contains expected fields
-        assert_eq!(proof_facts[0], PROOF_VERSION, "first field should be proof_version");
+        assert_eq!(proof_facts[0], PROOF_VERSION_V0, "first field should be proof_version");
         assert_eq!(proof_facts[1], VIRTUAL_SNOS, "second field should be variant_marker");
         assert_eq!(proof_facts[7], Felt::ZERO, "eighth field should be messages_hash");
 

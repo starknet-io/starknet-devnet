@@ -1,5 +1,5 @@
 use blockifier::blockifier_versioned_constants::VersionedConstants;
-use blockifier::bouncer::{BouncerConfig, BouncerWeights, BuiltinWeights};
+use blockifier::bouncer::{BouncerConfig, BouncerWeights, BuiltinInstanceLimits};
 use blockifier::transaction::objects::TransactionExecutionInfo;
 use starknet_api::block::StarknetVersion;
 use starknet_api::versioned_constants_logic::VersionedConstantsTrait;
@@ -61,7 +61,7 @@ pub(crate) fn custom_bouncer_config() -> BouncerConfig {
             n_events: 5_000,
             ..BouncerWeights::max()
         },
-        builtin_weights: BuiltinWeights::default(),
+        builtin_instance_limits: BuiltinInstanceLimits::default()
     }
 }
 
