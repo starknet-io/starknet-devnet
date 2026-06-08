@@ -1,5 +1,7 @@
 use starknet_api::core::OsChainInfo;
-use starknet_api::transaction::fields::{PROOF_VERSION_V0, VIRTUAL_OS_OUTPUT_VERSION, VIRTUAL_SNOS};
+use starknet_api::transaction::fields::{
+    PROOF_VERSION_V0, VIRTUAL_OS_OUTPUT_VERSION, VIRTUAL_SNOS,
+};
 use starknet_rs_core::types::Felt;
 use starknet_types::felt::ProofFacts;
 use starknet_types::proof::Proof;

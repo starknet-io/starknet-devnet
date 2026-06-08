@@ -61,7 +61,7 @@ pub(crate) fn custom_bouncer_config() -> BouncerConfig {
             n_events: 5_000,
             ..BouncerWeights::max()
         },
-        builtin_instance_limits: BuiltinInstanceLimits::default()
+        builtin_instance_limits: BuiltinInstanceLimits::default(),
     }
 }
 
