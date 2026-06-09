@@ -1,4 +1,4 @@
-FROM rust:1.92-alpine3.22 AS builder
+FROM rust:1.96-alpine3.23 AS builder
 
 COPY . .
 
@@ -7,7 +7,7 @@ RUN apk update && \
 
 RUN cargo build --bin starknet-devnet --release
 
-FROM alpine:3.22
+FROM alpine:3.23
 
 # Use tini to avoid hanging process on Ctrl+C
 # Use ca-certificates to allow forking from URLs using https scheme
