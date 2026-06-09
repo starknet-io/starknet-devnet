@@ -80,18 +80,20 @@ impl RpcHandler for JsonRpcHandler {
         let starknet_resp = self.execute(request).await;
 
         // If locally we got an error and forking is set up, forward the request to the origin
-        if let (Err(err), Some(forwarder)) = (&starknet_resp, &self.origin_caller) {
-            if err.is_forwardable_to_origin() && is_request_forwardable {
-                // if a block or state is requested that was only added to origin after
-                // forking happened, it will be normally returned; we don't extra-handle this case
-                return forwarder.call(&original_call).await;
-            }
+        if let (Err(err), Some(forwarder)) = (&starknet_resp, &self.origin_caller)
+            && err.is_forwardable_to_origin()
+            && is_request_forwardable
+        {
+            // if a block or state is requested that was only added to origin after
+            // forking happened, it will be normally returned; we don't extra-handle this case
+            return forwarder.call(&original_call).await;
         }
 
-        if starknet_resp.is_ok() && is_request_dumpable {
-            if let Err(e) = self.update_dump(&original_call).await {
-                return ResponseResult::Error(e);
-            }
+        if starknet_resp.is_ok()
+            && is_request_dumpable
+            && let Err(e) = self.update_dump(&original_call).await
+        {
+            return ResponseResult::Error(e);
         }
 
         if let Err(e) = self.broadcast_changes(old_latest_block, old_pre_confirmed_block).await {
@@ -576,10 +578,10 @@ impl JsonRpcHandler {
     }
 
     fn allows_method(&self, method: &str) -> bool {
-        if let Some(restricted_methods) = &self.api.server_config.restricted_methods {
-            if is_json_rpc_method_restricted(method, restricted_methods) {
-                return false;
-            }
+        if let Some(restricted_methods) = &self.api.server_config.restricted_methods
+            && is_json_rpc_method_restricted(method, restricted_methods)
+        {
+            return false;
         }
 
         true

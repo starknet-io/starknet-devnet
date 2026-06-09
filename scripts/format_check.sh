@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-cargo +nightly-2025-10-25 fmt --all --check
+cargo +nightly-2026-04-10 fmt --all --check
 
 # Format documentation
 npm --prefix website run format-check
