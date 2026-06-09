@@ -489,9 +489,9 @@ impl Starknet {
                 l1_da_mode,
                 &starknet_version,
             );
-            let commitments = if let Ok(handle) = Handle::try_current() {
+            let commitments = match Handle::try_current() { Ok(handle) => {
                 task::block_in_place(|| handle.block_on(commitments_future))
-            } else {
+            } _ => {
                 tokio::runtime::Runtime::new()
                     .map_err(|e| {
                         error!("Failed to create tokio runtime: {e}");
@@ -499,7 +499,7 @@ impl Starknet {
                     .ok()
                     .map(|rt| rt.block_on(commitments_future))
                     .unwrap_or_default()
-            };
+            }};
             new_block.set_commitments(commitments.0);
         }
 
