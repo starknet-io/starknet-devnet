@@ -39,10 +39,10 @@ struct RemoveArrayElement {
 
 fn rename_property(json_obj: &mut Value, path_parts: &[&str], new_name: &str) {
     if path_parts.len() == 1 {
-        if let Some(obj) = json_obj.as_object_mut() {
-            if let Some(value) = obj.remove(path_parts[0]) {
-                obj.insert(new_name.to_string(), value);
-            }
+        if let Some(obj) = json_obj.as_object_mut()
+            && let Some(value) = obj.remove(path_parts[0])
+        {
+            obj.insert(new_name.to_string(), value);
         }
     } else if let Some(next_obj) = json_obj.get_mut(path_parts[0]) {
         rename_property(next_obj, &path_parts[1..], new_name);

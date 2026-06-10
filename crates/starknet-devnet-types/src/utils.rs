@@ -119,10 +119,10 @@ pub fn compile_sierra_contract_json(
 
     {
         let mut cache = CASM_CACHE.lock();
-        if let Some((cached_input, cached_output)) = cache.get(&cache_key) {
-            if cached_input == &sierra_contract_json {
-                return Ok(cached_output.clone());
-            }
+        if let Some((cached_input, cached_output)) = cache.get(&cache_key)
+            && cached_input == &sierra_contract_json
+        {
+            return Ok(cached_output.clone());
         }
     }
 

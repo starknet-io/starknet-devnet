@@ -1,5 +1,5 @@
 use blockifier::blockifier_versioned_constants::VersionedConstants;
-use blockifier::bouncer::{BouncerConfig, BouncerWeights, BuiltinWeights};
+use blockifier::bouncer::{BouncerConfig, BouncerWeights, BuiltinInstanceLimits};
 use blockifier::transaction::objects::TransactionExecutionInfo;
 use starknet_api::block::StarknetVersion;
 use starknet_api::versioned_constants_logic::VersionedConstantsTrait;
@@ -40,10 +40,10 @@ pub(crate) fn get_storage_var_address(
     Ok(PatriciaKey::new(storage_var_address)?)
 }
 
-/// This should be modified when updating to the version after 0.14.2
+/// This should be modified when updating to the version after 0.14.3
 pub(crate) fn get_versioned_constants() -> VersionedConstants {
     #[allow(clippy::unwrap_used)]
-    VersionedConstants::get(&StarknetVersion::V0_14_2).unwrap().clone()
+    VersionedConstants::get(&StarknetVersion::V0_14_3).unwrap().clone()
 }
 
 /// Values not present here: https://docs.starknet.io/tools/limits-and-triggers/
@@ -61,7 +61,7 @@ pub(crate) fn custom_bouncer_config() -> BouncerConfig {
             n_events: 5_000,
             ..BouncerWeights::max()
         },
-        builtin_weights: BuiltinWeights::default(),
+        builtin_instance_limits: BuiltinInstanceLimits::default(),
     }
 }
 

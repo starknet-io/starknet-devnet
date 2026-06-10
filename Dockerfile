@@ -1,4 +1,4 @@
-FROM rust:1.92-alpine3.22 AS chef
+FROM rust:1.96-alpine3.23 AS chef
 
 RUN apk add --no-cache pkgconfig make musl-dev openssl-dev perl && \
     cargo install cargo-chef --locked
@@ -18,7 +18,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --bin starknet-devnet --release
 
-FROM alpine:3.22
+FROM alpine:3.23
 
 # Use tini to avoid hanging process on Ctrl+C
 # Use ca-certificates to allow forking from URLs using https scheme

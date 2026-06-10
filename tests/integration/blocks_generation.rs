@@ -354,9 +354,8 @@ async fn blocks_on_demand_declarations() {
 
     // assert individual tx state updates
     let mut expected_block_declarations = vec![];
-    let mut expected_nonce = 1_u32;
-    for (declaration_result, (_, casm_hash)) in
-        declaration_results.iter().zip(classes_with_hash.iter())
+    for (i, (declaration_result, (_, casm_hash))) in
+        declaration_results.iter().zip(classes_with_hash.iter()).enumerate()
     {
         let expected_declaration = DeclaredClassItem {
             class_hash: declaration_result.class_hash,
@@ -373,13 +372,12 @@ async fn blocks_on_demand_declarations() {
                     state_diff.nonces,
                     vec![NonceUpdate {
                         contract_address: account_address,
-                        nonce: Felt::from(expected_nonce)
+                        nonce: Felt::from(i + 1)
                     }]
                 )
             }
             other => panic!("Unexpected response: {other:?}"),
         }
-        expected_nonce += 1;
     }
 
     // assert block state update - should include diff of all txs from pre_confirmed block
