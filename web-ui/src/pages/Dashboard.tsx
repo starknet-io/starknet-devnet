@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Activity, Box, ArrowLeftRight, GitFork, ShieldCheck, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { Box, ArrowLeftRight, GitFork, ShieldCheck, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { devnetGetStatus, getBlockWithTxHashes } from '@/lib/rpc-client';
 import { useDevnet } from '@/lib/DevnetContext';
 import { formatTimestamp } from '@/lib/utils';
