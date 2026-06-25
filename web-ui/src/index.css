@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html {
+  min-height: 100%;
+  background: #080A18;
+}
+
+body {
+  @apply bg-starknet-blue text-slate-100 antialiased;
+  min-height: 100%;
+  background:
+    linear-gradient(145deg, rgba(255, 122, 97, 0.16) 0%, rgba(255, 122, 97, 0) 28%),
+    linear-gradient(220deg, rgba(53, 214, 180, 0.12) 0%, rgba(53, 214, 180, 0) 34%),
+    linear-gradient(180deg, #080A18 0%, #0B1020 48%, #090D16 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 72%);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-starknet-border rounded-full;
+}
+
+::selection {
+  @apply bg-starknet-accent/30 text-white;
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen lg:grid lg:grid-cols-[280px_minmax(0,1fr)];
+  }
+  .app-sidebar {
+    @apply hidden lg:flex h-screen sticky top-0 flex-col border-r border-white/10 backdrop-blur-xl;
+    background: rgba(9, 13, 24, 0.86);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
+  }
+  .app-mobile-nav {
+    @apply lg:hidden sticky top-0 z-30 border-b border-white/10 backdrop-blur-xl;
+    background: rgba(9, 13, 24, 0.92);
+  }
+  .app-main {
+    @apply relative min-w-0 overflow-y-auto;
+    min-height: calc(100vh - 104px);
+  }
+  @media (min-width: 1024px) {
+    .app-main {
+      height: 100vh;
+      min-height: 0;
+    }
+  }
+  .page {
+    @apply w-full min-w-0 p-4 sm:p-5 xl:p-7 2xl:p-8 space-y-6;
+  }
+  .page-header {
+    @apply flex flex-col gap-4 md:flex-row md:items-end md:justify-between;
+  }
+  .page-title {
+    @apply text-2xl sm:text-3xl font-semibold tracking-normal text-white;
+  }
+  .page-subtitle {
+    @apply text-sm text-slate-400 mt-1;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-starknet-accent text-[#160b10] hover:bg-[#ff907b] shadow-glow;
+  }
+  .btn-secondary {
+    @apply btn bg-white/[0.055] hover:bg-white/[0.09] text-slate-100 border border-white/10;
+  }
+  .btn-danger {
+    @apply btn bg-red-500/90 hover:bg-red-500 text-white;
+  }
+  .card {
+    @apply bg-starknet-card/80 border border-white/10 rounded-lg p-5 xl:p-6 shadow-panel backdrop-blur-xl;
+  }
+  .input {
+    @apply bg-[#0b111d]/85 border border-white/10 rounded-lg px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-starknet-accent/35 focus:border-starknet-accent/70;
+  }
+  .tab {
+    @apply px-4 py-2 text-sm font-medium border-b-2 border-transparent transition-colors cursor-pointer;
+  }
+  .tab-active {
+    @apply tab border-starknet-accent text-starknet-accent;
+  }
+  .tab-inactive {
+    @apply tab text-slate-400 hover:text-slate-100 hover:border-slate-600;
+  }
+  .metric-card {
+    @apply card p-4;
+  }
+  .data-table {
+    @apply w-full text-sm;
+  }
+  .data-table thead {
+    @apply text-slate-400;
+  }
+  .data-table th {
+    @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide border-b border-white/10;
+  }
+  .data-table td {
+    @apply px-4 py-3 border-b border-white/[0.07] align-middle;
+  }
+  .hash-link {
+    @apply font-mono text-starknet-mint hover:text-white text-xs break-all;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-slate-300;
+  }
+}
