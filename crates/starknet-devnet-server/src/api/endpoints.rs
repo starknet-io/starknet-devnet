@@ -24,8 +24,9 @@ use crate::api::account_helpers::{
     get_erc20_fee_unit_address,
 };
 use crate::api::models::{
-    AccountBalanceResponse, AccountBalancesResponse, DevnetResponse, ProveTransactionResponse,
-    SerializableAccount, StarknetExtResponse, StarknetResponse, StorageResult,
+    AccountBalanceResponse, AccountBalancesResponse, DevnetResponse, DevnetStatus, ForkStatus,
+    ProveTransactionResponse, SerializableAccount, StarknetExtResponse, StarknetResponse,
+    StorageResult,
 };
 use crate::api::{JsonRpcHandler, RPC_SPEC_VERSION};
 use crate::config::DevnetConfig;
@@ -853,6 +854,34 @@ impl JsonRpcHandler {
         Ok(DevnetResponse::DevnetConfig(DevnetConfig {
             starknet_config: (*self.api.config).clone(),
             server_config: (*self.api.server_config).clone(),
+        })
+        .into())
+    }
+
+    /// devnet_getStatus
+    pub async fn get_devnet_status(&self) -> StrictRpcResult {
+        let starknet = self.api.starknet.lock().await;
+
+        let is_forked = starknet.is_forked();
+        let fork_config = if is_forked {
+            Some(ForkStatus {
+                url: starknet.config.fork_config.url.as_ref().map(|u| u.to_string()),
+                block: starknet.config.fork_config.block_number,
+            })
+        } else {
+            None
+        };
+
+        Ok(DevnetResponse::DevnetStatus(DevnetStatus {
+            block_count: starknet.get_block_count(),
+            transaction_count: starknet.get_transaction_count(),
+            pre_confirmed_tx_count: starknet.get_pre_confirmed_tx_count(),
+            chain_id: starknet.chain_id().to_string(),
+            protocol_version: RPC_SPEC_VERSION.to_string(),
+            is_forked,
+            fork_config,
+            impersonated_accounts: starknet.get_impersonated_accounts(),
+            auto_impersonate: starknet.is_auto_impersonate(),
         })
         .into())
     }

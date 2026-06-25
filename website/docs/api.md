@@ -84,3 +84,34 @@ To retrieve the current configuration of Devnet, as specified via [CLI](running/
   "strk_erc20_class_hash": "0x046ded64ae2dead6448e247234bab192a9c483644395b66f2155f2614e5804b0"
 }
 ```
+
+## Status API
+
+To retrieve a summary of the current Devnet state (block count, transaction count, forking info, impersonation state, etc.), send a `JSON-RPC` request with method name `devnet_getStatus`. This method takes no parameters and is useful for dashboards or monitoring tools.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_getStatus"
+}
+```
+
+Example response:
+
+```json
+{
+  "block_count": 5,
+  "transaction_count": 12,
+  "pre_confirmed_tx_count": 2,
+  "chain_id": "SN_SEPOLIA",
+  "protocol_version": "0.10.2",
+  "is_forked": true,
+  "fork_config": {
+    "url": "http://rpc.pathfinder.equilibrium.co/integration-sepolia/rpc/v0_7",
+    "block": 26429
+  },
+  "impersonated_accounts": [],
+  "auto_impersonate": false
+}
+```

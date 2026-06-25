@@ -21,4 +21,10 @@ impl Cheats {
     pub(crate) fn set_auto_impersonate(&mut self, auto_impersonation: bool) {
         self.auto_impersonate = auto_impersonation;
     }
+    pub(crate) fn get_impersonated_accounts(&self) -> &HashSet<ContractAddress> {
+        &self.impersonated_accounts
+    }
+    pub(crate) fn is_auto_impersonate(&self) -> bool {
+        self.auto_impersonate
+    }
 }
