@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { getRpcUrl, setRpcUrl as saveRpcUrl } from '@/lib/rpc-client';
 import { useQueryClient } from '@tanstack/react-query';
-import { Wifi, WifiOff, Settings, Check, Loader2 } from 'lucide-react';
+import { Settings, Check, Loader2 } from 'lucide-react';
 import { useDevnet } from '@/lib/DevnetContext';
 
 export default function ConnectionSettings() {
