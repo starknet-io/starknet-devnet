@@ -925,6 +925,36 @@ impl Starknet {
         self.config.chain_id
     }
 
+    /// Returns true if devnet is running in forking mode
+    pub fn is_forked(&self) -> bool {
+        self.config.fork_config.url.is_some()
+    }
+
+    /// Returns the total number of accepted blocks
+    pub fn get_block_count(&self) -> usize {
+        self.blocks.num_to_hash.len()
+    }
+
+    /// Returns the total number of transactions across all blocks (including pre_confirmed)
+    pub fn get_transaction_count(&self) -> usize {
+        self.transactions.len()
+    }
+
+    /// Returns the number of transactions in the pre-confirmed block
+    pub fn get_pre_confirmed_tx_count(&self) -> usize {
+        self.blocks.pre_confirmed_block.get_transactions().len()
+    }
+
+    /// Returns addresses of currently impersonated accounts
+    pub fn get_impersonated_accounts(&self) -> Vec<ContractAddress> {
+        self.cheats.get_impersonated_accounts().iter().copied().collect()
+    }
+
+    /// Returns whether auto-impersonate is enabled
+    pub fn is_auto_impersonate(&self) -> bool {
+        self.cheats.is_auto_impersonate()
+    }
+
     pub fn add_deploy_account_transaction(
         &mut self,
         deploy_account_transaction: BroadcastedDeployAccountTransaction,

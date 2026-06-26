@@ -23,6 +23,7 @@ mod get_block_txs_count;
 mod get_block_with_txs_and_receipts;
 mod get_class;
 mod get_class_hash_at;
+mod get_devnet_status;
 mod get_events;
 mod get_transaction_by_block_id_and_index;
 mod get_transaction_by_hash;

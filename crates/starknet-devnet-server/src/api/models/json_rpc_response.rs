@@ -17,10 +17,10 @@ use starknet_types::starknet_api::block::BlockNumber;
 
 use crate::api::models::{
     AbortedBlocks, AcceptedOnL1Blocks, AccountBalanceResponse, BlockHashAndNumberOutput,
-    CreatedBlock, DeclareTransactionOutput, DeployAccountTransactionOutput, DumpResponseBody,
-    FlushedMessages, IncreaseTimeResponse, MessageHash, MessagingLoadAddress, MintTokensResponse,
-    ProveTransactionResponse, SerializableAccount, SetTimeResponse, StorageResult, SyncingOutput,
-    TransactionHashOutput,
+    CreatedBlock, DeclareTransactionOutput, DeployAccountTransactionOutput, DevnetStatus,
+    DumpResponseBody, FlushedMessages, IncreaseTimeResponse, MessageHash, MessagingLoadAddress,
+    MintTokensResponse, ProveTransactionResponse, SerializableAccount, SetTimeResponse,
+    StorageResult, SyncingOutput, TransactionHashOutput,
 };
 use crate::config::DevnetConfig;
 
@@ -115,6 +115,7 @@ pub enum DevnetResponse {
     MintTokens(MintTokensResponse),
     DevnetConfig(DevnetConfig),
     DevnetDump(DumpResponseBody),
+    DevnetStatus(DevnetStatus),
 }
 
 #[cfg(test)]
