@@ -549,6 +549,7 @@ impl JsonRpcHandler {
             DevnetSpecRequest::AccountBalance(data) => self.get_account_balance(data).await,
             DevnetSpecRequest::Mint(data) => self.mint(data).await,
             DevnetSpecRequest::DevnetConfig => self.get_devnet_config().await,
+            DevnetSpecRequest::DevnetStatus => self.get_devnet_status().await,
         }
     }
 

@@ -181,6 +181,8 @@ pub enum DevnetSpecRequest {
     Mint(MintTokensRequest),
     #[serde(rename = "devnet_getConfig", with = "empty_params")]
     DevnetConfig,
+    #[serde(rename = "devnet_getStatus", with = "empty_params")]
+    DevnetStatus,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -385,7 +387,8 @@ impl DevnetSpecRequest {
             | Self::Restart(_)
             | Self::PredeployedAccounts(_)
             | Self::AccountBalance(_)
-            | Self::DevnetConfig => false,
+            | Self::DevnetConfig
+            | Self::DevnetStatus => false,
         }
     }
 
@@ -413,7 +416,8 @@ impl DevnetSpecRequest {
             | Self::Restart(_)
             | Self::PredeployedAccounts(_)
             | Self::AccountBalance(_)
-            | Self::DevnetConfig => false,
+            | Self::DevnetConfig
+            | Self::DevnetStatus => false,
         }
     }
 }

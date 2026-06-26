@@ -509,6 +509,20 @@ pub struct ForkStatus {
     pub block: Option<u64>,
 }
 
+#[derive(Serialize)]
+pub struct DevnetStatus {
+    pub block_count: usize,
+    pub transaction_count: usize,
+    pub pre_confirmed_tx_count: usize,
+    pub chain_id: String,
+    pub protocol_version: String,
+    pub is_forked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_config: Option<ForkStatus>,
+    pub impersonated_accounts: Vec<ContractAddress>,
+    pub auto_impersonate: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FlushedMessages {
     pub messages_to_l1: Vec<MessageToL1>,
