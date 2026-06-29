@@ -35,6 +35,9 @@ export default function ConfigPage() {
             <IR label="Transactions" value={status.transaction_count.toString()} />
             <IR label="Chain ID" value={status.chain_id} mono />
             <IR label="Forking" value={status.is_forked ? 'Active' : 'Off'} />
+            {config.start_time != null && (
+              <IR label="Start Time" value={new Date(config.start_time * 1000).toLocaleString()} />
+            )}
           </dl>
         </div>
       )}
@@ -45,11 +48,15 @@ export default function ConfigPage() {
           <IR label="Host" value={config.server_config.host} />
           <IR label="Port" value={config.server_config.port.toString()} />
           <IR label="Timeout" value={`${config.server_config.timeout}s`} />
-          <IR label="Block Generation" value={config.block_generation ?? 'on transaction'} />
+          <IR label="Block Generation" value={config.block_generation_on ?? 'on transaction'} />
           <IR label="Lite Mode" value={config.lite_mode ? 'Yes' : 'No'} />
           <IR label="State Archive" value={config.state_archive} />
           <IR label="Dump On" value={config.dump_on ?? 'none'} />
           {config.dump_path && <IR label="Dump Path" value={config.dump_path} />}
+          {config.proof_mode && <IR label="Proof Mode" value={config.proof_mode} />}
+          {config.server_config.restricted_methods && (
+            <IR label="Restricted Methods" value={config.server_config.restricted_methods.join(', ')} />
+          )}
         </dl>
       </div>
 
@@ -108,6 +115,15 @@ export default function ConfigPage() {
         <dl className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div><span className="text-gray-400 text-xs block mb-1">ETH ERC20</span><CopyableHash value={config.eth_erc20_class_hash} short={12} /></div>
           <div><span className="text-gray-400 text-xs block mb-1">STRK ERC20</span><CopyableHash value={config.strk_erc20_class_hash} short={12} /></div>
+        </dl>
+      </div>
+
+      <div className="card">
+        <h2 className="font-semibold mb-4 flex items-center gap-2"><Settings size={18} />Class Size Limits</h2>
+        <dl className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <IR label="Max Contract Class" value={config.class_size_config.maximum_contract_class_size.toLocaleString()} />
+          <IR label="Max Bytecode" value={config.class_size_config.maximum_contract_bytecode_size.toLocaleString()} />
+          <IR label="Max Sierra Length" value={config.class_size_config.maximum_sierra_length.toLocaleString()} />
         </dl>
       </div>
     </div>

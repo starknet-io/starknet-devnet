@@ -1,37 +1,90 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Box, ArrowLeftRight, GitFork, ShieldCheck, Loader2, Wifi, WifiOff } from 'lucide-react';
-import { devnetGetStatus, getBlockWithTxHashes } from '@/lib/rpc-client';
+import { devnetGetStatus, devnetGetConfig, getBlockWithTxHashes } from '@/lib/rpc-client';
 import { useDevnet } from '@/lib/DevnetContext';
 import { formatTimestamp } from '@/lib/utils';
 import SearchBar from '@/components/SearchBar';
 import ConnectionSettings from '@/components/ConnectionSettings';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+const REQUIRED_METHODS = [
+  'devnet_getPredeployedAccounts',
+  'starknet_getBlockWithTxHashes',
+  'starknet_getBlockWithTxs',
+  'starknet_getTransactionByHash',
+  'starknet_getTransactionReceipt',
+  'starknet_getTransactionStatus',
+  'starknet_traceTransaction',
+  'starknet_getClass',
+  'starknet_getClassHashAt',
+  'starknet_blockNumber',
+];
 
 export default function Dashboard() {
-  const { connected, setConnected } = useDevnet();
+  const { connected, setConnected, verified, setVerified } = useDevnet();
+  const [displayStatus, setDisplayStatus] = useState<Awaited<ReturnType<typeof devnetGetStatus>> | null>(null);
+  const [showRpcEditor, setShowRpcEditor] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const everFetchedRef = useRef(false);
 
-  const { data: status, isLoading, error } = useQuery({
+  const { data: status, error } = useQuery({
     queryKey: ['status'],
     queryFn: devnetGetStatus,
     refetchInterval: 2000,
-    retry: 1,
+    retry: false,
   });
 
-  // Automatically track connection state from RPC success/failure
+  // Fetch config alongside status to check for restricted methods
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: devnetGetConfig,
+    refetchInterval: 10000,
+    retry: false,
+    enabled: !!status,
+  });
+
+  // Validate the config: if required methods are restricted, block the UI
   useEffect(() => {
-    if (status) setConnected(true);
-    else if (error) setConnected(false);
-  }, [status, error, setConnected]);
+    if (config) {
+      const restricted = config.server_config?.restricted_methods ?? [];
+      const blocked = REQUIRED_METHODS.filter((m) => restricted.includes(m));
+      if (blocked.length > 0) {
+        setConfigError(
+          `Required methods are restricted on this instance: ${blocked.join(', ')}. Remove them from --restrict-methods to use the explorer.`,
+        );
+        setVerified(false);
+        setDisplayStatus(null);
+      } else {
+        setConfigError(null);
+        setVerified(true);
+        if (status) setDisplayStatus(status);
+      }
+    }
+  }, [config, status, setVerified]);
+
+  // Keep the last successful status in local state so the UI never goes blank
+  useEffect(() => {
+    if (status && verified) {
+      everFetchedRef.current = true;
+      setDisplayStatus(status);
+      setConnected(true);
+    } else if (error) {
+      everFetchedRef.current = true;
+      setConnected(false);
+    }
+  }, [status, error, setConnected, verified]);
 
   const { data: latestBlock } = useQuery({
     queryKey: ['block', 'latest-hashes'],
     queryFn: () => getBlockWithTxHashes('latest'),
     refetchInterval: 2000,
-    enabled: !!status,
+    retry: false,
+    enabled: !!displayStatus,
   });
 
-  if (isLoading) {
+  // Spinner only on very first load, before any fetch completes
+  if (!everFetchedRef.current) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="animate-spin text-starknet-purple" size={32} />
@@ -39,14 +92,35 @@ export default function Dashboard() {
     );
   }
 
-  if (error || !status) {
+  if (configError) {
     return (
-      <div className="p-8">
-        <ConnectionSettings />
-        <div className="text-center mt-12">
-          <WifiOff size={48} className="mx-auto text-red-500 mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Cannot Connect to Devnet</h2>
-          <p className="text-gray-400">Make sure starknet-devnet is running and the RPC URL is correct.</p>
+      <div className="flex flex-col items-center justify-center h-full p-8">
+        <div className="w-full max-w-lg">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 mb-4">
+              <WifiOff size={28} className="text-red-400" />
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Devnet Restricted</h2>
+            <p className="text-gray-400 text-sm">{configError}</p>
+          </div>
+          <ConnectionSettings standalone />
+        </div>
+      </div>
+    );
+  }
+
+  if (!displayStatus) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8">
+        <div className="w-full max-w-lg">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 mb-4">
+              <WifiOff size={28} className="text-red-400" />
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Cannot Connect to Devnet</h2>
+            <p className="text-gray-400 text-sm">Make sure starknet-devnet is running and the RPC URL is correct.</p>
+          </div>
+          <ConnectionSettings standalone />
         </div>
       </div>
     );
@@ -61,9 +135,16 @@ export default function Dashboard() {
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {connected ? (
-            <span className="flex items-center gap-1.5 text-green-400 text-sm">
-              <Wifi size={14} /> Connected
-            </span>
+            showRpcEditor ? (
+              <ConnectionSettings onDone={() => setShowRpcEditor(false)} />
+            ) : (
+              <button
+                onClick={() => setShowRpcEditor(true)}
+                className="flex items-center gap-1.5 text-green-400 text-sm hover:text-green-300 transition-colors cursor-pointer"
+              >
+                <Wifi size={14} /> Connected
+              </button>
+            )
           ) : (
             <span className="flex items-center gap-1.5 text-red-400 text-sm">
               <WifiOff size={14} /> Disconnected
@@ -73,22 +154,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {status.is_forked && (
+      {displayStatus.is_forked && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
           <GitFork size={16} />
           <span>
-            Forking from <span className="font-mono">{status.fork_config?.url}</span> at block{' '}
-            <span className="font-mono">#{status.fork_config?.block}</span>
+            Forking from <span className="font-mono">{displayStatus.fork_config?.url}</span> at block{' '}
+            <span className="font-mono">#{displayStatus.fork_config?.block}</span>
           </span>
         </div>
       )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard icon={Box} label="Block Count" value={status.block_count.toLocaleString()} color="text-blue-400" />
-        <StatCard icon={ArrowLeftRight} label="Total Transactions" value={status.transaction_count.toLocaleString()} color="text-green-400" />
-        <StatCard icon={ShieldCheck} label="Chain ID" value={status.chain_id} color="text-purple-400" isString />
-        <StatCard icon={GitFork} label="Forking" value={status.is_forked ? 'Active' : 'Off'} color={status.is_forked ? 'text-yellow-400' : 'text-gray-500'} isString />
+        <StatCard icon={Box} label="Block Count" value={displayStatus.block_count.toLocaleString()} color="text-blue-400" />
+        <StatCard icon={ArrowLeftRight} label="Total Transactions" value={displayStatus.transaction_count.toLocaleString()} color="text-green-400" />
+        <StatCard icon={ShieldCheck} label="Chain ID" value={displayStatus.chain_id} color="text-purple-400" isString />
+        <StatCard icon={GitFork} label="Forking" value={displayStatus.is_forked ? 'Active' : 'Off'} color={displayStatus.is_forked ? 'text-yellow-400' : 'text-gray-500'} isString />
       </div>
 
       {/* Latest Block Card */}
@@ -113,10 +194,10 @@ export default function Dashboard() {
             <Link to="/config" className="text-sm text-starknet-purple hover:underline">Full config</Link>
           </div>
           <dl className="space-y-2 text-sm">
-            <InfoRow label="Protocol Version" value={status.protocol_version} />
-            <InfoRow label="Pre-confirmed TXs" value={status.pre_confirmed_tx_count.toString()} />
-            <InfoRow label="Auto-Impersonate" value={status.auto_impersonate ? 'Yes' : 'No'} />
-            <InfoRow label="Impersonated Accounts" value={status.impersonated_accounts.length > 0 ? status.impersonated_accounts.length.toString() : 'None'} />
+            <InfoRow label="Protocol Version" value={displayStatus.protocol_version} />
+            <InfoRow label="Pre-confirmed TXs" value={displayStatus.pre_confirmed_tx_count.toString()} />
+            <InfoRow label="Auto-Impersonate" value={displayStatus.auto_impersonate ? 'Yes' : 'No'} />
+            <InfoRow label="Impersonated Accounts" value={displayStatus.impersonated_accounts.length > 0 ? displayStatus.impersonated_accounts.length.toString() : 'None'} />
           </dl>
         </div>
       </div>

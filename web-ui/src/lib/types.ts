@@ -28,11 +28,21 @@ export interface DevnetConfig {
   chain_id: string;
   dump_on: string | null;
   dump_path: string | null;
+  block_generation_on: string | null;
+  lite_mode: boolean;
+  proof_mode: string;
   state_archive: string;
   fork_config: {
     url: string | null;
     block_number: number | null;
     caching_enabled: boolean | null;
+  };
+  eth_erc20_class_hash: string;
+  strk_erc20_class_hash: string;
+  class_size_config: {
+    maximum_contract_class_size: number;
+    maximum_contract_bytecode_size: number;
+    maximum_sierra_length: number;
   };
   server_config: {
     host: string;
@@ -40,10 +50,6 @@ export interface DevnetConfig {
     timeout: number;
     restricted_methods: string[] | null;
   };
-  block_generation: string | null;
-  lite_mode: boolean;
-  eth_erc20_class_hash: string;
-  strk_erc20_class_hash: string;
 }
 
 

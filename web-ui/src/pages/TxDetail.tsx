@@ -5,10 +5,12 @@ import {
   Activity,
   AlertTriangle,
   ArrowLeft,
+  Check,
   CheckCircle,
   ChevronDown,
   ChevronRight,
   Code2,
+  Copy,
   Globe,
   Loader2,
   XCircle,
@@ -201,19 +203,19 @@ export default function TxDetail() {
 
       {Array.isArray(raw.calldata) && raw.calldata.length > 0 && (
         <Section title={`Transaction Calldata (${raw.calldata.length})`} collapsible>
-          <Arr items={raw.calldata} />
+          <Arr items={raw.calldata} copyAll />
         </Section>
       )}
 
       {Array.isArray(raw.constructor_calldata) && raw.constructor_calldata.length > 0 && (
         <Section title={`Constructor Calldata (${raw.constructor_calldata.length})`} collapsible>
-          <Arr items={raw.constructor_calldata} />
+          <Arr items={raw.constructor_calldata} copyAll />
         </Section>
       )}
 
       {Array.isArray(raw.signature) && raw.signature.length > 0 && (
         <Section title={`Signature (${raw.signature.length})`} collapsible>
-          <Arr items={raw.signature} />
+          <Arr items={raw.signature} copyAll />
         </Section>
       )}
 
@@ -305,11 +307,11 @@ function InvocationCard({
 }) {
   const decoded = invocation.decoded;
   const title = decoded.name ?? shortenSelector(invocation.selector);
-  const [open, setOpen] = useState(() => depth < 2 && !isAccountWrapperCall(decoded.name, label));
+  const [open, setOpen] = useState(() => depth === 0 && !isAccountWrapperCall(decoded.name, label));
 
   return (
     <div
-      className="rounded-lg bg-starknet-surface border border-starknet-border overflow-hidden"
+      className="rounded-lg bg-starknet-surface border border-cyan-300/40 overflow-hidden"
       style={{ marginLeft: depth ? Math.min(depth * 18, 72) : 0 }}
     >
       <button
@@ -473,8 +475,7 @@ function DecodedFields({ fields, compact = false }: { fields: DecodedField[]; co
 
 function DecodedFieldRow({ field, compact }: { field: DecodedField; compact: boolean }) {
   const hasChildren = Array.isArray(field.children) && field.children.length > 0;
-  const isArray = isArrayDecodedField(field);
-  const [open, setOpen] = useState(() => hasChildren && !isArray);
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="rounded border border-starknet-border/70 bg-starknet-card/40 px-2 py-1.5">
@@ -508,13 +509,8 @@ function DecodedFieldRow({ field, compact }: { field: DecodedField; compact: boo
   );
 }
 
-function isArrayDecodedField(field: DecodedField): boolean {
-  const type = field.type ?? '';
-  return type.includes('Array::<') || type.includes('Span::<') || type.includes('Array<') || type.includes('Span<');
-}
-
 function isAccountWrapperCall(name?: string, label?: string): boolean {
-  return name === '__validate__' || label === 'Validate';
+  return name === '__validate__' || label === 'Validate' || label === 'Fee Transfer';
 }
 
 function ValueCell({ value, raw }: { value: string; raw: string[] }) {
@@ -630,20 +626,47 @@ function F({
   );
 }
 
-function Arr({ items, dense = false }: { items: string[]; dense?: boolean }) {
+function Arr({ items, dense = false, copyAll = false }: { items: string[]; dense?: boolean; copyAll?: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAll = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(items.map(String).join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
-    <div className={`${dense ? 'space-y-0' : 'space-y-0.5'} max-h-80 overflow-y-auto`}>
-      {items.map((item, index) => (
-        <div
-          key={`${item}-${index}`}
-          className={`font-mono text-xs flex items-start gap-3 px-2 rounded hover:bg-starknet-surface/50 ${
-            dense ? 'py-0.5' : 'py-1'
-          }`}
-        >
-          <span className="text-gray-500 w-10 shrink-0 select-none">[{index}]</span>
-          <CopyableHash value={String(item)} />
+    <div>
+      {copyAll && (
+        <div className="mb-2">
+          <button
+            onClick={handleCopyAll}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded border border-starknet-border hover:bg-starknet-surface"
+          >
+            {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+            Copy all
+          </button>
         </div>
-      ))}
+      )}
+      <div className={`${dense ? 'space-y-0' : 'space-y-0.5'} max-h-80 overflow-y-auto`}>
+        {items.map((item, index) => (
+          <div
+            key={`${item}-${index}`}
+            className={`font-mono text-xs flex items-start gap-3 px-2 rounded hover:bg-starknet-surface/50 ${
+              dense ? 'py-0.5' : 'py-1'
+            }`}
+          >
+            <span className="text-gray-500 w-10 shrink-0 select-none">[{index}]</span>
+            {copyAll ? (
+              <span className="text-starknet-mint break-all">{String(item)}</span>
+            ) : (
+              <CopyableHash value={String(item)} />
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

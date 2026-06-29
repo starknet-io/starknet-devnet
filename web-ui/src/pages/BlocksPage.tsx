@@ -165,7 +165,11 @@ export default function BlocksPage() {
             {hasMore ? (
               <Loader2 className="animate-spin text-starknet-purple" size={20} />
             ) : (
-              <span className="text-gray-500 text-xs">All blocks loaded</span>
+              <span className="text-gray-500 text-xs">
+                {isForked
+                  ? `Showing all devnet blocks + last ${ORIGIN_BLOCKS_TO_SHOW} origin blocks`
+                  : 'All blocks loaded'}
+              </span>
             )}
           </div>
         </div>

@@ -5,7 +5,6 @@ import {
   Settings,
   Users,
   Gamepad2,
-  Activity,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import BlocksPage from './pages/BlocksPage';
@@ -73,9 +72,7 @@ export default function App() {
         <aside className="app-sidebar">
           <div className="px-5 py-5 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-lg bg-starknet-accent text-[#170b10] shadow-glow">
-                <Activity size={24} />
-              </div>
+              <img src="/devnet-logo.png" alt="Devnet" className="h-11 w-11 rounded-lg" />
               <div>
                 <h1 className="text-lg font-semibold text-white">Devnet Explorer</h1>
                 <p className="text-xs text-slate-500 mt-0.5">starknet-devnet-rs</p>
@@ -108,9 +105,7 @@ export default function App() {
 
         <div className="app-mobile-nav">
           <div className="px-4 py-3 flex items-center gap-3 border-b border-white/10">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-starknet-accent text-[#170b10]">
-              <Activity size={20} />
-            </div>
+            <img src="/devnet-logo.png" alt="Devnet" className="h-9 w-9 rounded-lg" />
             <div>
               <h1 className="text-sm font-semibold text-white">Devnet Explorer</h1>
               <p className="text-[11px] text-slate-500">starknet-devnet-rs</p>
