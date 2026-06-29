@@ -72,7 +72,7 @@ export default function App() {
         <aside className="app-sidebar">
           <div className="px-5 py-5 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <img src="/devnet-logo.png" alt="Devnet" className="h-11 w-11 rounded-lg" />
+              <img src={`${import.meta.env.BASE_URL}devnet-logo.png`} alt="Devnet" className="h-11 w-11 rounded-lg" />
               <div>
                 <h1 className="text-lg font-semibold text-white">Devnet Explorer</h1>
                 <p className="text-xs text-slate-500 mt-0.5">starknet-devnet-rs</p>
@@ -105,7 +105,7 @@ export default function App() {
 
         <div className="app-mobile-nav">
           <div className="px-4 py-3 flex items-center gap-3 border-b border-white/10">
-            <img src="/devnet-logo.png" alt="Devnet" className="h-9 w-9 rounded-lg" />
+            <img src={`${import.meta.env.BASE_URL}devnet-logo.png`} alt="Devnet" className="h-9 w-9 rounded-lg" />
             <div>
               <h1 className="text-sm font-semibold text-white">Devnet Explorer</h1>
               <p className="text-[11px] text-slate-500">starknet-devnet-rs</p>
