@@ -6,7 +6,7 @@
 export function formatTokenAmount(hexOrDec: string, decimals = 18): string {
   try {
     const value = BigInt(hexOrDec);
-    const divisor = BigInt(10 ** decimals);
+    const divisor = 10n ** BigInt(decimals);
     const whole = value / divisor;
     const frac = value % divisor;
     const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '');

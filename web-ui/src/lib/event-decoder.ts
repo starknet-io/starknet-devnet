@@ -153,8 +153,30 @@ interface RawInvocation {
   is_reverted?: boolean;
 }
 
-const classAtCache = new Map<string, Promise<ContractClassInfo | null>>();
-const classHashCache = new Map<string, Promise<ContractClassInfo | null>>();
+// Bounded LRU map: evicts the oldest entry once the cap is exceeded. Iteration
+// order reflects insertion order, so the first key is always the oldest.
+class CappedMap<K, V> {
+  private readonly map = new Map<K, V>();
+  constructor(private readonly capacity: number) {}
+
+  get(key: K): V | undefined {
+    return this.map.get(key);
+  }
+
+  set(key: K, value: V): void {
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    } else if (this.map.size >= this.capacity) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+    this.map.set(key, value);
+  }
+}
+
+const CLASS_CACHE_CAPACITY = 256;
+const classAtCache = new CappedMap<string, Promise<ContractClassInfo | null>>(CLASS_CACHE_CAPACITY);
+const classHashCache = new CappedMap<string, Promise<ContractClassInfo | null>>(CLASS_CACHE_CAPACITY);
 const abiContextCache = new WeakMap<AbiEntry[], AbiContext>();
 
 export function selectorFromName(name: string): string {

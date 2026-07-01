@@ -14,6 +14,7 @@ import ConfigPage from './pages/ConfigPage';
 import AccountsPage from './pages/AccountsPage';
 import ControlPanel from './pages/ControlPanel';
 import { DevnetProvider } from './lib/DevnetContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const navGroups = [
   {
@@ -119,15 +120,17 @@ export default function App() {
         </div>
 
         <main className="app-main">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/blocks" element={<BlocksPage />} />
-            <Route path="/blocks/:blockNumber" element={<BlockDetail />} />
-            <Route path="/tx/:txHash" element={<TxDetail />} />
-            <Route path="/config" element={<ConfigPage />} />
-            <Route path="/accounts" element={<AccountsPage />} />
-            <Route path="/control" element={<ControlPanel />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/blocks" element={<BlocksPage />} />
+              <Route path="/blocks/:blockNumber" element={<BlockDetail />} />
+              <Route path="/tx/:txHash" element={<TxDetail />} />
+              <Route path="/config" element={<ConfigPage />} />
+              <Route path="/accounts" element={<AccountsPage />} />
+              <Route path="/control" element={<ControlPanel />} />
+            </Routes>
+          </ErrorBoundary>
         </main>
       </div>
     </DevnetProvider>

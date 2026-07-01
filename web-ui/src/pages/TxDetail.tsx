@@ -78,13 +78,20 @@ export default function TxDetail() {
 
   const blockId = useMemo(() => getReceiptBlockId(receipt), [receipt]);
   const blockKey = blockIdKey(blockId);
-  const receiptEvents: TransactionReceipt['events'] = Array.isArray(receipt?.events) ? receipt.events : [];
-  const eventFingerprint = JSON.stringify(
-    receiptEvents.map((event) => ({
-      from_address: event.from_address,
-      keys: event.keys ?? [],
-      data: event.data ?? [],
-    })),
+  const receiptEvents = useMemo<TransactionReceipt['events']>(
+    () => (Array.isArray(receipt?.events) ? receipt.events : []),
+    [receipt],
+  );
+  const eventFingerprint = useMemo(
+    () =>
+      JSON.stringify(
+        receiptEvents.map((event) => ({
+          from_address: event.from_address,
+          keys: event.keys ?? [],
+          data: event.data ?? [],
+        })),
+      ),
+    [receiptEvents],
   );
 
   const { data: decodedEvents, isLoading: eventsDecoding } = useQuery({

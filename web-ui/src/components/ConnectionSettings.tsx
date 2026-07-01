@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getRpcUrl, setRpcUrl as saveRpcUrl } from '@/lib/rpc-client';
+import { setRpcUrl, useRpcUrl } from '@/lib/rpc-client';
 import { verifyDevnet } from '@/lib/verify-devnet';
 import { useQueryClient } from '@tanstack/react-query';
 import { Settings, Check, Loader2, AlertTriangle } from 'lucide-react';
@@ -13,8 +13,9 @@ interface ConnectionSettingsProps {
 }
 
 export default function ConnectionSettings({ standalone = false, onDone }: ConnectionSettingsProps) {
+  const currentUrl = useRpcUrl();
   const [editing, setEditing] = useState(standalone);
-  const [url, setUrl] = useState(getRpcUrl());
+  const [url, setUrl] = useState(currentUrl);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -23,7 +24,7 @@ export default function ConnectionSettings({ standalone = false, onDone }: Conne
   const testConnection = async () => {
     setTesting(true);
     setError(null);
-    saveRpcUrl(url);
+    setRpcUrl(url);
 
     const result = await verifyDevnet();
     if (result.ok) {
@@ -98,7 +99,7 @@ export default function ConnectionSettings({ standalone = false, onDone }: Conne
       title="Change RPC URL"
     >
       <Settings size={14} />
-      <span className="truncate">{getRpcUrl()}</span>
+      <span className="truncate">{currentUrl}</span>
     </button>
   );
 }

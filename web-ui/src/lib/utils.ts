@@ -35,3 +35,29 @@ export function stringifyValue(value: unknown): string | undefined {
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
   return undefined;
 }
+
+/** Coerces an unknown value to a string, or returns undefined. */
+export function asString(v: unknown): string | undefined {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'bigint') return String(v);
+  return undefined;
+}
+
+/** Coerces an unknown value to a finite number, or returns undefined. */
+export function asNumber(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+  return v;
+}
+
+/** Coerces an unknown value to an array of strings, or returns undefined. */
+export function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined;
+}
+
+/** Parses a string as an integer in base 10, returning undefined for empty / non-numeric / NaN input. */
+export function parseInt10(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number.parseInt(trimmed, 10);
+  return Number.isNaN(n) ? undefined : n;
+}

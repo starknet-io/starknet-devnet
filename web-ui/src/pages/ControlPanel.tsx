@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Gamepad2, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { callRpc } from '@/lib/rpc-client';
 import { formatTokenAmount } from '@/lib/formatters';
-import { isRecord } from '@/lib/utils';
+import { asNumber, asString, asStringArray, isHex, isRecord, parseInt10 } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
 
 type Unit = 'ETH' | 'STRK';
@@ -19,20 +19,6 @@ function errorMessage(e: unknown): string {
   }
 }
 
-function asString(v: unknown): string | undefined {
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'bigint') return String(v);
-  return undefined;
-}
-
-function asNumber(v: unknown): number | undefined {
-  return typeof v === 'number' ? v : undefined;
-}
-
-function asStringArray(v: unknown): string[] | undefined {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined;
-}
-
 function ActionCard({
   title,
   method,
@@ -40,24 +26,39 @@ function ActionCard({
   getParams,
   label,
   renderResult,
+  validate,
 }: {
   title: string;
   method: string;
   children: React.ReactNode;
+  /** Returns the params to send, or `null` if inputs are invalid. */
   getParams: () => Record<string, unknown> | null;
   label?: string;
   renderResult?: (data: unknown) => React.ReactNode;
+  /** Optional client-side validation. Return a string error message, or undefined if valid. */
+  validate?: () => string | undefined;
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActionResult>(null);
   const [copied, setCopied] = useState(false);
 
   const execute = async () => {
+    if (validate) {
+      const validationError = validate();
+      if (validationError) {
+        setResult({ type: 'error', message: validationError });
+        return;
+      }
+    }
+    const params = getParams();
+    if (params === null) {
+      setResult({ type: 'error', message: 'Invalid input' });
+      return;
+    }
     setLoading(true);
     setResult(null);
     try {
-      const params = getParams();
-      const data = await callRpc(method, params ?? {});
+      const data = await callRpc(method, params);
       setResult({ type: 'success', data });
     } catch (e: unknown) {
       setResult({ type: 'error', message: errorMessage(e) });
@@ -184,34 +185,42 @@ export default function ControlPanel() {
       <div className="space-y-7">
         <ControlGroup title="Funding" description="Mint tokens and fund accounts on the local devnet.">
         {/* Mint */}
-        <ActionCard title="Mint Tokens" method="devnet_mint" getParams={() => ({
-          address: mintAddr,
-          amount: parseFloat(mintAmount || '0') * 1e18,
-          unit: mintUnit === 'ETH' ? 'WEI' : 'FRI',
-        })} renderResult={(data) => {
-          if (!isRecord(data)) return null;
-          const balance = BigInt(asString(data.new_balance) ?? '0');
-          const divisor = BigInt(10) ** BigInt(18);
-          const whole = balance / divisor;
-          const frac = balance % divisor;
-          const fracStr = frac.toString().padStart(18, '0').replace(/0+$/, '');
-          const human = fracStr ? `${whole.toLocaleString()}.${fracStr.slice(0, 6)}` : whole.toLocaleString();
-          const unit = data.unit === 'WEI' ? 'ETH' : 'STRK';
-          const txHash = asString(data.tx_hash);
-          if (!txHash) return null;
-          return (
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Tx Hash</span>
-                <CopyableHash value={txHash} short={12} />
+        <ActionCard title="Mint Tokens" method="devnet_mint"
+          validate={() => {
+            if (!isHex(mintAddr.trim())) return 'Address must be a 0x-prefixed hex string';
+            const amount = Number.parseFloat(mintAmount);
+            if (!Number.isFinite(amount) || amount < 0) return 'Amount must be a non-negative number';
+            return undefined;
+          }}
+          getParams={() => {
+            if (!isHex(mintAddr.trim())) return null;
+            const amount = Number.parseFloat(mintAmount);
+            if (!Number.isFinite(amount) || amount < 0) return null;
+            return {
+              address: mintAddr.trim(),
+              amount: amount * 1e18,
+              unit: mintUnit === 'ETH' ? 'WEI' : 'FRI',
+            };
+          }}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const balance = asString(data.new_balance);
+            const unit = data.unit === 'WEI' ? 'ETH' : 'STRK';
+            const txHash = asString(data.tx_hash);
+            if (!balance || !txHash) return null;
+            return (
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Tx Hash</span>
+                  <CopyableHash value={txHash} short={12} />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">New Balance</span>
+                  <span className="font-mono text-gray-200">{formatTokenAmount(balance)} {unit}</span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">New Balance</span>
-                <span className="font-mono text-gray-200">{human} {unit}</span>
-              </div>
-            </div>
-          );
-        }}>
+            );
+          }}>
           <div className="space-y-2">
             <InputField placeholder="Address (0x...)" value={mintAddr} onChange={setMintAddr} />
             <div className="flex gap-2">
@@ -245,7 +254,12 @@ export default function ControlPanel() {
           <p className="text-xs text-gray-400">Generate a new block from pre-confirmed transactions.</p>
         </ActionCard>
 
-        <ActionCard title="Abort Blocks" method="devnet_abortBlocks" getParams={() => ({ starting_block_id: { block_number: parseInt(abortBlock) } })}
+        <ActionCard title="Abort Blocks" method="devnet_abortBlocks"
+          validate={() => parseInt10(abortBlock) == null ? 'Starting block number must be a non-negative integer' : undefined}
+          getParams={() => {
+            const n = parseInt10(abortBlock);
+            return n == null ? null : { starting_block_id: { block_number: n } };
+          }}
           renderResult={(data) => {
             const aborted = isRecord(data) ? asStringArray(data.aborted) : undefined;
             if (!aborted || aborted.length === 0) return null;
@@ -264,7 +278,12 @@ export default function ControlPanel() {
           <InputField placeholder="Starting block number" value={abortBlock} onChange={setAbortBlock} />
         </ActionCard>
 
-        <ActionCard title="Accept Blocks on L1" method="devnet_acceptOnL1" getParams={() => ({ starting_block_id: { block_number: parseInt(acceptBlock) } })}
+        <ActionCard title="Accept Blocks on L1" method="devnet_acceptOnL1"
+          validate={() => parseInt10(acceptBlock) == null ? 'Starting block number must be a non-negative integer' : undefined}
+          getParams={() => {
+            const n = parseInt10(acceptBlock);
+            return n == null ? null : { starting_block_id: { block_number: n } };
+          }}
           renderResult={(data) => {
             const accepted = isRecord(data) ? asStringArray(data.accepted) : undefined;
             if (!accepted || accepted.length === 0) return null;
@@ -274,7 +293,12 @@ export default function ControlPanel() {
           <InputField placeholder="Starting block number" value={acceptBlock} onChange={setAcceptBlock} />
         </ActionCard>
 
-        <ActionCard title="Set Time" method="devnet_setTime" getParams={() => ({ time: parseInt(setTimeVal), generate_block: setTimeGen })}
+        <ActionCard title="Set Time" method="devnet_setTime"
+          validate={() => parseInt10(setTimeVal) == null ? 'Timestamp must be a non-negative integer (Unix seconds)' : undefined}
+          getParams={() => {
+            const n = parseInt10(setTimeVal);
+            return n == null ? null : { time: n, generate_block: setTimeGen };
+          }}
           renderResult={(data) => {
             if (!isRecord(data)) return null;
             const ts = asNumber(data.block_timestamp);
@@ -303,7 +327,12 @@ export default function ControlPanel() {
           </div>
         </ActionCard>
 
-        <ActionCard title="Increase Time" method="devnet_increaseTime" getParams={() => ({ time: parseInt(increaseTimeVal) })}
+        <ActionCard title="Increase Time" method="devnet_increaseTime"
+          validate={() => parseInt10(increaseTimeVal) == null ? 'Seconds must be a non-negative integer' : undefined}
+          getParams={() => {
+            const n = parseInt10(increaseTimeVal);
+            return n == null ? null : { time: n };
+          }}
           renderResult={(data) => {
             if (!isRecord(data)) return null;
             const increasedBy = asNumber(data.timestamp_increased_by);
@@ -325,28 +354,46 @@ export default function ControlPanel() {
 
         <ControlGroup title="Gas Prices" description="Adjust live L1, L2, and data gas pricing.">
         {/* Set Gas Price */}
-        <ActionCard title="Set Gas Price" method="devnet_setGasPrice" getParams={() => ({
-          gas_price_wei: parseInt(gasWei || '0') * 1e9,
-          gas_price_fri: parseInt(gasFri || '0') * 1e9,
-          data_gas_price_wei: parseInt(dataGasWei || '0') * 1e9,
-          data_gas_price_fri: parseInt(dataGasFri || '0') * 1e9,
-        })} renderResult={(data) => {
-          if (!isRecord(data)) return null;
-          const wei = Number(asString(data.gas_price_wei) ?? data.gas_price_wei ?? 0);
-          const fri = Number(asString(data.gas_price_fri) ?? data.gas_price_fri ?? 0);
-          return (
-            <div className="text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Gas (wei)</span>
-                <span className="font-mono text-gray-200">{wei.toLocaleString()}</span>
+        <ActionCard title="Set Gas Price" method="devnet_setGasPrice"
+          validate={() => {
+            const fields: Array<[string, string]> = [
+              ['Gas (Gwei)', gasWei],
+              ['Gas (Gfri)', gasFri],
+              ['Data Gas (Gwei)', dataGasWei],
+              ['Data Gas (Gfri)', dataGasFri],
+            ];
+            for (const [name, value] of fields) {
+              const n = Number.parseFloat(value);
+              if (!Number.isFinite(n) || n < 0) return `${name} must be a non-negative number`;
+            }
+            return undefined;
+          }}
+          getParams={() => {
+            const toGwei = (s: string) => (Number.parseFloat(s) || 0) * 1e9;
+            return {
+              gas_price_wei: toGwei(gasWei),
+              gas_price_fri: toGwei(gasFri),
+              data_gas_price_wei: toGwei(dataGasWei),
+              data_gas_price_fri: toGwei(dataGasFri),
+            };
+          }}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const wei = Number(asString(data.gas_price_wei) ?? data.gas_price_wei ?? 0);
+            const fri = Number(asString(data.gas_price_fri) ?? data.gas_price_fri ?? 0);
+            return (
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Gas (wei)</span>
+                  <span className="font-mono text-gray-200">{wei.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Gas (fri)</span>
+                  <span className="font-mono text-gray-200">{fri.toLocaleString()}</span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Gas (fri)</span>
-                <span className="font-mono text-gray-200">{fri.toLocaleString()}</span>
-              </div>
-            </div>
-          );
-        }}>
+            );
+          }}>
           <div className="grid grid-cols-2 gap-2">
             <div><label className="text-xs text-gray-500">Gas (Gwei)</label><input className="input w-full text-xs" value={gasWei} onChange={(e) => setGasWei(e.target.value)} /></div>
             <div><label className="text-xs text-gray-500">Gas (Gfri)</label><input className="input w-full text-xs" value={gasFri} onChange={(e) => setGasFri(e.target.value)} /></div>
@@ -367,7 +414,10 @@ export default function ControlPanel() {
           <InputField placeholder="Path (optional, returns in response if empty)" value={dumpPath} onChange={setDumpPath} />
         </ActionCard>
 
-        <ActionCard title="Load State" method="devnet_load" getParams={() => ({ path: loadPath })} label="Load">
+        <ActionCard title="Load State" method="devnet_load"
+          validate={() => !loadPath.trim() ? 'Path is required' : undefined}
+          getParams={() => loadPath.trim() ? { path: loadPath.trim() } : null}
+          label="Load">
           <InputField placeholder="File path to load" value={loadPath} onChange={setLoadPath} />
         </ActionCard>
 
@@ -380,13 +430,18 @@ export default function ControlPanel() {
         </ControlGroup>
 
         <ControlGroup title="Accounts & Impersonation" description="Inspect accounts and control impersonation helpers.">
-        <ActionCard title="Impersonate Account" method="devnet_impersonateAccount" getParams={() => ({ account_address: impersonateAddr })}
+        <ActionCard title="Impersonate Account" method="devnet_impersonateAccount"
+          validate={() => !isHex(impersonateAddr.trim()) ? 'Account address must be a 0x-prefixed hex string' : undefined}
+          getParams={() => isHex(impersonateAddr.trim()) ? { account_address: impersonateAddr.trim() } : null}
           renderResult={() => <div className="text-xs text-green-400">Account impersonated</div>}
         >
           <InputField placeholder="Account address (0x...)" value={impersonateAddr} onChange={setImpersonateAddr} />
         </ActionCard>
 
-        <ActionCard title="Stop Impersonating" method="devnet_stopImpersonateAccount" getParams={() => ({ account_address: stopImpersonateAddr })} label="Stop"
+        <ActionCard title="Stop Impersonating" method="devnet_stopImpersonateAccount"
+          validate={() => !isHex(stopImpersonateAddr.trim()) ? 'Account address must be a 0x-prefixed hex string' : undefined}
+          getParams={() => isHex(stopImpersonateAddr.trim()) ? { account_address: stopImpersonateAddr.trim() } : null}
+          label="Stop"
           renderResult={() => <div className="text-xs text-green-400">Impersonation stopped</div>}
         >
           <InputField placeholder="Account address (0x...)" value={stopImpersonateAddr} onChange={setStopImpersonateAddr} />
@@ -399,7 +454,10 @@ export default function ControlPanel() {
           <p className="text-xs text-gray-400">Disable auto-impersonation.</p>
         </ActionCard>
 
-        <ActionCard title="Get Account Balance" method="devnet_getAccountBalance" getParams={() => ({ address: balanceAddr, unit: balanceUnit === 'ETH' ? 'WEI' : 'FRI' })} label="Get Balance"
+        <ActionCard title="Get Account Balance" method="devnet_getAccountBalance"
+          validate={() => !isHex(balanceAddr.trim()) ? 'Address must be a 0x-prefixed hex string' : undefined}
+          getParams={() => isHex(balanceAddr.trim()) ? { address: balanceAddr.trim(), unit: balanceUnit === 'ETH' ? 'WEI' : 'FRI' } : null}
+          label="Get Balance"
           renderResult={(data) => {
             if (!isRecord(data)) return null;
             const amount = asString(data.amount);

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import type {
   BlockWithTxHashes,
   BlockWithReceipts,
@@ -11,23 +12,53 @@ import type {
   JsonRpcResponse,
 } from './types';
 
-let rpcUrl = localStorage.getItem('devnet-rpc-url') || 'http://127.0.0.1:5050/rpc';
-let wsUrl = localStorage.getItem('devnet-ws-url') || 'ws://127.0.0.1:5050/ws';
+const DEFAULT_RPC_URL = 'http://127.0.0.1:5050/rpc';
+const RPC_URL_STORAGE_KEY = 'devnet-rpc-url';
 
+let rpcUrl: string;
+try {
+  rpcUrl = localStorage.getItem(RPC_URL_STORAGE_KEY) || DEFAULT_RPC_URL;
+} catch {
+  // localStorage may be unavailable (e.g. private mode); fall back to default.
+  rpcUrl = DEFAULT_RPC_URL;
+}
+
+const rpcUrlListeners = new Set<() => void>();
+
+/** Returns the current RPC URL. Safe to call from non-React code (e.g. fetch). */
 export function getRpcUrl(): string {
   return rpcUrl;
 }
 
+/**
+ * Persist a new RPC URL and notify subscribers so React components re-render.
+ * `callRpc` reads through `getRpcUrl`, so the next request will use the new URL.
+ */
 export function setRpcUrl(url: string): void {
+  if (url === rpcUrl) return;
   rpcUrl = url;
-  localStorage.setItem('devnet-rpc-url', url);
-  const ws = url.replace(/^http/, 'ws').replace(/\/rpc$/, '/ws');
-  wsUrl = ws;
-  localStorage.setItem('devnet-ws-url', ws);
+  try {
+    localStorage.setItem(RPC_URL_STORAGE_KEY, url);
+  } catch {
+    // ignore quota / private-mode failures; in-memory state is still updated.
+  }
+  rpcUrlListeners.forEach((listener) => listener());
 }
 
-export function getWsUrl(): string {
-  return wsUrl;
+function subscribeRpcUrl(listener: () => void): () => void {
+  rpcUrlListeners.add(listener);
+  return () => {
+    rpcUrlListeners.delete(listener);
+  };
+}
+
+/**
+ * React hook returning the current RPC URL. Re-renders the caller when the URL
+ * changes via `setRpcUrl`. Uses `useSyncExternalStore` so it works correctly
+ * with React 18+ concurrent rendering and React Fast Refresh.
+ */
+export function useRpcUrl(): string {
+  return useSyncExternalStore(subscribeRpcUrl, getRpcUrl, getRpcUrl);
 }
 
 let idCounter = 0;
@@ -140,46 +171,5 @@ export function devnetGetPredeployedAccounts(withBalance = false) {
   return callRpc<SerializableAccount[]>(
     'devnet_getPredeployedAccounts',
     withBalance ? { with_balance: true } : {},
-  );
-}
-
-// ---- WebSocket ----
-
-export function createWebSocket(
-  onMessage: (data: unknown) => void,
-  onOpen?: () => void,
-  onClose?: () => void,
-): WebSocket {
-  const ws = new WebSocket(wsUrl);
-
-  ws.addEventListener('open', () => {
-    console.log('[WS] Connected to', wsUrl);
-    onOpen?.();
-  });
-
-  ws.addEventListener('message', (event) => {
-    try {
-      const parsed = JSON.parse(event.data);
-      onMessage(parsed);
-    } catch {
-      // ignore non-JSON messages
-    }
-  });
-
-  ws.addEventListener('close', () => {
-    console.log('[WS] Disconnected');
-    onClose?.();
-  });
-
-  return ws;
-}
-
-export function subscribeNewHeads(ws: WebSocket): void {
-  ws.send(
-    JSON.stringify({
-      jsonrpc: '2.0',
-      id: ++idCounter,
-      method: 'starknet_subscribeNewHeads',
-    }),
   );
 }
