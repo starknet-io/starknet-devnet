@@ -46,6 +46,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Load common configuration
+        id: config
+        uses: ./.github/actions/load-config
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
