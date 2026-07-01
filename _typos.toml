@@ -3,7 +3,8 @@ extend-exclude = [
     # exclude submodule
     "contracts/l1-l2-messaging/solidity",
     "crates/**/test_data",
-    "scripts/benchmark/"
+    "scripts/benchmark/",
+    "crates/starknet-devnet-server/assets"
 ]
 ignore-vcs = true
 
