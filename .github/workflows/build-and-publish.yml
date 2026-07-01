@@ -457,6 +457,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: '**/package-lock.json'
 
+      - name: Verify packaged web UI
+        run: |
+          npm --prefix web-ui ci
+          npm --prefix web-ui run build:devnet
+          git diff --exit-code -- crates/starknet-devnet-server/assets/ui
+          test -z "$(git status --porcelain -- crates/starknet-devnet-server/assets/ui)"
+
       - name: Download binary artifacts
         uses: actions/download-artifact@v8
         with:

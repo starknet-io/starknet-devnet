@@ -39,6 +39,27 @@ jobs:
           cargo +${{ steps.config.outputs.rust_nightly_version }} install typos-cli --version 1.43.4 --locked
           typos && echo "No spelling errors!"
 
+  web-ui-build:
+    name: Web UI Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web-ui/package-lock.json
+
+      - name: Build packaged web UI
+        run: |
+          npm --prefix web-ui ci
+          npm --prefix web-ui run build:devnet
+          git diff --exit-code -- crates/starknet-devnet-server/assets/ui
+          test -z "$(git status --porcelain -- crates/starknet-devnet-server/assets/ui)"
+
   clippy-and-unit-tests:
     name: Clippy and Unit Test
     runs-on: ubuntu-latest
