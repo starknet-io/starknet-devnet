@@ -278,6 +278,12 @@ Calling devnet_createBlock JSON-RPC method is also an option in modes other than
     #[arg(default_value_t = 9090)]
     #[arg(help = "Specify the port for the metrics server to listen at;")]
     metrics_port: u16,
+
+    /// Serve web UI explorer at /ui
+    #[arg(long = "ui")]
+    #[arg(env = "UI")]
+    #[arg(help = "Serve the embedded web UI explorer at /ui;")]
+    ui_enabled: bool,
 }
 
 impl Args {
@@ -345,6 +351,7 @@ impl Args {
             log_request,
             log_response,
             restricted_methods: self.get_validated_restricted_methods()?,
+            ui_enabled: self.ui_enabled,
         };
 
         Ok((starknet_config, server_config))
