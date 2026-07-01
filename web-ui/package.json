@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:devnet": "tsc -b && vite build --outDir ../crates/starknet-devnet-server/assets/ui --emptyOutDir",
     "preview": "vite preview"
   },
   "dependencies": {
