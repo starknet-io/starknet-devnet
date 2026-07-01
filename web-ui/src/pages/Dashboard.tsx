@@ -2,24 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Box, ArrowLeftRight, GitFork, ShieldCheck, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { devnetGetStatus, devnetGetConfig, getBlockWithTxHashes } from '@/lib/rpc-client';
-import { useDevnet } from '@/lib/DevnetContext';
+import { useDevnet } from '@/lib/useDevnet';
 import { formatTimestamp } from '@/lib/utils';
+import { REQUIRED_METHODS } from '@/lib/verify-devnet';
 import SearchBar from '@/components/SearchBar';
 import ConnectionSettings from '@/components/ConnectionSettings';
 import { useEffect, useRef, useState } from 'react';
-
-const REQUIRED_METHODS = [
-  'devnet_getPredeployedAccounts',
-  'starknet_getBlockWithTxHashes',
-  'starknet_getBlockWithTxs',
-  'starknet_getTransactionByHash',
-  'starknet_getTransactionReceipt',
-  'starknet_getTransactionStatus',
-  'starknet_traceTransaction',
-  'starknet_getClass',
-  'starknet_getClassHashAt',
-  'starknet_blockNumber',
-];
 
 export default function Dashboard() {
   const { connected, setConnected, verified, setVerified } = useDevnet();

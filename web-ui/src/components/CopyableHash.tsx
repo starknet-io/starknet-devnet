@@ -31,28 +31,3 @@ export function CopyableHash({ value, short, className = '' }: { value: string; 
     </span>
   );
 }
-
-/** Formats a hex or decimal string as human-readable with proper units. */
-export function formatTokenAmount(hexOrDec: string, decimals = 18): string {
-  try {
-    let value: bigint;
-    if (hexOrDec.startsWith('0x')) {
-      value = BigInt(hexOrDec);
-    } else {
-      value = BigInt(hexOrDec);
-    }
-    const divisor = BigInt(10 ** decimals);
-    const whole = value / divisor;
-    const frac = value % divisor;
-    const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
-    if (fracStr.length === 0) return whole.toLocaleString();
-    return `${whole.toLocaleString()}.${fracStr.slice(0, 6)}`;
-  } catch {
-    return hexOrDec;
-  }
-}
-
-/** Formats fee amount (hex, 18 decimals for both WEI and FRI/STRK) */
-export function formatFee(hexAmount: string): string {
-  return formatTokenAmount(hexAmount, 18);
-}

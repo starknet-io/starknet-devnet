@@ -912,7 +912,7 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item)) : [];
 }
 
-function lastSegment(name: string): string {
+export function lastSegment(name: string): string {
   const cairoParts = name.split('::');
   const lastCairoPart = cairoParts[cairoParts.length - 1] ?? name;
   const dotParts = lastCairoPart.split('.');

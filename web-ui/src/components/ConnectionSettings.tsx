@@ -3,7 +3,7 @@ import { getRpcUrl, setRpcUrl as saveRpcUrl } from '@/lib/rpc-client';
 import { verifyDevnet } from '@/lib/verify-devnet';
 import { useQueryClient } from '@tanstack/react-query';
 import { Settings, Check, Loader2, AlertTriangle } from 'lucide-react';
-import { useDevnet } from '@/lib/DevnetContext';
+import { useDevnet } from '@/lib/useDevnet';
 
 interface ConnectionSettingsProps {
   /** Show the URL input inline (no click-to-reveal). Used on error pages. */

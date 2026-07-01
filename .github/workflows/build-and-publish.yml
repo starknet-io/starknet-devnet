@@ -453,9 +453,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ steps.config.outputs.node_lts_version }}
           cache: 'npm'
           cache-dependency-path: '**/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@${{ steps.config.outputs.npm_version }}
 
       - name: Verify packaged web UI
         run: |

@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useState, type ReactNode } from 'react';
 
-interface DevnetContextType {
+export interface DevnetContextType {
   connected: boolean;
   setConnected: (v: boolean) => void;
   verified: boolean;
@@ -11,7 +11,7 @@ interface DevnetContextType {
   setTxCount: (v: number) => void;
 }
 
-const DevnetContext = createContext<DevnetContextType>({
+export const DevnetContext = createContext<DevnetContextType>({
   connected: false,
   setConnected: () => {},
   verified: false,
@@ -33,8 +33,4 @@ export function DevnetProvider({ children }: { children: ReactNode }) {
       {children}
     </DevnetContext.Provider>
   );
-}
-
-export function useDevnet() {
-  return useContext(DevnetContext);
 }

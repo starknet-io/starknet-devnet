@@ -17,17 +17,21 @@ export function formatTimestamp(ts: number): string {
   return date.toLocaleDateString();
 }
 
-export function formatBalance(amount: string, decimals = 18): string {
-  const num = parseFloat(amount) / 10 ** decimals;
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`;
-  return num.toFixed(4);
-}
-
 export function isHex(value: string): boolean {
   return /^0x[0-9a-fA-F]+$/.test(value);
 }
 
 export function isBlockNumber(value: string): boolean {
   return /^\d+$/.test(value);
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function stringifyValue(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  return undefined;
 }

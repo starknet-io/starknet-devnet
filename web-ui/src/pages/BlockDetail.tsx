@@ -4,13 +4,17 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Box,
-  CheckCircle,
   Loader2,
-  XCircle,
 } from 'lucide-react';
 import { getBlockWithReceipts, getBlockWithTxs } from '@/lib/rpc-client';
-import { formatTimestamp } from '@/lib/utils';
+import { formatTimestamp, isRecord, stringifyValue } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ExecutionBadge } from '@/components/ExecutionBadge';
+import { TxTypeBadge } from '@/components/TxTypeBadge';
+import type { BlockWithReceipts, BlockWithTxs } from '@/lib/types';
+
+type FullBlock = BlockWithReceipts | BlockWithTxs;
 
 interface BlockTransactionEntry {
   index: number;
@@ -24,7 +28,7 @@ export default function BlockDetail() {
   const { blockNumber } = useParams<{ blockNumber: string }>();
   const navigate = useNavigate();
 
-  const { data: block, isLoading, error } = useQuery({
+  const { data: block, isLoading, error } = useQuery<FullBlock>({
     queryKey: ['block', blockNumber, 'full-with-receipts'],
     queryFn: async () => {
       const id = Number(blockNumber);
@@ -38,7 +42,7 @@ export default function BlockDetail() {
   });
 
   const txEntries = useMemo(
-    () => normalizeTransactions(Array.isArray((block as any)?.transactions) ? (block as any).transactions : []),
+    () => normalizeTransactions(getBlockTransactions(block)),
     [block],
   );
 
@@ -52,12 +56,11 @@ export default function BlockDetail() {
 
   if (error || !block) return <div className="p-8 text-red-400">Block not found</div>;
 
-  const rawBlock = block as any;
   const hasCommitments = Boolean(
-    rawBlock.transaction_commitment
-    || rawBlock.event_commitment
-    || rawBlock.receipt_commitment
-    || rawBlock.state_diff_commitment,
+    block.transaction_commitment
+    || block.event_commitment
+    || block.receipt_commitment
+    || block.state_diff_commitment,
   );
 
   return (
@@ -74,35 +77,35 @@ export default function BlockDetail() {
           </h1>
           <p className="page-subtitle">Block header, gas prices, commitments, and transactions</p>
         </div>
-        {rawBlock.status && <BlockStatusBadge status={rawBlock.status} />}
+        {block.status && <BlockStatusBadge status={block.status} />}
       </div>
 
       <div className="card">
         <h2 className="font-semibold mb-4">Block Header</h2>
         <dl className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 text-sm">
-          <InfoRow label="Block Hash" value={rawBlock.block_hash} hash />
-          <InfoRow label="Parent Hash" value={rawBlock.parent_hash} hash />
-          <InfoRow label="Block Number" value={`#${rawBlock.block_number}`} />
-          <InfoRow label="Timestamp" value={formatTimestamp(rawBlock.timestamp)} />
-          <InfoRow label="Starknet Version" value={rawBlock.starknet_version || 'N/A'} />
-          <InfoRow label="Sequencer" value={rawBlock.sequencer_address} hash />
-          <InfoRow label="New Root" value={rawBlock.new_root || 'N/A'} hash />
-          <InfoRow label="Tx Count" value={String(rawBlock.transaction_count ?? txEntries.length)} />
-          <InfoRow label="Event Count" value={String(rawBlock.event_count ?? 'N/A')} />
-          <InfoRow label="L1 DA Mode" value={rawBlock.l1_da_mode || 'N/A'} />
-          <InfoRow label="State Diff Length" value={String(rawBlock.state_diff_length ?? 'N/A')} />
+          <InfoRow label="Block Hash" value={block.block_hash} hash />
+          <InfoRow label="Parent Hash" value={block.parent_hash} hash />
+          <InfoRow label="Block Number" value={`#${block.block_number}`} />
+          <InfoRow label="Timestamp" value={formatTimestamp(block.timestamp)} />
+          <InfoRow label="Starknet Version" value={block.starknet_version || 'N/A'} />
+          <InfoRow label="Sequencer" value={block.sequencer_address} hash />
+          <InfoRow label="New Root" value={block.new_root || 'N/A'} hash />
+          <InfoRow label="Tx Count" value={String(block.transaction_count ?? txEntries.length)} />
+          <InfoRow label="Event Count" value={String(block.event_count ?? 'N/A')} />
+          <InfoRow label="L1 DA Mode" value={block.l1_da_mode || 'N/A'} />
+          <InfoRow label="State Diff Length" value={String(block.state_diff_length ?? 'N/A')} />
         </dl>
       </div>
 
       <div className="card">
         <h2 className="font-semibold mb-4">Gas Prices</h2>
         <dl className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 text-sm">
-          {rawBlock.l1_gas_price?.price_in_wei && <InfoRow label="L1 Gas (WEI)" value={rawBlock.l1_gas_price.price_in_wei} mono />}
-          {rawBlock.l1_gas_price?.price_in_fri && <InfoRow label="L1 Gas (FRI)" value={rawBlock.l1_gas_price.price_in_fri} mono />}
-          {rawBlock.l2_gas_price?.price_in_wei && <InfoRow label="L2 Gas (WEI)" value={rawBlock.l2_gas_price.price_in_wei} mono />}
-          {rawBlock.l2_gas_price?.price_in_fri && <InfoRow label="L2 Gas (FRI)" value={rawBlock.l2_gas_price.price_in_fri} mono />}
-          {rawBlock.l1_data_gas_price?.price_in_wei && <InfoRow label="L1 Data Gas (WEI)" value={rawBlock.l1_data_gas_price.price_in_wei} mono />}
-          {rawBlock.l1_data_gas_price?.price_in_fri && <InfoRow label="L1 Data Gas (FRI)" value={rawBlock.l1_data_gas_price.price_in_fri} mono />}
+          {block.l1_gas_price?.price_in_wei && <InfoRow label="L1 Gas (WEI)" value={block.l1_gas_price.price_in_wei} mono />}
+          {block.l1_gas_price?.price_in_fri && <InfoRow label="L1 Gas (FRI)" value={block.l1_gas_price.price_in_fri} mono />}
+          {block.l2_gas_price?.price_in_wei && <InfoRow label="L2 Gas (WEI)" value={block.l2_gas_price.price_in_wei} mono />}
+          {block.l2_gas_price?.price_in_fri && <InfoRow label="L2 Gas (FRI)" value={block.l2_gas_price.price_in_fri} mono />}
+          {block.l1_data_gas_price?.price_in_wei && <InfoRow label="L1 Data Gas (WEI)" value={block.l1_data_gas_price.price_in_wei} mono />}
+          {block.l1_data_gas_price?.price_in_fri && <InfoRow label="L1 Data Gas (FRI)" value={block.l1_data_gas_price.price_in_fri} mono />}
         </dl>
       </div>
 
@@ -110,10 +113,10 @@ export default function BlockDetail() {
         <div className="card">
           <h2 className="font-semibold mb-4">Commitments</h2>
           <dl className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            {rawBlock.transaction_commitment && <InfoRow label="Transaction" value={rawBlock.transaction_commitment} hash />}
-            {rawBlock.event_commitment && <InfoRow label="Event" value={rawBlock.event_commitment} hash />}
-            {rawBlock.receipt_commitment && <InfoRow label="Receipt" value={rawBlock.receipt_commitment} hash />}
-            {rawBlock.state_diff_commitment && <InfoRow label="State Diff" value={rawBlock.state_diff_commitment} hash />}
+            {block.transaction_commitment && <InfoRow label="Transaction" value={block.transaction_commitment} hash />}
+            {block.event_commitment && <InfoRow label="Event" value={block.event_commitment} hash />}
+            {block.receipt_commitment && <InfoRow label="Receipt" value={block.receipt_commitment} hash />}
+            {block.state_diff_commitment && <InfoRow label="State Diff" value={block.state_diff_commitment} hash />}
           </dl>
         </div>
       )}
@@ -242,45 +245,6 @@ function EmptyValue() {
   return <span className="font-mono text-xs text-slate-600">--</span>;
 }
 
-function TxTypeBadge({ type }: { type: string }) {
-  const colors: Record<string, string> = {
-    INVOKE: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-    DEPLOY: 'bg-green-500/20 text-green-300 border-green-500/30',
-    DECLARE: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    DEPLOY_ACCOUNT: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
-    L1_HANDLER: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-  };
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border uppercase ${colors[type] || 'bg-gray-500/20 text-gray-400 border-gray-500/30'}`}>
-      {type}
-    </span>
-  );
-}
-
-function ExecutionBadge({ status }: { status: string }) {
-  const ok = status === 'SUCCEEDED';
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border inline-flex items-center gap-1 ${ok ? 'bg-green-500/20 text-green-300 border-green-500/30' : 'bg-red-500/20 text-red-300 border-red-500/30'}`}>
-      {ok ? <CheckCircle size={10} /> : <XCircle size={10} />}
-      {status}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const color =
-    status === 'ACCEPTED_ON_L2'
-      ? 'bg-green-500/20 text-green-300 border-green-500/30'
-      : status === 'ACCEPTED_ON_L1'
-        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-        : status === 'PRE_CONFIRMED'
-          ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
-          : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-
-  return <span className={`px-2 py-0.5 rounded text-xs font-medium border ${color}`}>{status.replace(/_/g, ' ')}</span>;
-}
-
 function BlockStatusBadge({ status }: { status: string }) {
   const color =
     status === 'ACCEPTED_ON_L2'
@@ -291,6 +255,13 @@ function BlockStatusBadge({ status }: { status: string }) {
           ? 'text-yellow-400'
           : 'text-slate-300';
   return <span className={`pill ${color}`}>{status.replace(/_/g, ' ')}</span>;
+}
+
+function getBlockTransactions(block: FullBlock | undefined): unknown[] {
+  if (!block || !Array.isArray(block.transactions)) return [];
+  // BlockWithReceipts transactions are TransactionWithReceipt[]; BlockWithTxs
+  // transactions are Transaction[]; the normalizer treats both via isRecord.
+  return block.transactions as unknown[];
 }
 
 function normalizeTransactions(items: unknown[]): BlockTransactionEntry[] {
@@ -328,15 +299,4 @@ function getPrimaryAddress(tx: Record<string, unknown>, receipt?: Record<string,
   const found = candidates.find((value) => typeof value === 'string' && value.length > 0);
   if (!found) return undefined;
   return { value: found as string };
-}
-
-function stringifyValue(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
-  return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

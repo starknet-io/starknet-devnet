@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Users, Loader2, Eye, EyeOff } from 'lucide-react';
 import { devnetGetPredeployedAccounts } from '@/lib/rpc-client';
+import { formatTokenAmount } from '@/lib/formatters';
 import { CopyableHash } from '@/components/CopyableHash';
 
 export default function AccountsPage() {
@@ -65,14 +66,14 @@ export default function AccountsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border border-white/10 bg-black/15 p-3">
                   <span className="text-gray-500 text-xs">Initial</span>
-                  <div className="font-mono text-gray-400 text-xs">{formatHuman(acct.initial_balance, 18)}</div>
+                  <div className="font-mono text-gray-400 text-xs">{formatTokenAmount(acct.initial_balance, 18)}</div>
                 </div>
                 {showBalances && acct.balance && (
                   <div className="rounded-lg border border-white/10 bg-black/15 p-3">
                     <span className="text-green-400 text-xs">Current</span>
                     <div className="space-y-0.5 mt-0.5">
-                      <div className="font-mono text-xs text-gray-200">{formatHuman(acct.balance.eth.amount, 18)} <span className="text-gray-500">ETH</span></div>
-                      <div className="font-mono text-xs text-gray-200">{formatHuman(acct.balance.strk.amount, 18)} <span className="text-gray-500">STRK</span></div>
+                      <div className="font-mono text-xs text-gray-200">{formatTokenAmount(acct.balance.eth.amount, 18)} <span className="text-gray-500">ETH</span></div>
+                      <div className="font-mono text-xs text-gray-200">{formatTokenAmount(acct.balance.strk.amount, 18)} <span className="text-gray-500">STRK</span></div>
                     </div>
                   </div>
                 )}
@@ -83,15 +84,4 @@ export default function AccountsPage() {
       </div>
     </div>
   );
-}
-
-function formatHuman(raw: string, decimals = 18): string {
-  try {
-    const b = BigInt(raw || '0');
-    const div = BigInt(10) ** BigInt(decimals);
-    const w = b / div;
-    const f = b % div;
-    const fs = f.toString().padStart(decimals, '0').replace(/0+$/, '');
-    return fs ? `${w.toLocaleString()}.${fs.slice(0, 6)}` : w.toLocaleString();
-  } catch { return raw; }
 }

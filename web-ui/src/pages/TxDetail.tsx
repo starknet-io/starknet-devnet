@@ -6,14 +6,12 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
-  CheckCircle,
   ChevronDown,
   ChevronRight,
   Code2,
   Copy,
   Globe,
   Loader2,
-  XCircle,
 } from 'lucide-react';
 import {
   getTransactionByHash,
@@ -21,11 +19,17 @@ import {
   getTransactionStatus,
   getTransactionTrace,
 } from '@/lib/rpc-client';
-import { CopyableHash, formatFee } from '@/components/CopyableHash';
+import { isHex } from '@/lib/utils';
+import { CopyableHash } from '@/components/CopyableHash';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ExecutionBadge } from '@/components/ExecutionBadge';
+import { TxTypeBadge } from '@/components/TxTypeBadge';
+import { formatFee } from '@/lib/formatters';
 import {
   blockIdKey,
   decodeReceiptEvents,
   decodeTrace,
+  lastSegment,
   normalizeFelt,
   type DecodedEvent,
   type DecodedField,
@@ -34,6 +38,14 @@ import {
   type DecodedTraceSection,
   type RpcBlockId,
 } from '@/lib/event-decoder';
+import type { Transaction, TransactionReceipt } from '@/lib/types';
+
+/** L2→L1 message shape used by `TransactionReceipt.messages_sent` items. */
+interface L2L1Message {
+  to_address?: string;
+  from_address?: string;
+  payload?: string[];
+}
 
 export default function TxDetail() {
   const { txHash } = useParams<{ txHash: string }>();
@@ -66,7 +78,7 @@ export default function TxDetail() {
 
   const blockId = useMemo(() => getReceiptBlockId(receipt), [receipt]);
   const blockKey = blockIdKey(blockId);
-  const receiptEvents = Array.isArray((receipt as any)?.events) ? ((receipt as any).events as any[]) : [];
+  const receiptEvents: TransactionReceipt['events'] = Array.isArray(receipt?.events) ? receipt.events : [];
   const eventFingerprint = JSON.stringify(
     receiptEvents.map((event) => ({
       from_address: event.from_address,
@@ -97,9 +109,27 @@ export default function TxDetail() {
 
   if (!tx) return <div className="p-8 text-red-400">Transaction not found</div>;
 
-  const raw = tx as any;
-  const rawReceipt = receipt as any;
+  // Typed views over the query data. `Transaction` and `TransactionReceipt` both
+  // include an index signature, so any unknown field access yields `unknown` —
+  // we therefore coerce at the JSX boundary.
+  const raw: Transaction = tx;
+  const rawReceipt: TransactionReceipt | undefined = receipt ?? undefined;
   const txType = raw.type || 'INVOKE';
+
+  // `Transaction` index signature helpers: read any custom field as a string.
+  const readStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : v == null ? undefined : String(v));
+  const txContractAddress = readStr(raw.contract_address);
+  const txEntryPointSelector = readStr(raw.entry_point_selector);
+  const txClassHash = readStr(raw.class_hash);
+  const txCompiledClassHash = readStr(raw.compiled_class_hash);
+  const txContractAddressSalt = readStr(raw.contract_address_salt);
+
+  // Receipt helpers: read custom fields and `execution_resources` keys.
+  const resources = (rawReceipt?.execution_resources ?? {}) as {
+    l1_gas?: unknown;
+    l1_data_gas?: unknown;
+    l2_gas?: unknown;
+  };
 
   return (
     <div className="page">
@@ -116,12 +146,9 @@ export default function TxDetail() {
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <TxTypeBadge type={txType} />
           {status && (
-            <ExecutionBadge
-              finality={status.finality_status}
-              execution={status.execution_status}
-            />
+            <ExecutionBadge status={status.execution_status} />
           )}
-          {rawReceipt?.finality_status && <StatusBadge label={rawReceipt.finality_status} />}
+          {rawReceipt?.finality_status && <StatusBadge status={rawReceipt.finality_status} />}
         </div>
         <CopyableHash value={txHash ?? ''} />
         </div>
@@ -133,12 +160,12 @@ export default function TxDetail() {
           {raw.version != null && <F label="Version" value={String(raw.version)} mono />}
           {raw.nonce != null && <F label="Nonce" value={String(raw.nonce)} mono />}
           {raw.sender_address && <F label="Sender" value={raw.sender_address} hash />}
-          {raw.contract_address && <F label="Contract" value={raw.contract_address} hash />}
+          {txContractAddress && <F label="Contract" value={txContractAddress} hash />}
           {rawReceipt?.contract_address && <F label="Deployed Contract" value={rawReceipt.contract_address} hash />}
-          {raw.entry_point_selector && <F label="Entry Point Selector" value={raw.entry_point_selector} hash />}
-          {raw.class_hash && <F label="Class Hash" value={raw.class_hash} hash />}
-          {raw.compiled_class_hash && <F label="Compiled Class Hash" value={raw.compiled_class_hash} hash />}
-          {raw.contract_address_salt && <F label="Salt" value={raw.contract_address_salt} hash />}
+          {txEntryPointSelector && <F label="Entry Point Selector" value={txEntryPointSelector} hash />}
+          {txClassHash && <F label="Class Hash" value={txClassHash} hash />}
+          {txCompiledClassHash && <F label="Compiled Class Hash" value={txCompiledClassHash} hash />}
+          {txContractAddressSalt && <F label="Salt" value={txContractAddressSalt} hash />}
         </Grid>
       </Section>
 
@@ -168,11 +195,11 @@ export default function TxDetail() {
                 <F label="Fee (hex)" value={String(rawReceipt.actual_fee.amount)} mono />
               </>
             )}
-            {rawReceipt.execution_resources && (
+            {Boolean(rawReceipt.execution_resources) && (
               <>
-                <F label="L1 Gas" value={bigFmt(rawReceipt.execution_resources.l1_gas)} />
-                <F label="L1 Data Gas" value={bigFmt(rawReceipt.execution_resources.l1_data_gas)} />
-                <F label="L2 Gas" value={bigFmt(rawReceipt.execution_resources.l2_gas)} />
+                <F label="L1 Gas" value={bigFmt(resources.l1_gas)} />
+                <F label="L1 Data Gas" value={bigFmt(resources.l1_data_gas)} />
+                <F label="L2 Gas" value={bigFmt(resources.l2_gas)} />
               </>
             )}
           </Grid>
@@ -222,19 +249,22 @@ export default function TxDetail() {
       {Array.isArray(rawReceipt?.messages_sent) && rawReceipt.messages_sent.length > 0 && (
         <Section title={`L2 to L1 Messages (${rawReceipt.messages_sent.length})`}>
           <div className="space-y-2">
-            {rawReceipt.messages_sent.map((message: any, index: number) => (
-              <div key={index} className="rounded-lg bg-starknet-surface border border-starknet-border p-3">
-                <Grid>
-                  {message.to_address && <F label="To" value={message.to_address} hash />}
-                  {message.from_address && <F label="From" value={message.from_address} hash />}
-                </Grid>
-                {Array.isArray(message.payload) && message.payload.length > 0 && (
-                  <div className="mt-3">
-                    <Arr items={message.payload} dense />
-                  </div>
-                )}
-              </div>
-            ))}
+            {rawReceipt.messages_sent.map((rawMessage, index) => {
+              const message = (rawMessage ?? {}) as L2L1Message;
+              return (
+                <div key={index} className="rounded-lg bg-starknet-surface border border-starknet-border p-3">
+                  <Grid>
+                    {message.to_address && <F label="To" value={message.to_address} hash />}
+                    {message.from_address && <F label="From" value={message.from_address} hash />}
+                  </Grid>
+                  {Array.isArray(message.payload) && message.payload.length > 0 && (
+                    <div className="mt-3">
+                      <Arr items={message.payload} dense />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
@@ -398,7 +428,7 @@ function EventRow({
   loading,
   index,
 }: {
-  event: any;
+  event: TransactionReceipt['events'][number];
   decoded?: DecodedEvent;
   loading?: boolean;
   index: number;
@@ -518,7 +548,7 @@ function ValueCell({ value, raw }: { value: string; raw: string[] }) {
 
   return (
     <div className="min-w-0 text-right">
-      {looksLikeFelt(value) ? (
+      {isHex(value) ? (
         <CopyableHash value={value} short={12} className="justify-end max-w-full" />
       ) : (
         <span className="text-gray-200 break-all">{value}</span>
@@ -704,64 +734,19 @@ function Count({ label, value }: { label: string; value: number }) {
   );
 }
 
-function TxTypeBadge({ type }: { type: string }) {
-  const colors: Record<string, string> = {
-    INVOKE: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    DEPLOY: 'bg-green-500/20 text-green-400 border-green-500/30',
-    DECLARE: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    DEPLOY_ACCOUNT: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
-    L1_HANDLER: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  };
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border uppercase ${colors[type] || 'bg-gray-500/20 text-gray-400 border-gray-500/30'}`}>
-      {type}
-    </span>
-  );
-}
-
-function ExecutionBadge({ execution }: { finality: string; execution: string }) {
-  const ok = execution === 'SUCCEEDED';
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border flex items-center gap-1 ${ok ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
-      {ok ? <CheckCircle size={10} /> : <XCircle size={10} />}
-      {execution}
-    </span>
-  );
-}
-
-function StatusBadge({ label }: { label: string }) {
-  const color =
-    label === 'ACCEPTED_ON_L2'
-      ? 'bg-green-500/20 text-green-400 border-green-500/30'
-      : label === 'ACCEPTED_ON_L1'
-        ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-        : label === 'PRE_CONFIRMED'
-          ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-          : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-
-  return <span className={`px-2 py-0.5 rounded text-xs font-medium border ${color}`}>{label.replace(/_/g, ' ')}</span>;
-}
-
 function getReceiptBlockId(receipt: unknown): RpcBlockId | undefined {
-  const raw = receipt as any;
-  if (raw?.block_hash) return { block_hash: raw.block_hash };
-  if (raw?.block_number != null) return { block_number: Number(raw.block_number) };
+  // `receipt` is typed as `unknown` at the API boundary; we narrow with a
+  // shape check rather than casting to `any`.
+  if (!receipt || typeof receipt !== 'object') return undefined;
+  const raw = receipt as { block_hash?: unknown; block_number?: unknown };
+  if (typeof raw.block_hash === 'string') return { block_hash: raw.block_hash };
+  if (raw.block_number != null) return { block_number: Number(raw.block_number) };
   return undefined;
-}
-
-function looksLikeFelt(value: string): boolean {
-  return /^0x[0-9a-fA-F]+$/.test(value);
 }
 
 function shortenSelector(selector: string): string {
   if (!selector) return 'Unknown selector';
   return `${selector.slice(0, 10)}...${selector.slice(-8)}`;
-}
-
-function lastSegment(value: string): string {
-  const cairoParts = value.split('::');
-  return cairoParts[cairoParts.length - 1] ?? value;
 }
 
 function bigFmt(value: unknown): string {

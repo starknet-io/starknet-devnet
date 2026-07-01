@@ -1,9 +1,37 @@
 import { useState } from 'react';
 import { Gamepad2, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { callRpc } from '@/lib/rpc-client';
+import { formatTokenAmount } from '@/lib/formatters';
+import { isRecord } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
 
+type Unit = 'ETH' | 'STRK';
 type ActionResult = { type: 'success'; data: unknown } | { type: 'error'; message: string } | null;
+
+/** Extracts a printable error message from an unknown thrown value. */
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
+function asString(v: unknown): string | undefined {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'bigint') return String(v);
+  return undefined;
+}
+
+function asNumber(v: unknown): number | undefined {
+  return typeof v === 'number' ? v : undefined;
+}
+
+function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined;
+}
 
 function ActionCard({
   title,
@@ -18,7 +46,7 @@ function ActionCard({
   children: React.ReactNode;
   getParams: () => Record<string, unknown> | null;
   label?: string;
-  renderResult?: (data: any) => React.ReactNode;
+  renderResult?: (data: unknown) => React.ReactNode;
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActionResult>(null);
@@ -31,8 +59,8 @@ function ActionCard({
       const params = getParams();
       const data = await callRpc(method, params ?? {});
       setResult({ type: 'success', data });
-    } catch (e: any) {
-      setResult({ type: 'error', message: e.message });
+    } catch (e: unknown) {
+      setResult({ type: 'error', message: errorMessage(e) });
     }
     setLoading(false);
   };
@@ -115,22 +143,11 @@ function ControlGroup({
   );
 }
 
-function formatHuman(raw: string, decimals = 18): string {
-  try {
-    const b = BigInt(raw || '0');
-    const div = BigInt(10) ** BigInt(decimals);
-    const w = b / div;
-    const f = b % div;
-    const fs = f.toString().padStart(decimals, '0').replace(/0+$/, '');
-    return fs ? `${w.toLocaleString()}.${fs.slice(0, 6)}` : w.toLocaleString();
-  } catch { return raw; }
-}
-
 export default function ControlPanel() {
   // Local state for each form
   const [mintAddr, setMintAddr] = useState('');
   const [mintAmount, setMintAmount] = useState('1');
-  const [mintUnit, setMintUnit] = useState<'ETH' | 'STRK'>('STRK');
+  const [mintUnit, setMintUnit] = useState<Unit>('STRK');
 
   const [abortBlock, setAbortBlock] = useState('');
   const [acceptBlock, setAcceptBlock] = useState('');
@@ -147,7 +164,7 @@ export default function ControlPanel() {
   const [impersonateAddr, setImpersonateAddr] = useState('');
   const [stopImpersonateAddr, setStopImpersonateAddr] = useState('');
   const [balanceAddr, setBalanceAddr] = useState('');
-  const [balanceUnit, setBalanceUnit] = useState<'ETH' | 'STRK'>('STRK');
+  const [balanceUnit, setBalanceUnit] = useState<Unit>('STRK');
   const [postmanUrl, setPostmanUrl] = useState('');
   const [postmanContract, setPostmanContract] = useState('');
   const [postmanKey, setPostmanKey] = useState('');
@@ -171,20 +188,22 @@ export default function ControlPanel() {
           address: mintAddr,
           amount: parseFloat(mintAmount || '0') * 1e18,
           unit: mintUnit === 'ETH' ? 'WEI' : 'FRI',
-        })} renderResult={(data: any) => {
-          if (!data) return null;
-          const balance = BigInt(data.new_balance || '0');
+        })} renderResult={(data) => {
+          if (!isRecord(data)) return null;
+          const balance = BigInt(asString(data.new_balance) ?? '0');
           const divisor = BigInt(10) ** BigInt(18);
           const whole = balance / divisor;
           const frac = balance % divisor;
           const fracStr = frac.toString().padStart(18, '0').replace(/0+$/, '');
           const human = fracStr ? `${whole.toLocaleString()}.${fracStr.slice(0, 6)}` : whole.toLocaleString();
           const unit = data.unit === 'WEI' ? 'ETH' : 'STRK';
+          const txHash = asString(data.tx_hash);
+          if (!txHash) return null;
           return (
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-400">Tx Hash</span>
-                <CopyableHash value={data.tx_hash} short={12} />
+                <CopyableHash value={txHash} short={12} />
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">New Balance</span>
@@ -197,7 +216,14 @@ export default function ControlPanel() {
             <InputField placeholder="Address (0x...)" value={mintAddr} onChange={setMintAddr} />
             <div className="flex gap-2">
               <input className="input flex-1 text-xs" placeholder="Amount" value={mintAmount} onChange={(e) => setMintAmount(e.target.value)} />
-              <select className="input text-xs" value={mintUnit} onChange={(e) => setMintUnit(e.target.value as any)}>
+              <select
+                className="input text-xs"
+                value={mintUnit}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'ETH' || v === 'STRK') setMintUnit(v);
+                }}
+              >
                 <option value="STRK">STRK</option>
                 <option value="ETH">ETH</option>
               </select>
@@ -209,25 +235,66 @@ export default function ControlPanel() {
         <ControlGroup title="Blocks & Time" description="Create, abort, accept, and timestamp blocks.">
         {/* Create Block */}
         <ActionCard title="Create New Block" method="devnet_createBlock" getParams={() => ({})} label="Create Block"
-          renderResult={(d: any) => d && <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">Block Hash</span><CopyableHash value={d.block_hash} short={14} /></div></div>}
+          renderResult={(data) => {
+            const blockHash = isRecord(data) ? asString(data.block_hash) : undefined;
+            return blockHash
+              ? <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">Block Hash</span><CopyableHash value={blockHash} short={14} /></div></div>
+              : null;
+          }}
         >
           <p className="text-xs text-gray-400">Generate a new block from pre-confirmed transactions.</p>
         </ActionCard>
 
         <ActionCard title="Abort Blocks" method="devnet_abortBlocks" getParams={() => ({ starting_block_id: { block_number: parseInt(abortBlock) } })}
-          renderResult={(d: any) => d?.aborted?.length > 0 && <div className="text-xs text-gray-200">Aborted {d.aborted.length} block(s): {d.aborted.map((h: string) => <span key={h} className="font-mono ml-1"><CopyableHash value={h} short={8}/></span>)}</div>}
+          renderResult={(data) => {
+            const aborted = isRecord(data) ? asStringArray(data.aborted) : undefined;
+            if (!aborted || aborted.length === 0) return null;
+            return (
+              <div className="text-xs text-gray-200">
+                Aborted {aborted.length} block(s):{' '}
+                {aborted.map((h) => (
+                  <span key={h} className="font-mono ml-1">
+                    <CopyableHash value={h} short={8} />
+                  </span>
+                ))}
+              </div>
+            );
+          }}
         >
           <InputField placeholder="Starting block number" value={abortBlock} onChange={setAbortBlock} />
         </ActionCard>
 
         <ActionCard title="Accept Blocks on L1" method="devnet_acceptOnL1" getParams={() => ({ starting_block_id: { block_number: parseInt(acceptBlock) } })}
-          renderResult={(d: any) => d?.accepted?.length > 0 && <div className="text-xs text-gray-200">Accepted {d.accepted.length} block(s)</div>}
+          renderResult={(data) => {
+            const accepted = isRecord(data) ? asStringArray(data.accepted) : undefined;
+            if (!accepted || accepted.length === 0) return null;
+            return <div className="text-xs text-gray-200">Accepted {accepted.length} block(s)</div>;
+          }}
         >
           <InputField placeholder="Starting block number" value={acceptBlock} onChange={setAcceptBlock} />
         </ActionCard>
 
         <ActionCard title="Set Time" method="devnet_setTime" getParams={() => ({ time: parseInt(setTimeVal), generate_block: setTimeGen })}
-          renderResult={(d: any) => d && <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">Timestamp</span><span className="font-mono text-gray-200">{new Date(d.block_timestamp * 1000).toLocaleString()}</span></div>{d.block_hash && <div className="flex justify-between"><span className="text-gray-400">Block Hash</span><CopyableHash value={d.block_hash} short={12}/></div>}</div>}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const ts = asNumber(data.block_timestamp);
+            if (ts == null) return null;
+            const blockHash = asString(data.block_hash);
+            return (
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Timestamp</span>
+                  <span className="font-mono text-gray-200">{new Date(ts * 1000).toLocaleString()}</span>
+                </div>
+                {blockHash && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Block Hash</span>
+                    <CopyableHash value={blockHash} short={12} />
+                  </div>
+                )}
+              </div>
+            );
+          }}
         >
           <div className="space-y-2">
             <InputField placeholder="Unix timestamp" value={setTimeVal} onChange={setSetTimeVal} />
@@ -237,7 +304,20 @@ export default function ControlPanel() {
         </ActionCard>
 
         <ActionCard title="Increase Time" method="devnet_increaseTime" getParams={() => ({ time: parseInt(increaseTimeVal) })}
-          renderResult={(d: any) => d && <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">+{d.timestamp_increased_by}s</span><span className="text-gray-200">Block: <CopyableHash value={d.block_hash} short={12}/></span></div></div>}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const increasedBy = asNumber(data.timestamp_increased_by);
+            const blockHash = asString(data.block_hash);
+            if (increasedBy == null || !blockHash) return null;
+            return (
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">+{increasedBy}s</span>
+                  <span className="text-gray-200">Block: <CopyableHash value={blockHash} short={12} /></span>
+                </div>
+              </div>
+            );
+          }}
         >
           <div className="flex items-center gap-2"><InputField placeholder="Seconds" value={increaseTimeVal} onChange={setIncreaseTimeVal} /><span className="text-xs text-gray-500">sec</span></div>
         </ActionCard>
@@ -250,7 +330,23 @@ export default function ControlPanel() {
           gas_price_fri: parseInt(gasFri || '0') * 1e9,
           data_gas_price_wei: parseInt(dataGasWei || '0') * 1e9,
           data_gas_price_fri: parseInt(dataGasFri || '0') * 1e9,
-        })} renderResult={(d: any) => d && <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">Gas (wei)</span><span className="font-mono text-gray-200">{d.gas_price_wei?.toLocaleString()}</span></div><div className="flex justify-between"><span className="text-gray-400">Gas (fri)</span><span className="font-mono text-gray-200">{d.gas_price_fri?.toLocaleString()}</span></div></div>}>
+        })} renderResult={(data) => {
+          if (!isRecord(data)) return null;
+          const wei = Number(asString(data.gas_price_wei) ?? data.gas_price_wei ?? 0);
+          const fri = Number(asString(data.gas_price_fri) ?? data.gas_price_fri ?? 0);
+          return (
+            <div className="text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Gas (wei)</span>
+                <span className="font-mono text-gray-200">{wei.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Gas (fri)</span>
+                <span className="font-mono text-gray-200">{fri.toLocaleString()}</span>
+              </div>
+            </div>
+          );
+        }}>
           <div className="grid grid-cols-2 gap-2">
             <div><label className="text-xs text-gray-500">Gas (Gwei)</label><input className="input w-full text-xs" value={gasWei} onChange={(e) => setGasWei(e.target.value)} /></div>
             <div><label className="text-xs text-gray-500">Gas (Gfri)</label><input className="input w-full text-xs" value={gasFri} onChange={(e) => setGasFri(e.target.value)} /></div>
@@ -262,9 +358,9 @@ export default function ControlPanel() {
 
         <ControlGroup title="State & Runtime" description="Persist, restore, or restart the devnet process state.">
         <ActionCard title="Dump State" method="devnet_dump" getParams={() => dumpPath ? { path: dumpPath } : {}} label="Dump"
-          renderResult={(d: any) => {
-            if (d === null || d === undefined) return <div className="text-xs text-gray-400">Saved to file</div>;
-            if (Array.isArray(d)) return <div className="text-xs text-gray-200">{d.length} event(s) in dump</div>;
+          renderResult={(data) => {
+            if (data === null || data === undefined) return <div className="text-xs text-gray-400">Saved to file</div>;
+            if (Array.isArray(data)) return <div className="text-xs text-gray-200">{data.length} event(s) in dump</div>;
             return null;
           }}
         >
@@ -304,17 +400,41 @@ export default function ControlPanel() {
         </ActionCard>
 
         <ActionCard title="Get Account Balance" method="devnet_getAccountBalance" getParams={() => ({ address: balanceAddr, unit: balanceUnit === 'ETH' ? 'WEI' : 'FRI' })} label="Get Balance"
-          renderResult={(d: any) => d && (<div className="text-xs"><div className="flex justify-between"><span className="text-gray-400">Balance</span><span className="font-mono text-gray-200">{formatHuman(d.amount, 18)} {d.unit === 'WEI' ? 'ETH' : 'STRK'}</span></div><div className="flex justify-between mt-1"><span className="text-gray-400">Raw</span><span className="font-mono text-gray-500">{d.amount}</span></div></div>)}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const amount = asString(data.amount);
+            if (!amount) return null;
+            const unit = data.unit === 'WEI' ? 'ETH' : 'STRK';
+            return (
+              <div className="text-xs">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Balance</span>
+                  <span className="font-mono text-gray-200">{formatTokenAmount(amount, 18)} {unit}</span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-gray-400">Raw</span>
+                  <span className="font-mono text-gray-500">{amount}</span>
+                </div>
+              </div>
+            );
+          }}
         >
           <div className="flex gap-2">
             <InputField placeholder="Address (0x...)" value={balanceAddr} onChange={setBalanceAddr} />
-            <select className="input text-xs" value={balanceUnit} onChange={(e) => setBalanceUnit(e.target.value as any)}>
+            <select
+              className="input text-xs"
+              value={balanceUnit}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'ETH' || v === 'STRK') setBalanceUnit(v);
+              }}
+            >
               <option value="STRK">STRK</option><option value="ETH">ETH</option></select>
           </div>
         </ActionCard>
 
         <ActionCard title="Get Predeployed Accounts" method="devnet_getPredeployedAccounts" getParams={() => ({ with_balance: false })} label="Fetch"
-          renderResult={(d: any) => Array.isArray(d) ? <div className="text-xs text-gray-200">{d.length} accounts listed</div> : null}
+          renderResult={(data) => Array.isArray(data) ? <div className="text-xs text-gray-200">{data.length} accounts listed</div> : null}
         >
           <p className="text-xs text-gray-400">List all predeployed accounts with addresses and keys.</p>
         </ActionCard>
@@ -322,7 +442,19 @@ export default function ControlPanel() {
 
         <ControlGroup title="Messaging" description="Operate the L1-L2 postman utilities.">
         <ActionCard title="Postman Flush" method="devnet_postmanFlush" getParams={() => ({ dry_run: false })} label="Flush"
-          renderResult={(d: any) => d && <div className="text-xs space-y-1"><div className="flex justify-between"><span className="text-gray-400">L2 → L1</span><span className="font-mono text-gray-200">{d.messages_to_l1?.length ?? 0}</span></div><div className="flex justify-between"><span className="text-gray-400">L1 → L2</span><span className="font-mono text-gray-200">{d.messages_to_l2?.length ?? 0}</span></div><div className="flex justify-between"><span className="text-gray-400">L2 TXs generated</span><span className="font-mono text-gray-200">{d.generated_l2_transactions?.length ?? 0}</span></div></div>}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const l1 = asStringArray(data.messages_to_l1)?.length ?? 0;
+            const l2 = asStringArray(data.messages_to_l2)?.length ?? 0;
+            const gen = asStringArray(data.generated_l2_transactions)?.length ?? 0;
+            return (
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between"><span className="text-gray-400">L2 → L1</span><span className="font-mono text-gray-200">{l1}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">L1 → L2</span><span className="font-mono text-gray-200">{l2}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">L2 TXs generated</span><span className="font-mono text-gray-200">{gen}</span></div>
+              </div>
+            );
+          }}
         >
           <p className="text-xs text-gray-400">Flush L1-L2 messages.</p>
         </ActionCard>
@@ -330,7 +462,17 @@ export default function ControlPanel() {
         <ActionCard title="Postman Load" method="devnet_postmanLoad" getParams={() => ({
           network_url: postmanUrl, address: postmanContract || undefined, deployer_account_private_key: postmanKey || undefined,
         })} label="Load"
-          renderResult={(d: any) => d?.messaging_contract_address && <div className="text-xs flex justify-between"><span className="text-gray-400">Messaging Contract</span><CopyableHash value={d.messaging_contract_address} short={12}/></div>}
+          renderResult={(data) => {
+            if (!isRecord(data)) return null;
+            const addr = asString(data.messaging_contract_address);
+            if (!addr) return null;
+            return (
+              <div className="text-xs flex justify-between">
+                <span className="text-gray-400">Messaging Contract</span>
+                <CopyableHash value={addr} short={12} />
+              </div>
+            );
+          }}
         >
           <div className="space-y-2">
             <InputField placeholder="Network URL" value={postmanUrl} onChange={setPostmanUrl} />

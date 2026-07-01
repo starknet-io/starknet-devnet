@@ -1,8 +1,7 @@
-import { devnetGetStatus, devnetGetConfig, callRpc } from './rpc-client';
-import type { DevnetConfig } from './types';
+import { devnetGetStatus, devnetGetConfig } from './rpc-client';
 
 /** Required devnet methods that must NOT be in restricted_methods */
-const REQUIRED_METHODS = [
+export const REQUIRED_METHODS = [
   'devnet_getStatus',
   'devnet_getConfig',
   'devnet_getPredeployedAccounts',
