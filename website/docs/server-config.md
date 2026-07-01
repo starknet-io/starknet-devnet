@@ -63,6 +63,10 @@ If, however, you need to customize the limits, you may rely on the following CLI
 
 The default upper limits configured in Devnet can be found [among constants](https://github.com/starknet-io/starknet-devnet/blob/main/crates/starknet-devnet-core/src/constants.rs#L121).
 
+## Web UI
+
+Opt in to the embedded [web UI explorer](./web-ui.md) with `--ui` (or the `UI` env var). When enabled, the UI is served on the same host and port as the JSON-RPC API, at `/ui`. The flag is reflected in `devnet_getConfig.server_config.ui_enabled`.
+
 ## API
 
 Retrieve the server config by sending a `JSON-RPC` request with method name `devnet_getConfig` and extracting its `server_config` property.
