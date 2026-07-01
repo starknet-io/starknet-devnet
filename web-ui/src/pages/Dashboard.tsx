@@ -194,7 +194,7 @@ export default function Dashboard() {
             <Link to="/config" className="text-sm text-starknet-purple hover:underline">Full config</Link>
           </div>
           <dl className="space-y-2 text-sm">
-            <InfoRow label="Protocol Version" value={displayStatus.protocol_version} />
+            <InfoRow label="RPC Version" value={displayStatus.protocol_version} />
             <InfoRow label="Pre-confirmed TXs" value={displayStatus.pre_confirmed_tx_count.toString()} />
             <InfoRow label="Auto-Impersonate" value={displayStatus.auto_impersonate ? 'Yes' : 'No'} />
             <InfoRow label="Impersonated Accounts" value={displayStatus.impersonated_accounts.length > 0 ? displayStatus.impersonated_accounts.length.toString() : 'None'} />
