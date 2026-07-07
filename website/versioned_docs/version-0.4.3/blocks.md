@@ -10,7 +10,7 @@ By default, Devnet starts with a genesis block labelled with number zero. In [fo
 
 ## Limits
 
-To read more about block limits, see [this](./intro#limits).
+To read more about block limits, see [this](./intro).
 
 ## Creating blocks on transaction
 
