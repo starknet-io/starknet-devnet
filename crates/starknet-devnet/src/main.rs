@@ -346,6 +346,7 @@ async fn main() -> Result<(), anyhow::Error> {
     );
 
     let api = Api::new(starknet, server_config);
+    let ui_enabled = api.server_config.ui_enabled;
     let json_rpc_handler = JsonRpcHandler::new(api.clone());
     if let Some(dump_path) = &starknet_config.dump_path {
         // Try to load events from the path. Since the same CLI parameter is used for dump and load
@@ -365,6 +366,9 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = serve_http_json_rpc(listener, &api.server_config, json_rpc_handler).await;
     info!("Starknet Devnet listening on {}", address);
+    if ui_enabled {
+        info!("Web UI explorer enabled at http://{}/ui", address);
+    }
 
     #[cfg(unix)]
     if let Ok(socket_path) = std::env::var("UNIX_SOCKET") {
