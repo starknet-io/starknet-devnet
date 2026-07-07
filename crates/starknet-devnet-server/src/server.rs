@@ -35,8 +35,13 @@ pub async fn serve_http_json_rpc(
 ) -> StarknetDevnetServer {
     let mut routes = Router::new()
         .route("/is_alive", get(|| async { "Alive!!!" })) // Only REST endpoint to simplify liveness probe
-        .merge(json_rpc_routes(json_rpc_handler.clone()))
-        .layer(TraceLayer::new_for_http());
+        .merge(json_rpc_routes(json_rpc_handler.clone()));
+
+    if server_config.ui_enabled {
+        routes = routes.merge(crate::ui::routes());
+    }
+
+    routes = routes.layer(TraceLayer::new_for_http());
 
     if server_config.log_response {
         routes = routes.layer(axum::middleware::from_fn(response_logging_middleware));

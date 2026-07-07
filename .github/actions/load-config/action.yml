@@ -8,6 +8,12 @@ outputs:
   rust_nightly_version:
     description: 'Nightly Rust version to use'
     value: 'nightly-2026-04-10'
+  node_lts_version:
+    description: 'Node.js LTS version to use (major only — picks latest minor)'
+    value: '24'
+  npm_version:
+    description: 'npm version to install globally after setup-node'
+    value: '11'
   docker_registry:
     description: 'Docker registry to use'
     value: 'docker.io'

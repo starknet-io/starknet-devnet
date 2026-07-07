@@ -11,5 +11,6 @@ pub mod server;
 pub mod subscribe;
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;
+mod ui;
 
 pub use config::ServerConfig;

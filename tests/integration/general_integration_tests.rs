@@ -57,6 +57,7 @@ async fn test_config() {
             "port": 0, // default value in tests, config not modified upon finding a free port
             "timeout": 121,
             "restricted_methods": null,
+            "ui_enabled": false,
         },
         "block_generation_on": "demand",
         "lite_mode": false,

@@ -13,6 +13,7 @@ pub struct ServerConfig {
     #[serde(skip)]
     pub log_response: bool,
     pub restricted_methods: Option<Vec<String>>,
+    pub ui_enabled: bool,
 }
 
 #[derive(Serialize)]
