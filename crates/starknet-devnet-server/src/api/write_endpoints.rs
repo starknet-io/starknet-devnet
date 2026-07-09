@@ -19,10 +19,10 @@ use super::models::{
 use crate::api::JsonRpcHandler;
 use crate::api::account_helpers::{get_balance, get_erc20_fee_unit_address};
 use crate::api::models::{
-    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock, DumpPath,
-    FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, MessageHash,
-    MessagingLoadAddress, MintTokensRequest, MintTokensResponse, PostmanLoadL1MessagingContract,
-    RestartParameters, SetTime, SetTimeResponse,
+    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock,
+    DumpRequest, FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, LoadRequest,
+    MessageHash, MessagingLoadAddress, MintTokensRequest, MintTokensResponse,
+    PostmanLoadL1MessagingContract, RestartParameters, SetTime, SetTimeResponse,
 };
 use crate::dump_util::{dump_events, load_events};
 use crate::rpc_core::error::RpcError;
@@ -110,33 +110,39 @@ impl JsonRpcHandler {
     }
 
     /// devnet_dump
-    pub async fn dump(&self, path: Option<DumpPath>) -> StrictRpcResult {
+    pub async fn dump(&self, request: DumpRequest) -> StrictRpcResult {
         if self.api.config.dump_on.is_none() {
             return Err(ApiError::DumpError {
                 msg: "Please provide --dump-on mode on startup.".to_string(),
             });
         }
 
-        let path = path
-            .as_ref()
-            .map(|DumpPath { path }| path.clone())
-            .or_else(|| self.api.config.dump_path.clone())
-            .unwrap_or_default();
-
         let dumpable_events = { self.api.dumpable_events.lock().await.clone() };
+
+        let path = if request.inline {
+            request.path.unwrap_or_default()
+        } else {
+            request.path.or_else(|| self.api.config.dump_path.clone()).unwrap_or_default()
+        };
 
         if !path.is_empty() {
             dump_events(&dumpable_events, &path)
                 .map_err(|err| ApiError::DumpError { msg: err.to_string() })?;
-            return Ok(DevnetResponse::DevnetDump(None).into());
+            if !request.inline {
+                return Ok(DevnetResponse::DevnetDump(None).into());
+            }
         }
 
         Ok(DevnetResponse::DevnetDump(Some(dumpable_events)).into())
     }
 
     /// devnet_load
-    pub async fn load(&self, path: String) -> StrictRpcResult {
-        let events = load_events(self.api.config.dump_on, &path)?;
+    pub async fn load(&self, request: LoadRequest) -> StrictRpcResult {
+        let events = match request {
+            LoadRequest::Path { path } => load_events(self.api.config.dump_on, &path)?,
+            LoadRequest::Events { events } => events,
+        };
+
         // Necessary to restart before loading; restarting messaging to allow re-execution
         self.restart(Some(RestartParameters { restart_l1_to_l2_messaging: true })).await?;
         self.re_execute(&events).await.map_err(ApiError::RpcError)?;

@@ -62,18 +62,10 @@ async fn dump_load_dump_load_without_path() {
         devnet_dump.create_block().await.unwrap();
         devnet_dump.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
     }
-    let dump_rpc = devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap().to_string();
-    let dump_file = UniqueAutoDeletableFile::new("dump_load_dump_load_on_request_nofile");
-    std::fs::write(&dump_file.path, dump_rpc).expect("Failed to write dump file");
+    let dump_rpc = devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
 
-    let devnet_load = BackgroundDevnet::spawn_with_additional_args(&[
-        "--dump-path",
-        &dump_file.path,
-        "--dump-on",
-        "request",
-    ])
-    .await
-    .expect("Could not start Devnet");
+    let devnet_load = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
+    devnet_load.send_custom_rpc("devnet_load", json!({ "events": dump_rpc })).await.unwrap();
 
     let last_block = devnet_load.get_latest_block_with_tx_hashes().await.unwrap();
     assert_eq!(last_block.block_number, 4);
@@ -369,10 +361,36 @@ async fn load_endpoint_fail_with_wrong_path() {
 
 #[tokio::test]
 async fn dump_load_endpoints_transaction_and_state_after_load_is_valid() {
-    // check if the dump with the default path "dump_endpoint" works as expected when json body
-    // is empty, later check if the dump with the custom path "dump_endpoint_custom_path"
-    // works
+    // check if the dump with empty params uses the startup path, later check if the dump with the
+    // custom path "dump_endpoint_custom_path" works
     let dump_file = UniqueAutoDeletableFile::new("dump_endpoint");
+    let inline_dump_file = UniqueAutoDeletableFile::new("dump_endpoint_force_inline");
+    let devnet_inline_dump = BackgroundDevnet::spawn_with_additional_args(&[
+        "--dump-path",
+        &inline_dump_file.path,
+        "--dump-on",
+        "exit",
+    ])
+    .await
+    .expect("Could not start Devnet");
+
+    devnet_inline_dump.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
+    let forced_inline_dump =
+        devnet_inline_dump.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    assert!(!Path::new(&inline_dump_file.path).exists());
+    assert!(forced_inline_dump.as_array().is_some_and(|events| !events.is_empty()));
+
+    let inline_path_dump_file = UniqueAutoDeletableFile::new("dump_endpoint_force_inline_path");
+    let forced_inline_path_dump = devnet_inline_dump
+        .send_custom_rpc(
+            "devnet_dump",
+            json!({ "path": inline_path_dump_file.path, "inline": true }),
+        )
+        .await
+        .unwrap();
+    assert!(Path::new(&inline_path_dump_file.path).exists());
+    assert!(forced_inline_path_dump.as_array().is_some_and(|events| !events.is_empty()));
+
     let devnet_dump = BackgroundDevnet::spawn_with_additional_args(&[
         "--dump-path",
         &dump_file.path,
@@ -383,15 +401,17 @@ async fn dump_load_endpoints_transaction_and_state_after_load_is_valid() {
     .expect("Could not start Devnet");
 
     let mint_tx_hash = devnet_dump.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
-    devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
+    let default_path_dump = devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
+    assert_eq!(default_path_dump, serde_json::Value::Null);
     assert!(Path::new(&dump_file.path).exists());
 
     let dump_file_custom = UniqueAutoDeletableFile::new("dump_endpoint_custom_path");
-    devnet_dump
+    let file_dump = devnet_dump
         .send_custom_rpc("devnet_dump", json!({ "path": dump_file_custom.path }))
         .await
         .unwrap();
     assert!(Path::new(&dump_file_custom.path).exists());
+    assert_eq!(file_dump, serde_json::Value::Null);
 
     // load and re-execute from "dump_endpoint" file and check if transaction and state of the
     // blockchain is valid

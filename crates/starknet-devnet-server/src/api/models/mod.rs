@@ -367,18 +367,21 @@ pub struct TransactionReceiptSubscriptionInput {
     pub finality_status: Option<Vec<TransactionFinalityStatusWithoutL1>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(Debug))]
-pub struct DumpPath {
-    pub path: String,
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub struct DumpRequest {
+    pub path: Option<String>,
+    #[serde(default)]
+    pub inline: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(Debug))]
-pub struct LoadPath {
-    pub path: String,
+#[derive(Deserialize, Clone)]
+#[serde(untagged, deny_unknown_fields)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub enum LoadRequest {
+    Path { path: String },
+    Events { events: Vec<RpcMethodCall> },
 }
 
 #[derive(Deserialize)]
