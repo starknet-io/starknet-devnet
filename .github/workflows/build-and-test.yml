@@ -148,8 +148,9 @@ jobs:
         with:
           workspaces: |
             . -> target
-            tests/integration -> tests/integration/target
+            tests/integration
           shared-key: ${{ runner.os }}-integration-test
+          add-rust-environment-hash-key: "false"
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1.8.0
