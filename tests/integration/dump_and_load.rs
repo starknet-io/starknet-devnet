@@ -385,6 +385,12 @@ async fn dump_endpoint_inline_with_block_mode() {
         .unwrap();
     assert!(Path::new(&custom_dump_file.path).exists());
     assert_eq!(inline_path_dump, inline_dump);
+
+    devnet.send_custom_rpc("devnet_load", json!({ "events": inline_dump.clone() })).await.unwrap();
+
+    let persisted_dump: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&dump_file.path).unwrap()).unwrap();
+    assert_eq!(persisted_dump, inline_dump);
 }
 
 #[tokio::test]

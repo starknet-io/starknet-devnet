@@ -1,3 +1,4 @@
+use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::{TransactionHash, felt_from_prefixed_hex};
@@ -24,7 +25,7 @@ use crate::api::models::{
     MessageHash, MessagingLoadAddress, MintTokensRequest, MintTokensResponse,
     PostmanLoadL1MessagingContract, RestartParameters, SetTime, SetTimeResponse,
 };
-use crate::dump_util::{dump_events, load_events};
+use crate::dump_util::{clear_dump_file, dump_events, load_events};
 use crate::rpc_core::error::RpcError;
 use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
@@ -137,7 +138,14 @@ impl JsonRpcHandler {
     pub async fn load(&self, request: LoadRequest) -> StrictRpcResult {
         let events = match request {
             LoadRequest::Path { path } => load_events(self.api.config.dump_on, &path)?,
-            LoadRequest::Events { events } => events,
+            LoadRequest::Events { events } => {
+                if let (Some(DumpOn::Block), Some(path)) =
+                    (self.api.config.dump_on, self.api.config.dump_path.as_deref())
+                {
+                    clear_dump_file(path)?;
+                }
+                events
+            }
         };
 
         // Necessary to restart before loading; restarting messaging to allow re-execution

@@ -203,7 +203,23 @@ async fn should_load_correct_devnet_with_state_modified_via_ws() {
         )
         .await
         .unwrap();
-        assert_eq!(dump_resp, json!({ "jsonrpc": "2.0", "id": 0, "result": null }));
+        assert_eq!(
+            dump_resp,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 0,
+                "result": [{
+                    "jsonrpc": "2.0",
+                    "method": "devnet_mint",
+                    "params": {
+                        "address": mint_address,
+                        "amount": mint_amount,
+                        "unit": "FRI"
+                    },
+                    "id": 0
+                }]
+            })
+        );
 
         send_ctrl_c_signal_and_wait(&devnet_dumpable.process).await;
     }
