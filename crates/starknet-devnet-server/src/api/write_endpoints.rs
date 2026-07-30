@@ -118,7 +118,8 @@ impl JsonRpcHandler {
             });
         }
 
-        let dumpable_events = { self.api.dumpable_events.lock().await.clone() };
+        // Keep the event snapshot and any file rewrite synchronized with block-mode appends.
+        let dumpable_events = self.api.dumpable_events.lock().await;
 
         let path = if request.inline {
             request.path.unwrap_or_default()
@@ -131,11 +132,13 @@ impl JsonRpcHandler {
                 .map_err(|err| ApiError::DumpError { msg: err.to_string() })?;
         }
 
-        Ok(DevnetResponse::DevnetDump(Some(dumpable_events)).into())
+        Ok(DevnetResponse::DevnetDump(Some(dumpable_events.clone())).into())
     }
 
     /// devnet_load
     pub async fn load(&self, request: LoadRequest) -> StrictRpcResult {
+        // Serialize file reads and clears with block-mode appends and endpoint rewrites.
+        let dumpable_events = self.api.dumpable_events.lock().await;
         let events = match request {
             LoadRequest::Path { path } => load_events(self.api.config.dump_on, &path)?,
             LoadRequest::Events { events } => {
@@ -147,6 +150,8 @@ impl JsonRpcHandler {
                 events
             }
         };
+        // Re-execution records the loaded events, so release the lock before restarting.
+        drop(dumpable_events);
 
         // Necessary to restart before loading; restarting messaging to allow re-execution
         self.restart(Some(RestartParameters { restart_l1_to_l2_messaging: true })).await?;

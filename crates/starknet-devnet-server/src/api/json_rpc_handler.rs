@@ -643,12 +643,13 @@ impl JsonRpcHandler {
                     .dump_path
                     .as_deref()
                     .ok_or(RpcError::internal_error_with("Undefined dump path"))?;
+                let mut dumpable_events = self.api.dumpable_events.lock().await;
 
                 dump_event(event, path).map_err(|e| {
                     let msg = format!("Failed dumping of {}: {e}", event.method);
                     RpcError::internal_error_with(msg)
                 })?;
-                self.api.dumpable_events.lock().await.push(event.clone());
+                dumpable_events.push(event.clone());
             }
             Some(DumpOn::Request | DumpOn::Exit) => {
                 self.api.dumpable_events.lock().await.push(event.clone())
