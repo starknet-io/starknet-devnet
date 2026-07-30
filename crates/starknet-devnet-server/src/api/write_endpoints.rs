@@ -128,9 +128,6 @@ impl JsonRpcHandler {
         if !path.is_empty() {
             dump_events(&dumpable_events, &path)
                 .map_err(|err| ApiError::DumpError { msg: err.to_string() })?;
-            if !request.inline {
-                return Ok(DevnetResponse::DevnetDump(None).into());
-            }
         }
 
         Ok(DevnetResponse::DevnetDump(Some(dumpable_events)).into())

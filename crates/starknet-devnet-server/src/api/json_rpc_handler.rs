@@ -648,6 +648,7 @@ impl JsonRpcHandler {
                     let msg = format!("Failed dumping of {}: {e}", event.method);
                     RpcError::internal_error_with(msg)
                 })?;
+                self.api.dumpable_events.lock().await.push(event.clone());
             }
             Some(DumpOn::Request | DumpOn::Exit) => {
                 self.api.dumpable_events.lock().await.push(event.clone())

@@ -360,6 +360,34 @@ async fn load_endpoint_fail_with_wrong_path() {
 }
 
 #[tokio::test]
+async fn dump_endpoint_inline_with_block_mode() {
+    let dump_file = UniqueAutoDeletableFile::new("dump_endpoint_inline_block_mode");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--dump-path",
+        &dump_file.path,
+        "--dump-on",
+        "block",
+    ])
+    .await
+    .expect("Could not start Devnet");
+
+    devnet.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
+
+    let inline_dump =
+        devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    assert!(inline_dump.as_array().is_some_and(|events| !events.is_empty()));
+
+    let custom_dump_file =
+        UniqueAutoDeletableFile::new("dump_endpoint_inline_block_mode_custom_path");
+    let inline_path_dump = devnet
+        .send_custom_rpc("devnet_dump", json!({ "path": custom_dump_file.path, "inline": true }))
+        .await
+        .unwrap();
+    assert!(Path::new(&custom_dump_file.path).exists());
+    assert_eq!(inline_path_dump, inline_dump);
+}
+
+#[tokio::test]
 async fn dump_load_endpoints_transaction_and_state_after_load_is_valid() {
     // check if the dump with empty params uses the startup path, later check if the dump with the
     // custom path "dump_endpoint_custom_path" works
@@ -402,7 +430,7 @@ async fn dump_load_endpoints_transaction_and_state_after_load_is_valid() {
 
     let mint_tx_hash = devnet_dump.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
     let default_path_dump = devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
-    assert_eq!(default_path_dump, serde_json::Value::Null);
+    assert!(default_path_dump.as_array().is_some_and(|events| !events.is_empty()));
     assert!(Path::new(&dump_file.path).exists());
 
     let dump_file_custom = UniqueAutoDeletableFile::new("dump_endpoint_custom_path");
@@ -411,7 +439,7 @@ async fn dump_load_endpoints_transaction_and_state_after_load_is_valid() {
         .await
         .unwrap();
     assert!(Path::new(&dump_file_custom.path).exists());
-    assert_eq!(file_dump, serde_json::Value::Null);
+    assert_eq!(file_dump, default_path_dump);
 
     // load and re-execute from "dump_endpoint" file and check if transaction and state of the
     // blockchain is valid
