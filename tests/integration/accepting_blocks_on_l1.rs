@@ -1,6 +1,6 @@
 use serde_json::json;
 use starknet_rs_core::types::{
-    BlockId, BlockStatus, BlockTag, Felt, MaybePreConfirmedBlockWithTxHashes,
+    BlockId, BlockStatus, BlockTag, EventFilter, Felt, MaybePreConfirmedBlockWithTxHashes,
     SequencerTransactionStatus, StarknetError, TransactionFinalityStatus,
 };
 use starknet_rs_providers::{Provider, ProviderError};
@@ -279,6 +279,66 @@ async fn should_move_origin_l1_boundary_without_accepting_newer_blocks() {
         err,
         RpcError { code: -1, message: "Block already accepted on L1".into(), data: None }
     );
+}
+
+#[tokio::test]
+async fn l1_accepted_should_use_overlay_for_non_status_requests() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_genesis = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    send_dummy_tx(&origin_devnet).await;
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+
+    fork_devnet.accept_on_l1(&BlockId::Number(origin_genesis.block_number)).await.unwrap();
+
+    let expected_count = origin_devnet
+        .json_rpc_client
+        .get_block_transaction_count(BlockId::Number(origin_genesis.block_number))
+        .await
+        .unwrap();
+    let fork_block_count = origin_devnet
+        .json_rpc_client
+        .get_block_transaction_count(BlockId::Tag(BlockTag::Latest))
+        .await
+        .unwrap();
+    assert_ne!(expected_count, fork_block_count);
+
+    let actual_count = fork_devnet
+        .json_rpc_client
+        .get_block_transaction_count(BlockId::Tag(BlockTag::L1Accepted))
+        .await
+        .unwrap();
+
+    assert_eq!(actual_count, expected_count);
+}
+
+#[tokio::test]
+async fn l1_accepted_should_use_overlay_for_event_ranges() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_genesis = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    send_dummy_tx(&origin_devnet).await;
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+
+    fork_devnet.accept_on_l1(&BlockId::Number(origin_genesis.block_number)).await.unwrap();
+
+    let events = fork_devnet
+        .json_rpc_client
+        .get_events(
+            EventFilter {
+                from_block: Some(BlockId::Tag(BlockTag::L1Accepted)),
+                to_block: Some(BlockId::Tag(BlockTag::L1Accepted)),
+                address: None,
+                keys: None,
+            },
+            None,
+            100,
+        )
+        .await
+        .unwrap();
+
+    assert!(events.events.iter().all(|event| {
+        event.block_number == Some(origin_genesis.block_number)
+            && event.block_hash == Some(origin_genesis.block_hash)
+    }));
 }
 
 #[tokio::test]

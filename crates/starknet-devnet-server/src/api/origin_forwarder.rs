@@ -134,8 +134,7 @@ impl OriginForwarder {
         let accepted_on_l1_through = self.acceptance.read().await.accepted_on_l1_through;
         let interception =
             AcceptanceResponseKind::from_method(&rpc_call.method).zip(accepted_on_l1_through);
-        let forwarded_call =
-            self.clone_call_with_origin_block_id(rpc_call, interception.map(|(_, number)| number));
+        let forwarded_call = self.clone_call_with_origin_block_id(rpc_call, accepted_on_l1_through);
         let origin_rpc_resp: RpcResponse = self
             .reqwest_client
             .post(self.url.to_string())
@@ -366,6 +365,10 @@ impl OriginForwarder {
         block_id: BlockId,
     ) -> Result<u64, ApiError> {
         if block_id == BlockId::Tag(BlockTag::L1Accepted) {
+            if let Some(block_number) = self.acceptance.read().await.accepted_on_l1_through {
+                return Ok(block_number);
+            }
+
             let l1_accepted_block = self.get_l1_accepted_block().await?;
             return Ok(std::cmp::min(l1_accepted_block.block_number, self.fork_block_number()));
         }
