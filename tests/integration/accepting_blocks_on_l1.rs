@@ -1,12 +1,14 @@
+use serde_json::json;
 use starknet_rs_core::types::{
     BlockId, BlockStatus, BlockTag, Felt, MaybePreConfirmedBlockWithTxHashes,
-    SequencerTransactionStatus, StarknetError,
+    SequencerTransactionStatus, StarknetError, TransactionFinalityStatus,
 };
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::assert_eq_prop;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::errors::RpcError;
+use crate::common::utils::{UniqueAutoDeletableFile, send_ctrl_c_signal_and_wait};
 
 /// Returns the hash of the dummy tx
 async fn send_dummy_tx(devnet: &BackgroundDevnet) -> Felt {
@@ -47,6 +49,14 @@ async fn assert_latest_accepted_on_l2(devnet: &BackgroundDevnet) -> Result<(), a
     }
 
     Ok(())
+}
+
+async fn assert_block_status(devnet: &BackgroundDevnet, block_hash: Felt, expected: BlockStatus) {
+    match devnet.json_rpc_client.get_block_with_tx_hashes(BlockId::Hash(block_hash)).await.unwrap()
+    {
+        MaybePreConfirmedBlockWithTxHashes::Block(block) => assert_eq!(block.status, expected),
+        other => panic!("Unexpected block response: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -172,6 +182,157 @@ async fn origin_block_should_be_acceptable_on_l1() {
 
     origin_block.status = BlockStatus::AcceptedOnL1;
     assert_eq!(origin_block, l1_accepted_block);
+}
+
+#[tokio::test]
+async fn should_accept_local_and_origin_blocks_on_l1_in_forking_mode() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_genesis = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    let first_origin_tx = send_dummy_tx(&origin_devnet).await;
+    let first_origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let second_origin_tx = send_dummy_tx(&origin_devnet).await;
+    let second_origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+    let local_block = fork_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    // Forwarding is unchanged before devnet_acceptOnL1 activates the overlay.
+    assert_block_status(&fork_devnet, second_origin_block.block_hash, BlockStatus::AcceptedOnL2)
+        .await;
+
+    let accepted = fork_devnet.accept_on_l1(&BlockId::Tag(BlockTag::Latest)).await.unwrap();
+    assert_eq!(accepted, vec![local_block.block_hash]);
+
+    for block_hash in [
+        local_block.block_hash,
+        second_origin_block.block_hash,
+        first_origin_block.block_hash,
+        origin_genesis.block_hash,
+    ] {
+        assert_block_status(&fork_devnet, block_hash, BlockStatus::AcceptedOnL1).await;
+    }
+
+    assert_accepted_on_l1(
+        &fork_devnet,
+        &[second_origin_block.block_hash, first_origin_block.block_hash],
+        &[first_origin_tx, second_origin_tx],
+    )
+    .await
+    .unwrap();
+
+    let receipt =
+        fork_devnet.json_rpc_client.get_transaction_receipt(first_origin_tx).await.unwrap().receipt;
+    assert_eq!(receipt.finality_status(), &TransactionFinalityStatus::AcceptedOnL1);
+
+    // The overlay must not mutate the origin itself.
+    assert_block_status(&origin_devnet, second_origin_block.block_hash, BlockStatus::AcceptedOnL2)
+        .await;
+    let origin_tx_status =
+        origin_devnet.json_rpc_client.get_transaction_status(first_origin_tx).await.unwrap();
+    assert_eq!(origin_tx_status.finality_status(), SequencerTransactionStatus::AcceptedOnL2);
+}
+
+#[tokio::test]
+async fn should_move_origin_l1_boundary_without_accepting_newer_blocks() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_genesis = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    let first_origin_tx = send_dummy_tx(&origin_devnet).await;
+    let first_origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let second_origin_tx = send_dummy_tx(&origin_devnet).await;
+    let second_origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+    let local_block = fork_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+
+    let accepted = fork_devnet.accept_on_l1(&BlockId::Number(1)).await.unwrap();
+    assert!(accepted.is_empty());
+
+    assert_block_status(&fork_devnet, origin_genesis.block_hash, BlockStatus::AcceptedOnL1).await;
+    assert_block_status(&fork_devnet, first_origin_block.block_hash, BlockStatus::AcceptedOnL1)
+        .await;
+    assert_block_status(&fork_devnet, second_origin_block.block_hash, BlockStatus::AcceptedOnL2)
+        .await;
+    assert_block_status(&fork_devnet, local_block.block_hash, BlockStatus::AcceptedOnL2).await;
+
+    let first_status =
+        fork_devnet.json_rpc_client.get_transaction_status(first_origin_tx).await.unwrap();
+    let second_status =
+        fork_devnet.json_rpc_client.get_transaction_status(second_origin_tx).await.unwrap();
+    assert_eq!(first_status.finality_status(), SequencerTransactionStatus::AcceptedOnL1);
+    assert_eq!(second_status.finality_status(), SequencerTransactionStatus::AcceptedOnL2);
+
+    let l1_accepted = fork_devnet.get_l1_accepted_block_with_tx_hashes().await.unwrap();
+    assert_eq!(l1_accepted.block_hash, first_origin_block.block_hash);
+
+    let accepted =
+        fork_devnet.accept_on_l1(&BlockId::Hash(second_origin_block.block_hash)).await.unwrap();
+    assert!(accepted.is_empty());
+    assert_block_status(&fork_devnet, second_origin_block.block_hash, BlockStatus::AcceptedOnL1)
+        .await;
+    assert_block_status(&fork_devnet, local_block.block_hash, BlockStatus::AcceptedOnL2).await;
+
+    let err =
+        fork_devnet.accept_on_l1(&BlockId::Hash(second_origin_block.block_hash)).await.unwrap_err();
+    assert_eq!(
+        err,
+        RpcError { code: -1, message: "Block already accepted on L1".into(), data: None }
+    );
+}
+
+#[tokio::test]
+async fn restart_should_clear_origin_acceptance_overlay() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    send_dummy_tx(&origin_devnet).await;
+    let origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+
+    fork_devnet.accept_on_l1(&BlockId::Number(origin_block.block_number)).await.unwrap();
+    assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL1).await;
+
+    fork_devnet.restart().await;
+    assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL2).await;
+}
+
+#[tokio::test]
+async fn dump_and_load_should_reconstruct_origin_acceptance_overlay() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_tx = send_dummy_tx(&origin_devnet).await;
+    let origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--fork-network",
+        &origin_devnet.url,
+        "--dump-on",
+        "request",
+    ])
+    .await
+    .unwrap();
+    let dump_file = UniqueAutoDeletableFile::new("fork_origin_acceptance");
+
+    fork_devnet.accept_on_l1(&BlockId::Number(origin_block.block_number)).await.unwrap();
+    fork_devnet.send_custom_rpc("devnet_dump", json!({ "path": dump_file.path })).await.unwrap();
+
+    fork_devnet.restart().await;
+    assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL2).await;
+
+    fork_devnet.send_custom_rpc("devnet_load", json!({ "path": dump_file.path })).await.unwrap();
+    assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL1).await;
+    let tx_status = fork_devnet.json_rpc_client.get_transaction_status(origin_tx).await.unwrap();
+    assert_eq!(tx_status.finality_status(), SequencerTransactionStatus::AcceptedOnL1);
+}
+
+#[tokio::test]
+async fn local_acceptance_should_not_require_origin() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    send_dummy_tx(&origin_devnet).await;
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+    let local_block = fork_devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    send_ctrl_c_signal_and_wait(&origin_devnet.process).await;
+
+    let accepted = fork_devnet.accept_on_l1(&BlockId::Tag(BlockTag::Latest)).await.unwrap();
+    assert_eq!(accepted, vec![local_block.block_hash]);
+    assert_block_status(&fork_devnet, local_block.block_hash, BlockStatus::AcceptedOnL1).await;
 }
 
 #[tokio::test]

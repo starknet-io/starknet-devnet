@@ -145,7 +145,10 @@ When aborting the currently `pre_confirmed` block, it is mined and aborted as la
 
 ## Accepting blocks on L1
 
-This functionality allows simulating block acceptance on L1 (Ethereum). It merely marks the requested blocks and their transactions as `ACCEPTED_ON_L1`. It is only supported on blocks that are `ACCEPTED_ON_L2` and fails for all others, including blocks already `ACCEPTED_ON_L1`. In case of [forking](./forking), blocks on forking origin cannot be affected by this feature.
+This functionality allows simulating block acceptance on L1 (Ethereum). It merely marks the requested blocks and their transactions as `ACCEPTED_ON_L1`. It is only supported on blocks that are `ACCEPTED_ON_L2` and fails for all others, including blocks already `ACCEPTED_ON_L1`.
+
+In [forking](./forking) mode, the simulation also applies to blocks and transactions from the forking origin. Their status is overridden only in the forked Devnet; the origin itself is not modified.
+Origin block hashes are not included in the `accepted` response; it lists only locally generated Devnet blocks.
 
 :::note
 
