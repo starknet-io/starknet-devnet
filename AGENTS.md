@@ -14,8 +14,9 @@ make verify
 ```
 
 Run `make integration` when a change affects the running server, RPC behavior, contracts,
-or integration tests. It requires Foundry's `anvil`. `make ci` runs the full local
-CI-equivalent suite and also requires LLVM 19 for the all-features Rust checks.
+or integration tests. It requires Foundry's `anvil`. `make verify` (and therefore `make ci`)
+requires LLVM 19 for the `--all-features` Rust checks in `check`/`lint`; `make doctor` only
+warns when LLVM is missing and still exits 0. `make ci` also runs spelling and integration.
 
 Use `make help` to see every target. State which targets you ran in the final handoff and
 name any skipped target with its reason.
