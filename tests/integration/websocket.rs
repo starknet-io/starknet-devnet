@@ -1,21 +1,40 @@
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
-use serde_json::json;
+use serde_json::{Value, json};
 use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
 use starknet_rs_core::types::{
     BroadcastedDeclareTransactionV3, DataAvailabilityMode, Felt, Transaction,
 };
 use starknet_rs_signers::Signer;
-use tokio_tungstenite::connect_async;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, LocalFee, UniqueAutoDeletableFile, assert_no_notifications,
-    get_simple_contract_artifacts, send_binary_rpc_via_ws, send_ctrl_c_signal_and_wait,
-    send_text_rpc_via_ws, subscribe,
+    get_simple_contract_artifacts, receive_rpc_via_ws, send_binary_rpc_via_ws,
+    send_ctrl_c_signal_and_wait, send_text_rpc_via_ws, subscribe,
 };
+
+async fn send_batch_via_ws(
+    ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    message: Message,
+) -> Value {
+    ws.send(message).await.unwrap();
+    receive_rpc_via_ws(ws).await.unwrap()
+}
+
+fn get_response_by_id(batch_response: &Value, id: i64) -> &Value {
+    batch_response
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|response| response.get("id") == Some(&json!(id)))
+        .unwrap()
+}
 
 #[tokio::test]
 async fn mint_and_check_tx_via_websocket() {
@@ -63,6 +82,44 @@ async fn create_block_via_binary_ws_message() {
     let block_resp_after =
         send_binary_rpc_via_ws(&mut ws, "starknet_getBlockWithTxs", block_specifier).await.unwrap();
     assert_eq!(block_resp_after["result"]["block_number"], 1);
+}
+
+#[tokio::test]
+async fn batch_requests_via_text_ws_message() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+
+    let batch = json!([
+        { "jsonrpc": "2.0", "id": 11, "method": "starknet_specVersion" },
+        { "jsonrpc": "2.0", "id": 12, "method": "starknet_blockNumber" },
+    ]);
+    let batch_response = send_batch_via_ws(&mut ws, Message::Text(batch.to_string().into())).await;
+
+    assert_eq!(batch_response.as_array().unwrap().len(), 2);
+    assert_eq!(get_response_by_id(&batch_response, 11)["result"], "0.10.2");
+    assert_eq!(get_response_by_id(&batch_response, 12)["result"], 0);
+}
+
+#[tokio::test]
+async fn batch_requests_via_binary_ws_message_include_individual_errors() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+
+    let batch = json!([
+        { "jsonrpc": "2.0", "id": 21, "method": "starknet_blockNumber" },
+        { "jsonrpc": "2.0", "id": 22, "method": "starknet_invalid" },
+        { "jsonrpc": "2.0", "id": 23, "method": "starknet_subscribeNewHeads" },
+        { "jsonrpc": "2.0", "id": 24, "method": "devnet_getConfig" },
+    ]);
+    let batch_response =
+        send_batch_via_ws(&mut ws, Message::Binary(serde_json::to_vec(&batch).unwrap().into()))
+            .await;
+
+    assert_eq!(batch_response.as_array().unwrap().len(), 4);
+    assert_eq!(get_response_by_id(&batch_response, 21)["result"], 0);
+    assert_eq!(get_response_by_id(&batch_response, 22)["error"]["code"], -32601);
+    assert_eq!(get_response_by_id(&batch_response, 23)["error"]["code"], -32601);
+    assert!(get_response_by_id(&batch_response, 24)["result"].is_object());
 }
 
 #[tokio::test]
