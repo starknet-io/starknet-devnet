@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -15,8 +16,8 @@ use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, LocalFee, UniqueAutoDeletableFile, assert_no_notifications,
-    get_simple_contract_artifacts, receive_rpc_via_ws, send_binary_rpc_via_ws,
-    send_ctrl_c_signal_and_wait, send_text_rpc_via_ws, subscribe,
+    get_simple_contract_artifacts, send_binary_rpc_via_ws, send_ctrl_c_signal_and_wait,
+    send_text_rpc_via_ws, subscribe,
 };
 
 async fn send_batch_via_ws(
@@ -24,7 +25,13 @@ async fn send_batch_via_ws(
     message: Message,
 ) -> Value {
     ws.send(message).await.unwrap();
-    receive_rpc_via_ws(ws).await.unwrap()
+    let response = tokio::time::timeout(Duration::from_secs(10), ws.next())
+        .await
+        .expect("Timed out waiting for WebSocket batch response")
+        .expect("No response in WebSocket stream")
+        .expect("Failed to read WebSocket batch response");
+
+    serde_json::from_slice(&response.into_data()).unwrap()
 }
 
 fn get_response_by_id(batch_response: &Value, id: i64) -> &Value {
