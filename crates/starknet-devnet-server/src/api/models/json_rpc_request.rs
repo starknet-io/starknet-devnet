@@ -14,9 +14,9 @@ use crate::api::models::{
     BlockAndContractAddressInput, BlockAndIndexInput, BlockIdAndFlagsInput, BlockIdInput,
     BlockTransactionTracesInput, BroadcastedDeclareTransactionInput,
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionInput, CallInput,
-    ClassHashInput, DumpPath, EstimateFeeInput, EventsInput, EventsSubscriptionInput,
+    ClassHashInput, DumpRequest, EstimateFeeInput, EventsInput, EventsSubscriptionInput,
     FlushParameters, GetStorageInput, GetStorageProofInput, IncreaseTime, JsonRpcResponse,
-    L1TransactionHashInput, LoadPath, MintTokensRequest, PostmanLoadL1MessagingContract,
+    L1TransactionHashInput, LoadRequest, MintTokensRequest, PostmanLoadL1MessagingContract,
     ProveTransactionInput, RestartParameters, SetTime, SimulateTransactionsInput, StateUpdateInput,
     SubscriptionBlockIdInput, SubscriptionIdInput, TransactionHashAndFlagsInput,
     TransactionHashInput, TransactionReceiptSubscriptionInput, TransactionSubscriptionInput,
@@ -148,9 +148,9 @@ pub enum DevnetSpecRequest {
     #[serde(rename = "devnet_stopAutoImpersonate", with = "empty_params")]
     StopAutoImpersonate,
     #[serde(rename = "devnet_dump", with = "optional_params")]
-    Dump(Option<DumpPath>),
+    Dump(Option<DumpRequest>),
     #[serde(rename = "devnet_load")]
-    Load(LoadPath),
+    Load(LoadRequest),
     #[serde(rename = "devnet_postmanLoad")]
     PostmanLoadL1MessagingContract(PostmanLoadL1MessagingContract),
     #[serde(rename = "devnet_postmanFlush", with = "optional_params")]

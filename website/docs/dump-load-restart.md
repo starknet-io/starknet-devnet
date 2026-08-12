@@ -20,13 +20,15 @@ $ starknet-devnet --dump-on block --dump-path <PATH>
 
 ### Dumping on request
 
-You can request dumping via JSON-RPC. An optional file path can be provided in the request or on startup via `--dump-path <FILE>` (the HTTP request parameter takes precedence). If no dumping path is specified, the dump is included in the response body. This means that if you request dumping via [`curl`](https://curl.se/), it will be printed to STDOUT, which you can then redirect to a destination of your choice.
+You can request dumping via JSON-RPC. An optional file path can be provided in the request or on startup via `--dump-path <FILE>` (the JSON-RPC request parameter takes precedence). The dumped events are always included in the response, including when they are also written to a file.
+
+By default, a request without a `path` uses the path supplied through `--dump-path`, if one was configured. Set `inline` to `true` to ignore that startup path and return the events without writing to it. A `path` supplied in the same request is still written to, even when `inline` is `true`.
 
 ```
 $ starknet-devnet --dump-on <MODE> [--dump-path <FILE>]
 ```
 
-- No body parameters:
+- Use the startup path if configured; otherwise return the events without writing a file:
 
 ```
 JSON-RPC
@@ -37,7 +39,7 @@ JSON-RPC
 }
 ```
 
-- With a custom path:
+- Write to a custom path and return the events:
 
 ```
 JSON-RPC
@@ -52,6 +54,20 @@ JSON-RPC
 }
 ```
 
+- Return the events without writing to the startup path:
+
+```
+JSON-RPC
+{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "devnet_dump",
+    "params": {
+        "inline": true
+    }
+}
+```
+
 ## Loading
 
 To load a preserved Devnet instance, the options are:
@@ -62,7 +78,9 @@ To load a preserved Devnet instance, the options are:
 $ starknet-devnet --dump-path <PATH>
 ```
 
-- Loading on request, which replaces the current state with the one in the provided file. It can be done via JSON-RPC:
+- Loading on request, which replaces the current state by re-executing events. Provide either a dump file path or dumped events directly in the request body.
+
+To load from a file:
 
 ```
 JSON-RPC
@@ -75,6 +93,24 @@ JSON-RPC
     }
 }
 ```
+
+To load events directly:
+
+```
+JSON-RPC
+{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "devnet_load",
+    "params": {
+        "events": [
+            // events returned by devnet_dump
+        ]
+    }
+}
+```
+
+The `path` and `events` parameters are mutually exclusive. Passing both, or neither, results in an invalid-params error.
 
 ### Loading disclaimer
 
