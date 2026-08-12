@@ -251,7 +251,28 @@ impl JsonRpcHandler {
 
     /// devnet_acceptOnL1
     pub async fn accept_on_l1(&self, data: AcceptOnL1Request) -> StrictRpcResult {
-        let accepted = self.api.starknet.lock().await.accept_on_l1(data.starting_block_id)?;
+        let Some(origin_caller) = &self.origin_caller else {
+            let accepted = self.api.starknet.lock().await.accept_on_l1(data.starting_block_id)?;
+            return Ok(DevnetResponse::AcceptedOnL1Blocks(AcceptedOnL1Blocks { accepted }).into());
+        };
+
+        let _acceptance_guard = origin_caller.acceptance_lock.lock().await;
+        let local_acceptance = self.api.starknet.lock().await.accept_on_l1(data.starting_block_id);
+
+        let accepted = match local_acceptance {
+            Ok(accepted) => {
+                origin_caller.set_accepted_on_l1_through(origin_caller.fork_block_number()).await;
+                accepted
+            }
+            Err(starknet_core::error::Error::NoBlock) => {
+                let origin_block_number =
+                    origin_caller.resolve_origin_block_number(data.starting_block_id).await?;
+                origin_caller.set_accepted_on_l1_through(origin_block_number).await;
+                Vec::new()
+            }
+            Err(error) => return Err(ApiError::StarknetDevnetError(error)),
+        };
+
         Ok(DevnetResponse::AcceptedOnL1Blocks(AcceptedOnL1Blocks { accepted }).into())
     }
 
@@ -267,8 +288,16 @@ impl JsonRpcHandler {
     pub async fn restart(&self, data: Option<RestartParameters>) -> StrictRpcResult {
         self.api.dumpable_events.lock().await.clear();
 
+        let _acceptance_guard = if let Some(origin_caller) = &self.origin_caller {
+            Some(origin_caller.acceptance_lock.lock().await)
+        } else {
+            None
+        };
         let restart_params = data.unwrap_or_default();
         self.api.starknet.lock().await.restart(restart_params.restart_l1_to_l2_messaging)?;
+        if let Some(origin_caller) = &self.origin_caller {
+            origin_caller.reset_acceptance().await;
+        }
 
         self.api.sockets.lock().await.clear();
 

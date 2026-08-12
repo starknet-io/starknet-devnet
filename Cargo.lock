@@ -7761,6 +7761,7 @@ dependencies = [
  "futures",
  "http-body-util",
  "lazy_static",
+ "lru 0.16.4",
  "prometheus",
  "rand 0.9.4",
  "rand_chacha 0.9.0",
