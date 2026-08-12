@@ -1,3 +1,4 @@
+use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::{TransactionHash, felt_from_prefixed_hex};
@@ -19,12 +20,12 @@ use super::models::{
 use crate::api::JsonRpcHandler;
 use crate::api::account_helpers::{get_balance, get_erc20_fee_unit_address};
 use crate::api::models::{
-    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock, DumpPath,
-    FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, MessageHash,
-    MessagingLoadAddress, MintTokensRequest, MintTokensResponse, PostmanLoadL1MessagingContract,
-    RestartParameters, SetTime, SetTimeResponse,
+    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock,
+    DumpRequest, FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, LoadRequest,
+    MessageHash, MessagingLoadAddress, MintTokensRequest, MintTokensResponse,
+    PostmanLoadL1MessagingContract, RestartParameters, SetTime, SetTimeResponse,
 };
-use crate::dump_util::{dump_events, load_events};
+use crate::dump_util::{clear_dump_file, dump_events, load_events};
 use crate::rpc_core::error::RpcError;
 use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
@@ -110,33 +111,48 @@ impl JsonRpcHandler {
     }
 
     /// devnet_dump
-    pub async fn dump(&self, path: Option<DumpPath>) -> StrictRpcResult {
+    pub async fn dump(&self, request: DumpRequest) -> StrictRpcResult {
         if self.api.config.dump_on.is_none() {
             return Err(ApiError::DumpError {
                 msg: "Please provide --dump-on mode on startup.".to_string(),
             });
         }
 
-        let path = path
-            .as_ref()
-            .map(|DumpPath { path }| path.clone())
-            .or_else(|| self.api.config.dump_path.clone())
-            .unwrap_or_default();
+        // Keep the event snapshot and any file rewrite synchronized with block-mode appends.
+        let dumpable_events = self.api.dumpable_events.lock().await;
 
-        let dumpable_events = { self.api.dumpable_events.lock().await.clone() };
+        let path = if request.inline {
+            request.path.unwrap_or_default()
+        } else {
+            request.path.or_else(|| self.api.config.dump_path.clone()).unwrap_or_default()
+        };
 
         if !path.is_empty() {
             dump_events(&dumpable_events, &path)
                 .map_err(|err| ApiError::DumpError { msg: err.to_string() })?;
-            return Ok(DevnetResponse::DevnetDump(None).into());
         }
 
-        Ok(DevnetResponse::DevnetDump(Some(dumpable_events)).into())
+        Ok(DevnetResponse::DevnetDump(Some(dumpable_events.clone())).into())
     }
 
     /// devnet_load
-    pub async fn load(&self, path: String) -> StrictRpcResult {
-        let events = load_events(self.api.config.dump_on, &path)?;
+    pub async fn load(&self, request: LoadRequest) -> StrictRpcResult {
+        // Serialize file reads and clears with block-mode appends and endpoint rewrites.
+        let dumpable_events = self.api.dumpable_events.lock().await;
+        let events = match request {
+            LoadRequest::Path { path } => load_events(self.api.config.dump_on, &path)?,
+            LoadRequest::Events { events } => {
+                if let (Some(DumpOn::Block), Some(path)) =
+                    (self.api.config.dump_on, self.api.config.dump_path.as_deref())
+                {
+                    clear_dump_file(path)?;
+                }
+                events
+            }
+        };
+        // Re-execution records the loaded events, so release the lock before restarting.
+        drop(dumpable_events);
+
         // Necessary to restart before loading; restarting messaging to allow re-execution
         self.restart(Some(RestartParameters { restart_l1_to_l2_messaging: true })).await?;
         self.re_execute(&events).await.map_err(ApiError::RpcError)?;

@@ -18,9 +18,9 @@ use crate::api::models::{
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionEnumWrapper,
     BroadcastedInvokeTransactionInput, CallInput, ClassHashInput, DevnetSpecRequest,
     EstimateFeeInput, EventsInput, GetStorageInput, JsonRpcRequest, JsonRpcResponse,
-    JsonRpcWsRequest, LoadPath, ProveTransactionInput, SimulateTransactionsInput,
-    StarknetSpecExtRequest, StarknetSpecRequest, StateUpdateInput, ToRpcResponseResult,
-    TransactionHashAndFlagsInput, TransactionHashInput, to_json_rpc_request,
+    JsonRpcWsRequest, ProveTransactionInput, SimulateTransactionsInput, StarknetSpecExtRequest,
+    StarknetSpecRequest, StateUpdateInput, ToRpcResponseResult, TransactionHashAndFlagsInput,
+    TransactionHashInput, to_json_rpc_request,
 };
 use crate::api::origin_forwarder::OriginForwarder;
 use crate::api::{Api, ApiError, error};
@@ -524,8 +524,8 @@ impl JsonRpcHandler {
             }
             DevnetSpecRequest::AutoImpersonate => self.set_auto_impersonate(true).await,
             DevnetSpecRequest::StopAutoImpersonate => self.set_auto_impersonate(false).await,
-            DevnetSpecRequest::Dump(path) => self.dump(path).await,
-            DevnetSpecRequest::Load(LoadPath { path }) => self.load(path).await,
+            DevnetSpecRequest::Dump(request) => self.dump(request.unwrap_or_default()).await,
+            DevnetSpecRequest::Load(request) => self.load(request).await,
             DevnetSpecRequest::PostmanLoadL1MessagingContract(data) => {
                 self.postman_load(data).await
             }
@@ -637,17 +637,19 @@ impl JsonRpcHandler {
     async fn update_dump(&self, event: &RpcMethodCall) -> Result<(), RpcError> {
         match self.api.config.dump_on {
             Some(DumpOn::Block) => {
-                let dump_path = self
+                let path = self
                     .api
                     .config
                     .dump_path
                     .as_deref()
-                    .ok_or(RpcError::internal_error_with("Undefined dump_path"))?;
+                    .ok_or(RpcError::internal_error_with("Undefined dump path"))?;
+                let mut dumpable_events = self.api.dumpable_events.lock().await;
 
-                dump_event(event, dump_path).map_err(|e| {
+                dump_event(event, path).map_err(|e| {
                     let msg = format!("Failed dumping of {}: {e}", event.method);
                     RpcError::internal_error_with(msg)
                 })?;
+                dumpable_events.push(event.clone());
             }
             Some(DumpOn::Request | DumpOn::Exit) => {
                 self.api.dumpable_events.lock().await.push(event.clone())

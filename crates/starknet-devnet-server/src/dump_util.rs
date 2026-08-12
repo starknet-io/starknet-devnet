@@ -53,6 +53,15 @@ pub fn dump_event(event: &DumpEvent, path: &str) -> DevnetResult<()> {
     Ok(())
 }
 
+/// Removes the dump file at `path`, ignoring it if it does not exist.
+pub fn clear_dump_file(path: &str) -> DevnetResult<()> {
+    match fs::remove_file(Path::new(path)) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(Error::IoError(err)),
+    }
+}
+
 /// Returns Devnet events from the provided `path`
 pub fn load_events(dump_on: Option<DumpOn>, path: &str) -> DevnetResult<Vec<DumpEvent>> {
     let file_path = Path::new(path);
@@ -68,7 +77,7 @@ pub fn load_events(dump_on: Option<DumpOn>, path: &str) -> DevnetResult<Vec<Dump
     // because they will be re-executed and saved again
     if let Some(DumpOn::Block) = dump_on {
         // TODO refactor: this shouldn't be the responsibility of this method
-        fs::remove_file(file_path).map_err(Error::IoError)?;
+        clear_dump_file(path)?;
     }
 
     Ok(events)
