@@ -28,9 +28,9 @@ use crate::dump_util::dump_event;
 use crate::restrictive_mode::is_json_rpc_method_restricted;
 use crate::rpc_core;
 use crate::rpc_core::error::{ErrorCode, RpcError};
-use crate::rpc_core::request::RpcMethodCall;
-use crate::rpc_core::response::{ResponseResult, RpcResponse};
-use crate::rpc_handler::RpcHandler;
+use crate::rpc_core::request::{Request, RpcCall, RpcMethodCall};
+use crate::rpc_core::response::{Response, ResponseResult, RpcResponse};
+use crate::rpc_handler::{RpcHandler, handle_request};
 use crate::subscribe::{
     NewTransactionNotification, NewTransactionReceiptNotification, NewTransactionStatus,
     NotificationData, SocketId,
@@ -553,27 +553,32 @@ impl JsonRpcHandler {
         }
     }
 
-    /// Takes `bytes` to be an encoded RPC call, executes it, and sends the response back via `ws`.
+    /// Takes `bytes` to be an encoded RPC request, executes it, and sends the response via `ws`.
     async fn on_websocket_call(
         &self,
         bytes: &[u8],
         ws: Arc<Mutex<SplitSink<WebSocket, Message>>>,
         socket_id: SocketId,
     ) {
-        let error_serialized = match serde_json::from_slice(bytes) {
-            Ok(rpc_call) => match self.on_websocket_rpc_call(&rpc_call, socket_id).await {
-                Ok(_) => return,
-                Err(e) => serde_json::to_string(&RpcResponse::from_rpc_error(e, rpc_call.id))
-                    .unwrap_or_default(),
-            },
-            Err(e) => serde_json::to_string(&RpcResponse::from_rpc_error(
+        let response = match serde_json::from_slice(bytes) {
+            Ok(Request::Single(RpcCall::MethodCall(rpc_call))) => {
+                match self.on_websocket_rpc_call(&rpc_call, socket_id).await {
+                    Ok(_) => return,
+                    Err(e) => RpcResponse::from_rpc_error(e, rpc_call.id).into(),
+                }
+            }
+            Ok(request) => handle_request(request, self.clone())
+                .await
+                .unwrap_or_else(|| Response::error(RpcError::invalid_request())),
+            Err(e) => RpcResponse::from_rpc_error(
                 RpcError::parse_error(e.to_string()),
                 rpc_core::request::Id::Null,
-            ))
-            .unwrap_or_default(),
+            )
+            .into(),
         };
+        let response_serialized = serde_json::to_string(&response).unwrap_or_default();
 
-        if let Err(e) = ws.lock().await.send(Message::Text(error_serialized.into())).await {
+        if let Err(e) = ws.lock().await.send(Message::Text(response_serialized.into())).await {
             tracing::error!("Error sending websocket message: {e}");
         }
     }
