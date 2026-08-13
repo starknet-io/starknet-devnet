@@ -2,8 +2,6 @@ name: Build and Test
 
 on:
   push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
