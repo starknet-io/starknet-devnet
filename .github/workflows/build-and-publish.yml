@@ -461,11 +461,7 @@ jobs:
         run: npm install -g npm@${{ steps.config.outputs.npm_version }}
 
       - name: Verify packaged web UI
-        run: |
-          npm --prefix web-ui ci
-          npm --prefix web-ui run build:devnet
-          git diff --exit-code -- crates/starknet-devnet-server/assets/ui
-          test -z "$(git status --porcelain -- crates/starknet-devnet-server/assets/ui)"
+        run: ./scripts/check_web_ui.sh
 
       - name: Download binary artifacts
         uses: actions/download-artifact@v8

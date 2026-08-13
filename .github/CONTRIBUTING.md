@@ -1,12 +1,10 @@
 # Contributing
 
-To read about PR expectations, check out the [Pull requests](#pull-requests) section. To learn about setting up the project for development and testing, but also getting a per-feature insight, check out [Development](#development).
+Read the [Pull requests](#pull-requests) section for review expectations and [Development](#development) for setup and validation.
 
 ## Pull requests
 
-> :warning: IMPORTANT NOTE :warning:
->
-> All contributions are expected to be of the highest possible quality! That means the PR is thoroughly tested and documented, and without blindly generated ChatGPT code and documentation! PRs not complying with these rules shall not be considered!
+Contributors own the quality of every submitted change. Keep changes focused, include appropriate tests and documentation, and review generated or assisted changes before submitting.
 
 ### Should you create a PR?
 
@@ -25,31 +23,45 @@ Once a PR is created, somebody from the team will review it. When a reviewer lea
 
 This is an example of a good author-reviewer correspondence: [link](https://github.com/starknet-io/starknet-devnet/pull/310#discussion_r1457142002).
 
-#### Note to reviewers
-
-This project's CI/CD platform (CircleCI) does not have the option to trigger the workflow on external PRs simply with a click. So once a PR is reviewed and looks like its workflow could pass, it can either be accepted & merged it blindly (which shall trigger the workflow on the target branch), or the following workaround can be used to trigger it:
-
-```
-# https://stackoverflow.com/questions/5884784/how-to-pull-remote-branch-from-somebody-elses-repo
-$ git remote add <CONTRIBUTOR> <CONTRIBUTOR_GIT_FORK_URL>
-$ git fetch <CONTRIBUTOR>
-$ git checkout -b <CONTRIBUTOR>/<BRANCH> <CONTRIBUTOR>/<BRANCH>
-
-$ git remote set-url --push <CONTRIBUTOR> git@github.com:starknet-io/starknet-devnet.git
-$ git push <CONTRIBUTOR> HEAD
-```
-
 ## Development
+
+The root [AGENTS.md](../AGENTS.md) is the task-oriented guide for coding agents and other automated contributors. It documents the repository layout, generated files, and expectations for a handoff.
+
+### Standard commands
+
+The repository's `scripts/` directory contains the supported development commands.
+
+| Command | Purpose |
+| --- | --- |
+| `./scripts/doctor.sh` | Check the local tools required for common workflows. |
+| `./scripts/format.sh` / `./scripts/format_check.sh` | Apply or check Rust and website formatting. |
+| `cargo check --workspace --all-targets --all-features` / `./scripts/clippy_check.sh` | Type-check all Rust targets and run the required Clippy checks. |
+| `cargo test --workspace --exclude integration --no-fail-fast` | Run unit tests; integration tests are excluded. |
+| `./scripts/test_integration.sh` | Build the release binary and run integration tests. |
+| `./scripts/check_web_ui.sh` | Lint and rebuild the embedded UI, then verify its committed assets. |
+| `./scripts/check_website.sh` | Type-check and build the documentation site after `npm --prefix website ci`. |
+| `./scripts/verify.sh` | Run routine checks that do not require Foundry. |
+| `./scripts/ci.sh` | Run the full local CI-equivalent suite. |
+
+### Prerequisites
+
+- Rust stable is pinned in `rust-toolchain.toml`. Formatting and spelling additionally require the pinned nightly toolchain:
+
+  ```
+  $ rustup toolchain install nightly-2026-04-10 --component rustfmt
+  ```
+
+- Use Node 24 and npm 11 to match CI.
+- Integration tests require [Foundry](https://book.getfoundry.sh/getting-started/installation); `anvil` must be on `PATH`.
+- All-features Rust checks require LLVM 19. In CI, `MLIR_SYS_190_PREFIX`, `LLVM_SYS_191_PREFIX`, and `TABLEGEN_190_PREFIX` point to `/usr/lib/llvm-19`.
 
 ### Installation
 
-Some developer scripts used in this project are written in Python 3, with dependencies specified in `scripts/requirements.txt`. You may want to [install the dependencies in a virtual environment](https://docs.python.org/3/library/venv.html#creating-virtual-environments).
+Run `./scripts/doctor.sh` after installing the prerequisites. It checks the required Rust and Node tooling and reports optional integration-test dependencies. The website and web UI commands use `npm ci`, so their lockfiles are respected.
 
-Documentation maintenance requires installing `npm`.
+### Editor support
 
-### Visual Studio Code
-
-It is highly recommended to get familiar with [Visual Studio Code Dev Containers](https://code.visualstudio.com/docs/devcontainers/create-dev-container#_dockerfile) and install [rust-analyzer](https://code.visualstudio.com/docs/languages/rust) extension.
+Any editor with Rust Analyzer support works well. Ensure editor-launched tests inherit the shell `PATH` that contains `anvil` when testing integration code.
 
 ### Linter
 
@@ -64,19 +76,19 @@ $ ./scripts/clippy_check.sh
 Run the formatter with:
 
 ```
-$ ./scripts/format.sh
+$ npm --prefix website ci && ./scripts/format.sh
 ```
 
 If you encounter an error like
 
 ```
-error: toolchain 'nightly-x86_64-unknown-linux-gnu' is not installed
+error: toolchain 'nightly-2026-04-10' is not installed
 ```
 
 Resolve it with:
 
 ```
-$ rustup default nightly
+$ rustup toolchain install nightly-2026-04-10 --component rustfmt
 ```
 
 ### Unused dependencies
@@ -107,19 +119,23 @@ To speed up development, you can put the previous steps (and more) in a local sc
 
 #### Prerequisites
 
-Some tests require the `anvil` command, so you need to [install Foundry](https://book.getfoundry.sh/getting-started/installation). The `anvil` command might not be usable by tests if you run them using VS Code's `Run Test` button available just above the test case. Either run tests using a shell which has foundry/anvil in `PATH`, or modify the BackgroundAnvil utility to run `anvil` by its path on your system.
+Integration tests require the `anvil` command from [Foundry](https://book.getfoundry.sh/getting-started/installation). Run them from a shell whose `PATH` contains `anvil`.
 
 #### Test execution
 
-Run all tests using all available CPUs with:
+Run the unit-test suite with:
 
 ```
-$ cargo test
+$ cargo test --workspace --exclude integration --no-fail-fast
 ```
 
-If it is your first time executing an integration test after changes to production code, you need to wait a bit longer for compilation to finish.
+Run the integration suite after production, RPC, CLI, or contract-fixture changes with:
 
-If you experience memory overuse or flaky tests, try limiting the number of jobs with `cargo test --jobs=<N>`.
+```
+$ ./scripts/test_integration.sh
+```
+
+Integration tests build the release binary and can take longer after production-code changes. If resources are constrained, pass `--jobs=<N>` to a focused Cargo command.
 
 #### Benchmarking
 
@@ -159,6 +175,6 @@ When adding new compilation artifacts, e.g. in the format of JSON files, please 
 
 The documentation website content has [its own readme](../website/README.md).
 
-### New Devnet version release
+### Releasing
 
 To release a new version, check out the [release docs](../RELEASE.md).

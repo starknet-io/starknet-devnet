@@ -51,4 +51,4 @@ Simplify the installation, spawning and usage of Devnet in your tests by relying
 
 We ❤️ and encourage all contributions and thank all the [contributors](https://github.com/starknet-io/starknet-devnet/graphs/contributors)!
 
-[Click here](.github/CONTRIBUTING.md) for the development guide.
+Start with the [contribution guide](.github/CONTRIBUTING.md). Contributors using coding agents should also follow the repository [agent guide](AGENTS.md), which describes the toolchain, generated assets, and validation commands. Run `./scripts/verify.sh` for the standard local validation workflow.

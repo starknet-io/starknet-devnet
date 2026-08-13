@@ -8,7 +8,7 @@ Check out the existing pages and categories under `website/docs/`. If the change
 
 ### Documentation versioning
 
-A new version of the documentation should be created when releasing a new crate. Check [this](../.github/CONTRIBUTING#new-devnet-version-release) out for more info.
+A new version of the documentation should be created when releasing a new crate. Check [the release guidance](../.github/CONTRIBUTING.md#releasing) for more information.
 
 #### Updating versioned documentation
 
@@ -17,7 +17,7 @@ Generally, you should only be making changes to the pages in `website/versioned_
 ### Installation
 
 ```
-$ npm install
+$ npm ci
 ```
 
 ### Format
@@ -43,6 +43,10 @@ $ npm run build
 ```
 
 This command generates static content into the `build` directory and can be served using any static contents hosting service.
+
+### Validation
+
+From the repository root, run `npm --prefix website ci && ./scripts/check_website.sh` to type-check and build the site. Run `npm --prefix website ci && ./scripts/format_check.sh` to check Rust and website formatting together.
 
 ### Deployment
 

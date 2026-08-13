@@ -29,15 +29,23 @@ jobs:
           toolchain: ${{ steps.config.outputs.rust_nightly_version }}
           components: rustfmt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.config.outputs.node_lts_version }}
+          cache: 'npm'
+          cache-dependency-path: 'website/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@${{ steps.config.outputs.npm_version }}
+
       - name: Check code formatting
         run: |
-          cargo +${{ steps.config.outputs.rust_nightly_version }} fmt --all --check
-          cd website && npm ci && npm run format-check
+          npm --prefix website ci
+          NIGHTLY_TOOLCHAIN=${{ steps.config.outputs.rust_nightly_version }} ./scripts/format_check.sh
       
       - name: Check spelling
-        run: |
-          cargo +${{ steps.config.outputs.rust_nightly_version }} install typos-cli --version 1.43.4 --locked
-          typos && echo "No spelling errors!"
+        run: NIGHTLY_TOOLCHAIN=${{ steps.config.outputs.rust_nightly_version }} ./scripts/check_spelling.sh
 
   web-ui-build:
     name: Web UI Build
@@ -60,16 +68,34 @@ jobs:
       - name: Pin npm version
         run: npm install -g npm@${{ steps.config.outputs.npm_version }}
 
-      - name: Lint web UI
-        run: |
-          npm --prefix web-ui ci
-          npm --prefix web-ui run lint
+      - name: Verify embedded web UI
+        run: ./scripts/check_web_ui.sh
 
-      - name: Build packaged web UI
+  website-build:
+    name: Documentation Site Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Load common configuration
+        id: config
+        uses: ./.github/actions/load-config
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.config.outputs.node_lts_version }}
+          cache: 'npm'
+          cache-dependency-path: 'website/package-lock.json'
+
+      - name: Pin npm version
+        run: npm install -g npm@${{ steps.config.outputs.npm_version }}
+
+      - name: Type-check and build documentation site
         run: |
-          npm --prefix web-ui run build:devnet
-          git diff --exit-code -- crates/starknet-devnet-server/assets/ui
-          test -z "$(git status --porcelain -- crates/starknet-devnet-server/assets/ui)"
+          npm --prefix website ci
+          ./scripts/check_website.sh
 
   clippy-and-unit-tests:
     name: Clippy and Unit Test
@@ -107,10 +133,7 @@ jobs:
         run: cargo check --workspace --all-targets --all-features
 
       - name: Run clippy check
-        run: |
-          cargo clippy --workspace -- -Dwarnings
-          cargo clippy --workspace --all-features -- -Dwarnings
-          cargo clippy --workspace --tests -- -Dwarnings
+        run: ./scripts/clippy_check.sh
       
       - name: Run tests
         run: RUST_BACKTRACE=full cargo test --workspace --exclude integration --no-fail-fast
@@ -157,8 +180,5 @@ jobs:
         with:
           version: nightly-5b7e4cb3c882b28f3c32ba580de27ce7381f415a
 
-      - name: Build in release mode
-        run: cargo build --release
-
-      - name: Run tests
-        run: RUST_BACKTRACE=full cargo test --package integration --no-fail-fast
+      - name: Build and run integration tests
+        run: ./scripts/test_integration.sh
