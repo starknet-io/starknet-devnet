@@ -461,7 +461,7 @@ jobs:
         run: npm install -g npm@${{ steps.config.outputs.npm_version }}
 
       - name: Verify packaged web UI
-        run: make web-ui
+        run: ./scripts/check_web_ui.sh
 
       - name: Download binary artifacts
         uses: actions/download-artifact@v8

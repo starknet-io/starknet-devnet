@@ -9,17 +9,18 @@ over ad-hoc equivalents so local validation matches CI.
 ## Fast path
 
 ```sh
-make doctor
-make verify
+./scripts/doctor.sh
+./scripts/verify.sh
 ```
 
-Run `make integration` when a change affects the running server, RPC behavior, contracts,
-or integration tests. It requires Foundry's `anvil`. `make verify` (and therefore `make ci`)
-requires LLVM 19 for the `--all-features` Rust checks in `check`/`lint`; `make doctor` only
-warns when LLVM is missing and still exits 0. `make ci` also runs spelling and integration.
+Run `./scripts/test_integration.sh` when a change affects the running server, RPC behavior,
+contracts, or integration tests. It requires Foundry's `anvil`. `./scripts/verify.sh` (and
+therefore `./scripts/ci.sh`) requires LLVM 19 for its `--all-features` Rust checks;
+`./scripts/doctor.sh` only warns when LLVM is missing and still exits 0.
+`./scripts/ci.sh` also runs spelling and integration tests.
 
-Use `make help` to see every target. State which targets you ran in the final handoff and
-name any skipped target with its reason.
+Use the focused scripts in `scripts/` for individual checks. State which targets you ran in
+the final handoff and name any skipped target with its reason.
 
 ## Toolchain
 
@@ -56,17 +57,18 @@ Do not edit `Cargo.lock` or generated web UI assets by hand.
    externally observable JSON-RPC, CLI, server, or process behavior.
 3. Put new Rust dependencies in the root `Cargo.toml` workspace dependencies and reference
    them as `{ workspace = true }` from member crates.
-4. Run the smallest relevant target first, then `make verify`; run `make integration` when
-   required by the change. Use `make format` only to apply formatting and `make format-check`
-   in validation.
+4. Run the smallest relevant check first, then `./scripts/verify.sh`; run
+   `./scripts/test_integration.sh` when required by the change. Use
+   `./scripts/format.sh` only to apply formatting and `./scripts/format_check.sh` in
+   validation.
 5. Update the current website docs and/or CLI help when behavior visible to users changes.
 
 ## Generated and sensitive areas
 
 - After changing `web-ui`, run `npm --prefix web-ui ci` and
   `npm --prefix web-ui run build:devnet`, then include the resulting changes under
-  `crates/starknet-devnet-server/assets/ui`. `make web-ui` is a verification target: it
-  intentionally fails if those generated assets differ from the committed files.
+  `crates/starknet-devnet-server/assets/ui`. `./scripts/check_web_ui.sh` verifies that
+  those generated assets match the committed files.
 - JSON compilation artifacts should be minified unless they are JSON-RPC specification files.
 - Never run release or publishing scripts as part of ordinary development.
 - Avoid broad formatter or dependency upgrades unless the task specifically calls for them.

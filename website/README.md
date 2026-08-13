@@ -46,8 +46,9 @@ This command generates static content into the `build` directory and can be serv
 
 ### Validation
 
-From the repository root, run `make website` to install locked dependencies, type-check the
-site, and build it. Run `make format-check` to check Rust and website formatting together.
+From the repository root, run `npm --prefix website ci && ./scripts/check_website.sh` to
+type-check and build the site. Run `npm --prefix website ci && ./scripts/format_check.sh` to
+check Rust and website formatting together.
 
 ### Deployment
 

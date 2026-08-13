@@ -29,19 +29,19 @@ The root [AGENTS.md](../AGENTS.md) is the task-oriented guide for coding agents 
 
 ### Standard commands
 
-The `Makefile` is the supported command interface. Run `make help` to see every target.
+The repository's `scripts/` directory contains the supported development commands.
 
 | Command | Purpose |
 | --- | --- |
-| `make doctor` | Check the local tools required for common workflows. |
-| `make format` / `make format-check` | Apply or check Rust and website formatting. |
-| `make check` / `make lint` | Type-check all Rust targets and run the required Clippy checks. |
-| `make test` | Run unit tests; integration tests are excluded. |
-| `make integration` | Build the release binary and run integration tests. |
-| `make web-ui` | Lint and rebuild the embedded UI, then verify its committed assets. |
-| `make website` | Type-check and build the documentation site. |
-| `make verify` | Run routine checks that do not require Foundry. |
-| `make ci` | Run the full local CI-equivalent suite. |
+| `./scripts/doctor.sh` | Check the local tools required for common workflows. |
+| `./scripts/format.sh` / `./scripts/format_check.sh` | Apply or check Rust and website formatting. |
+| `cargo check --workspace --all-targets --all-features` / `./scripts/clippy_check.sh` | Type-check all Rust targets and run the required Clippy checks. |
+| `cargo test --workspace --exclude integration --no-fail-fast` | Run unit tests; integration tests are excluded. |
+| `./scripts/test_integration.sh` | Build the release binary and run integration tests. |
+| `./scripts/check_web_ui.sh` | Lint and rebuild the embedded UI, then verify its committed assets. |
+| `./scripts/check_website.sh` | Type-check and build the documentation site after `npm --prefix website ci`. |
+| `./scripts/verify.sh` | Run routine checks that do not require Foundry. |
+| `./scripts/ci.sh` | Run the full local CI-equivalent suite. |
 
 ### Prerequisites
 
@@ -57,7 +57,7 @@ The `Makefile` is the supported command interface. Run `make help` to see every 
 
 ### Installation
 
-Run `make doctor` after installing the prerequisites. It checks the required Rust and Node tooling and reports optional integration-test dependencies. The website and web UI commands use `npm ci`, so their lockfiles are respected.
+Run `./scripts/doctor.sh` after installing the prerequisites. It checks the required Rust and Node tooling and reports optional integration-test dependencies. The website and web UI commands use `npm ci`, so their lockfiles are respected.
 
 ### Editor support
 
@@ -68,7 +68,7 @@ Any editor with Rust Analyzer support works well. Ensure editor-launched tests i
 Run the linter with:
 
 ```
-$ make lint
+$ ./scripts/clippy_check.sh
 ```
 
 ### Formatter
@@ -76,7 +76,7 @@ $ make lint
 Run the formatter with:
 
 ```
-$ make format
+$ npm --prefix website ci && ./scripts/format.sh
 ```
 
 If you encounter an error like
@@ -96,7 +96,7 @@ $ rustup toolchain install nightly-2026-04-10 --component rustfmt
 To check for unused dependencies, run:
 
 ```
-$ make unused-deps
+$ ./scripts/check_unused_deps.sh
 ```
 
 If you think this reports a dependency as a false positive (i.e. isn't unused), check [here](https://github.com/bnjbvr/cargo-machete#false-positives).
@@ -106,7 +106,7 @@ If you think this reports a dependency as a false positive (i.e. isn't unused), 
 To check for spelling errors in the code, run:
 
 ```
-$ make spelling
+$ ./scripts/check_spelling.sh
 ```
 
 If you think this reports a false-positive, check [here](https://crates.io/crates/typos-cli#false-positives).
@@ -126,13 +126,13 @@ Integration tests require the `anvil` command from [Foundry](https://book.getfou
 Run the unit-test suite with:
 
 ```
-$ make test
+$ cargo test --workspace --exclude integration --no-fail-fast
 ```
 
 Run the integration suite after production, RPC, CLI, or contract-fixture changes with:
 
 ```
-$ make integration
+$ ./scripts/test_integration.sh
 ```
 
 Integration tests build the release binary and can take longer after production-code changes. If resources are constrained, pass `--jobs=<N>` to a focused Cargo command.

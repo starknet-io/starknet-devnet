@@ -53,5 +53,5 @@ We ❤️ and encourage all contributions and thank all the [contributors](https
 
 Start with the [contribution guide](.github/CONTRIBUTING.md). Contributors using coding
 agents should also follow the repository [agent guide](AGENTS.md), which describes the
-toolchain, generated assets, and validation commands. Run `make help` to discover the
-standard local workflows.
+toolchain, generated assets, and validation commands. Run `./scripts/verify.sh` for the
+standard local validation workflow.
