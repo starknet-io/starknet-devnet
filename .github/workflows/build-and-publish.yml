@@ -488,6 +488,19 @@ jobs:
           git config --global user.name "GitHub Actions"
           npm run deploy
 
+      - name: Render release body
+        id: render_release_body
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          IS_RC: ${{ needs.prepare.outputs.is_rc }}
+          DOCKER_REGISTRY: ${{ steps.config.outputs.docker_registry }}
+          DOCKER_NAMESPACE: ${{ steps.config.outputs.docker_namespace }}
+          IMAGE_NAME: ${{ steps.config.outputs.image_name }}
+        run: |
+          mkdir -p artifacts
+          ./scripts/render_release_body.sh
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -496,39 +509,12 @@ jobs:
           draft: false
           prerelease: ${{ needs.prepare.outputs.is_rc }}
           generate_release_notes: true
+          body_path: artifacts/release-body.md
           files: |
             artifacts/starknet-devnet-x86_64-unknown-linux-gnu/starknet-devnet-x86_64-unknown-linux-gnu.tar.gz
             artifacts/starknet-devnet-aarch64-unknown-linux-gnu/starknet-devnet-aarch64-unknown-linux-gnu.tar.gz
             artifacts/starknet-devnet-x86_64-unknown-linux-musl/starknet-devnet-x86_64-unknown-linux-musl.tar.gz
             artifacts/starknet-devnet-x86_64-apple-darwin/starknet-devnet-x86_64-apple-darwin.tar.gz
             artifacts/starknet-devnet-aarch64-apple-darwin/starknet-devnet-aarch64-apple-darwin.tar.gz
-          body: |
-            # Starknet Devnet v${{ needs.prepare.outputs.version }}
-            
-            ## Installation
-            
-            ### Binary
-            Download the appropriate binary for your platform from the assets below.
-            
-            ### Docker
-            ```bash
-            # Pull by version
-            docker pull ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:${{ needs.prepare.outputs.version }}
-            docker pull ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:${{ needs.prepare.outputs.version }}-seed0
-            
-            # Pull by SHA
-            docker pull ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:sha-${{ needs.prepare.outputs.sha }}
-            docker pull ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:sha-${{ needs.prepare.outputs.sha }}-seed0
-            
-            ${{ needs.prepare.outputs.is_rc != 'true' && '# Pull latest versions' }}
-            ${{ needs.prepare.outputs.is_rc != 'true' && 'docker pull '}}${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:latest
-            ${{ needs.prepare.outputs.is_rc != 'true' && 'docker pull '}}${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.docker_namespace }}/${{ steps.config.outputs.image_name }}:latest-seed0
-            ```
-            ${{ needs.prepare.outputs.is_rc == 'true' && '### Note\nLatest tags are not available for release candidates.' || '' }}
-            
-            ### Cargo
-            ```bash
-            cargo install starknet-devnet
-            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
