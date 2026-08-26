@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use starknet_rs_accounts::{
     Account, AccountDeploymentV3, AccountError, AccountFactory, ConnectedAccount, DeclarationV3,
-    ExecutionEncoding, ExecutionV3, OpenZeppelinAccountFactory, SingleOwnerAccount,
+    ExecutionV3, OpenZeppelinAccountFactory, SingleOwnerAccount,
 };
 use starknet_rs_core::types::{
     BlockId, BlockTag, Call, ExecutionResult, Felt, FlattenedSierraClass, InvokeTransactionResult,
@@ -57,15 +57,7 @@ async fn declare_deploy_happy_path() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     let (sierra_artifact, casm_hash) = get_simple_contract_artifacts();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let declare_transaction =
@@ -118,22 +110,17 @@ async fn declare_deploy_happy_path() {
 async fn declare_from_an_account_with_insufficient_strk_tokens_balance() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (sierra_artifact, casm_hash) = get_simple_contract_artifacts();
     let sierra_artifact = Arc::new(sierra_artifact);
     let declaration = account.declare_v3(sierra_artifact.clone(), casm_hash);
     let estimate_fee = declaration.estimate_fee().await.unwrap();
 
-    let account_strk_balance =
-        devnet.get_balance_by_tag(&account_address, FeeUnit::Fri, BlockTag::Latest).await.unwrap();
+    let account_strk_balance = devnet
+        .get_balance_by_tag(&account.address(), FeeUnit::Fri, BlockTag::Latest)
+        .await
+        .unwrap();
 
     // transfer balance of the account without the amount of fee
     let amount_to_transfer =
@@ -158,8 +145,10 @@ async fn declare_from_an_account_with_insufficient_strk_tokens_balance() {
         .await
         .unwrap();
 
-    let account_strk_balance =
-        devnet.get_balance_by_tag(&account_address, FeeUnit::Fri, BlockTag::Latest).await.unwrap();
+    let account_strk_balance = devnet
+        .get_balance_by_tag(&account.address(), FeeUnit::Fri, BlockTag::Latest)
+        .await
+        .unwrap();
     assert!(Felt::from(estimate_fee.overall_fee) > account_strk_balance);
 
     match declaration.send().await.unwrap_err() {
@@ -174,14 +163,7 @@ async fn declare_from_an_account_with_insufficient_strk_tokens_balance() {
 async fn invoke_with_insufficient_gas_price_and_or_gas_units_should_fail() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     transaction_with_less_gas_units_and_or_less_gas_price_should_return_error_or_be_accepted_as_reverted(
             Action::Execution(vec![Call {
@@ -228,15 +210,7 @@ async fn deploy_account_with_insufficient_gas_price_and_or_gas_units_should_fail
 async fn redeclaration_has_to_fail() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     let (sierra_artifact, casm_hash) = get_simple_contract_artifacts();
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let sierra_artifact = Arc::new(sierra_artifact);
@@ -265,15 +239,7 @@ async fn declare_with_insufficient_gas_price_and_or_gas_units_should_fail() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     let (sierra_artifact, casm_hash) = get_simple_contract_artifacts();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let sierra_artifact = Arc::new(sierra_artifact);
@@ -431,14 +397,7 @@ async fn transaction_with_less_gas_units_and_or_less_gas_price_should_return_err
 async fn test_rejection_of_too_big_class_declaration() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(TOO_BIG_CONTRACT_SIERRA_PATH);

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use starknet_rs_accounts::{
-    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory, SingleOwnerAccount,
-};
+use starknet_rs_accounts::{Account, AccountFactory, OpenZeppelinAccountFactory};
 use starknet_rs_core::types::{
     Call, ExecutionResult, Felt, StarknetError, TransactionFinalityStatus, TransactionReceipt,
 };
@@ -11,7 +9,7 @@ use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_0_ACCOUNT_CONTRACT_HASH, CHAIN_ID, ETH_ERC20_CONTRACT_ADDRESS,
+    CAIRO_0_ACCOUNT_CONTRACT_HASH, CHAIN_ID, ETH_ERC20_CONTRACT_ADDRESS,
     STRK_ERC20_CONTRACT_ADDRESS, UDC_CONTRACT_ADDRESS,
 };
 use crate::common::utils::{
@@ -60,14 +58,7 @@ async fn deploy_account_transaction_receipt() {
 async fn deploy_transaction_receipt() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let predeployed_account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     let (cairo_1_contract, casm_class_hash) = get_events_contract_artifacts();
 
@@ -115,7 +106,7 @@ async fn deploy_transaction_receipt() {
                 vec![get_selector_from_name("ContractDeployed").unwrap()]
             );
             assert_eq!(deployment_event.data[0], expected_contract_address);
-            assert_eq!(deployment_event.data[1], account_address);
+            assert_eq!(deployment_event.data[1], predeployed_account.address());
 
             // Assert STRK fee charge event
             let fee_charge_event = receipt
@@ -127,7 +118,7 @@ async fn deploy_transaction_receipt() {
                 fee_charge_event.keys,
                 vec![
                     get_selector_from_name("Transfer").unwrap(),
-                    account_address,
+                    predeployed_account.address(),
                     Felt::from_hex_unchecked("0x1000") // this is sequencer address
                 ]
             );
@@ -140,14 +131,7 @@ async fn deploy_transaction_receipt() {
 async fn invalid_deploy_transaction_receipt() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let predeployed_account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     let (cairo_1_contract, casm_class_hash) = get_events_contract_artifacts();
 
@@ -203,14 +187,7 @@ async fn invalid_deploy_transaction_receipt() {
 async fn reverted_invoke_transaction_receipt() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     let transfer_execution = predeployed_account.execute_v3(vec![Call {
         to: ETH_ERC20_CONTRACT_ADDRESS,

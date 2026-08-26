@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use starknet_core::constants::UDC_CONTRACT_CLASS_HASH;
-use starknet_rs_accounts::{Account, AccountError, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::{Account, AccountError};
 use starknet_rs_core::types::{
     Call, ContractExecutionError, Felt, StarknetError, TransactionExecutionErrorData,
 };
@@ -10,7 +10,7 @@ use starknet_rs_providers::ProviderError;
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, UDC_CONTRACT_ADDRESS, UDC_LEGACY_CONTRACT_ADDRESS,
+    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, UDC_CONTRACT_ADDRESS, UDC_LEGACY_CONTRACT_ADDRESS,
 };
 use crate::common::utils::{
     assert_contains, assert_tx_succeeded_accepted, extract_message_error, extract_nested_error,
@@ -23,14 +23,7 @@ use crate::common::utils::{
 async fn double_deployment_not_allowed() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     // declare
     let (contract_class, casm_hash) = get_simple_contract_artifacts();
@@ -87,14 +80,7 @@ async fn double_deployment_not_allowed() {
 async fn cannot_deploy_undeclared_class() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     // skip declaration
     let (contract_class, _) = get_simple_contract_artifacts();
@@ -116,14 +102,7 @@ async fn cannot_deploy_undeclared_class() {
 async fn test_all_udc_deployment_methods_supported() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     // declare
     let (contract_class, casm_hash) = get_simple_contract_artifacts();

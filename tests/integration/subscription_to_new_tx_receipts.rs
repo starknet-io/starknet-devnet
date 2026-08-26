@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 use starknet_core::constants::CHARGEABLE_ACCOUNT_ADDRESS;
-use starknet_rs_accounts::{ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::Account;
 use starknet_rs_core::types::{
     DeclareTransactionReceipt, Felt, InvokeTransactionReceipt, Transaction,
     TransactionFinalityStatus, TransactionReceipt, TransactionReceiptWithBlockInfo,
@@ -11,7 +11,6 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, SubscriptionId, assert_no_notifications, declare_deploy_simple_contract,
     deploy_oz_account, receive_new_tx, receive_notification, receive_rpc_via_ws,
@@ -180,20 +179,14 @@ async fn should_notify_for_filtered_address() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
     let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let predeployed_account = devnet.get_first_predeployed_account().await;
 
-    let predeployed_account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
-
-    let subscription_id =
-        subscribe_new_tx_receipts(&mut ws, json!({ "sender_address": [account_address] }))
-            .await
-            .unwrap();
+    let subscription_id = subscribe_new_tx_receipts(
+        &mut ws,
+        json!({ "sender_address": [predeployed_account.address()] }),
+    )
+    .await
+    .unwrap();
 
     // Send the actual txs
     declare_deploy_simple_contract(&predeployed_account).await.unwrap();
@@ -414,14 +407,7 @@ async fn test_declare_transaction_receipt_deserialization() {
     let subscription_id = subscribe_new_tx_receipts(&mut ws, json!({})).await.unwrap();
 
     // Get a predeployed account to use for declaration
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account().await;
 
     // Declare and deploy a contract (this will generate multiple transactions)
     let (_declare_tx_hash, _) = declare_deploy_simple_contract(&predeployed_account).await.unwrap();

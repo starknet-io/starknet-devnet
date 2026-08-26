@@ -52,10 +52,7 @@ async fn assert_txs_aborted(
 
 #[tokio::test]
 async fn abort_latest_block_with_hash() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let genesis_block_hash = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_hash;
 
@@ -86,10 +83,7 @@ async fn abort_latest_block_with_hash() {
 
 #[tokio::test]
 async fn abort_two_blocks() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let first_block_hash = devnet.create_block().await.unwrap();
     let second_block_hash = devnet.create_block().await.unwrap();
@@ -103,10 +97,7 @@ async fn abort_two_blocks() {
 
 #[tokio::test]
 async fn abort_block_with_transaction() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let mint_hash = devnet.mint(Felt::ONE, 100).await;
 
@@ -122,10 +113,7 @@ async fn abort_block_with_transaction() {
 
 #[tokio::test]
 async fn query_aborted_block_by_number_should_fail() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let new_block_hash = devnet.create_block().await.unwrap();
     let aborted_blocks = devnet.abort_blocks(&BlockId::Hash(new_block_hash)).await.unwrap();
@@ -144,10 +132,7 @@ async fn query_aborted_block_by_number_should_fail() {
 
 #[tokio::test]
 async fn block_abortion_should_affect_state() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     // State setup
     devnet.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
@@ -187,10 +172,7 @@ async fn block_abortion_should_affect_state() {
 
 #[tokio::test]
 async fn block_abortion_should_affect_block_number() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     /// Assert `devnet` currently has `latest` and `pre_confirmed` as its block numbers.
     async fn assert_block_number(devnet: &BackgroundDevnet, latest: u64, pre_confirmed: u64) {
@@ -240,10 +222,7 @@ async fn abort_blocks_without_state_archive_capacity() {
 
 #[tokio::test]
 async fn abort_same_block_twice() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let first_block_hash = devnet.create_block().await.unwrap();
     let second_block_hash = devnet.create_block().await.unwrap();
@@ -259,10 +238,7 @@ async fn abort_same_block_twice() {
 /// The purpose of this test to prevent a bug which overwrote the list of aborted blocks with newly
 /// aborted blocks, thus forgetting old abortions.
 async fn abort_same_block_twice_if_blocks_aborted_on_two_occasions() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let first_block_hash = devnet.create_block().await.unwrap();
     let second_block_hash = devnet.create_block().await.unwrap();
@@ -282,9 +258,7 @@ async fn abort_same_block_twice_if_blocks_aborted_on_two_occasions() {
 #[tokio::test]
 async fn abort_block_after_fork() {
     let origin_devnet: BackgroundDevnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+        BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let fork_devnet = origin_devnet.fork_with_full_state_archive().await.unwrap();
 
@@ -300,10 +274,7 @@ async fn abort_block_after_fork() {
 
 #[tokio::test]
 async fn abort_latest_blocks() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     for _ in 0..3 {
         devnet.create_block().await.unwrap();

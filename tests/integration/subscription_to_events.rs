@@ -44,7 +44,7 @@ async fn receive_event(
 async fn get_single_owner_account(
     devnet: &BackgroundDevnet,
 ) -> SingleOwnerAccount<&JsonRpcClient<HttpTransport>, LocalWallet> {
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     SingleOwnerAccount::new(
         &devnet.json_rpc_client,
@@ -762,7 +762,7 @@ async fn test_fork_subscription_to_events() {
 
     // Emit additional events on the forked devnet
 
-    let (wallet, address) = origin_devnet.get_first_predeployed_account().await; // to avoid nonce clash
+    let (wallet, address) = origin_devnet.get_first_predeployed_account_credentials().await; // to avoid nonce clash
     let original_account_on_fork = SingleOwnerAccount::new(
         &fork_devnet.json_rpc_client,
         wallet,

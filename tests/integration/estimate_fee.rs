@@ -143,7 +143,7 @@ async fn estimate_fee_of_declare_v3() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     // get class
     let (flattened_contract_artifact, casm_hash) =
@@ -212,14 +212,7 @@ async fn estimate_fee_of_invoke() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     // get class
     let (contract_artifact, casm_hash) = get_simple_contract_artifacts();
@@ -305,14 +298,7 @@ async fn message_available_if_estimation_reverts() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     // get class
     let (flattened_contract_artifact, casm_hash) =
@@ -377,14 +363,7 @@ async fn using_query_version_if_estimating() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     // get class
     let (flattened_contract_artifact, casm_hash) =
@@ -499,14 +478,9 @@ async fn estimate_fee_of_multiple_txs() {
         .expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::Legacy,
-    );
+    let (mut account, signer) = devnet
+        .get_first_predeployed_account_with_signer_and_encoding(ExecutionEncoding::Legacy)
+        .await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     // get class
@@ -541,7 +515,7 @@ async fn estimate_fee_of_multiple_txs() {
                 BroadcastedTransaction::Declare(BroadcastedDeclareTransactionV3 {
                     signature: vec![declaration_signature.r, declaration_signature.s],
                     nonce: declaration_nonce,
-                    sender_address: account_address,
+                    sender_address: account.address(),
                     contract_class,
                     is_query: query_only,
                     compiled_class_hash: casm_hash,
@@ -588,14 +562,7 @@ async fn estimate_fee_of_multiple_txs() {
 #[tokio::test]
 async fn estimate_fee_of_multiple_txs_with_second_failing() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let (account, signer) = devnet.get_first_predeployed_account_with_signer().await;
 
     let non_existent_selector = get_selector_from_name("nonExistentMethod").unwrap();
 
@@ -655,14 +622,7 @@ async fn estimate_fee_of_multiple_failing_txs_should_return_index_of_the_first_f
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
 
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
@@ -699,7 +659,7 @@ async fn estimate_fee_of_multiple_failing_txs_should_return_index_of_the_first_f
         .estimate_fee(
             [
                 BroadcastedTransaction::Declare(BroadcastedDeclareTransactionV3 {
-                    sender_address: account_address,
+                    sender_address: account.address(),
                     compiled_class_hash: casm_hash,
                     signature: vec![],
                     nonce: Felt::ZERO,
@@ -714,7 +674,7 @@ async fn estimate_fee_of_multiple_failing_txs_should_return_index_of_the_first_f
                 }),
                 BroadcastedTransaction::Invoke(BroadcastedInvokeTransaction {
                     broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
-                        sender_address: account_address,
+                        sender_address: account.address(),
                         calldata,
                         signature: vec![],
                         nonce: Felt::ONE,

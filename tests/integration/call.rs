@@ -1,4 +1,3 @@
-use starknet_rs_accounts::SingleOwnerAccount;
 use starknet_rs_core::types::{
     BlockId, BlockTag, ContractErrorData, Felt, FunctionCall, StarknetError,
 };
@@ -102,14 +101,7 @@ async fn calling_nonexistent_cairo1_contract_method() {
 async fn call_panicking_method() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        starknet_rs_accounts::ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);

@@ -60,7 +60,7 @@ async fn set_gas_scenario(
     expected_chain_id: Felt,
 ) -> Result<(), anyhow::Error> {
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -349,7 +349,7 @@ async fn set_gas_check_blocks() {
 #[tokio::test]
 async fn unsuccessful_declare_set_gas_successful_declare() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),

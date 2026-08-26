@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use starknet_rs_accounts::{
-    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory, SingleOwnerAccount,
+    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory,
 };
 use starknet_rs_core::types::{
     BlockId, BlockTag, Call, Felt, InvokeTransaction, StarknetError, Transaction,
@@ -25,14 +25,8 @@ async fn get_declare_v3_transaction_by_hash_happy_path() {
 
     let (contract_class, casm_hash) = get_simple_contract_artifacts();
 
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::Legacy,
-    );
+    let mut account =
+        devnet.get_first_predeployed_account_with_encoding(ExecutionEncoding::Legacy).await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let declare_result = account
@@ -80,15 +74,7 @@ async fn get_deploy_account_transaction_by_hash_happy_path() {
 #[tokio::test]
 async fn get_invoke_v3_transaction_by_hash_happy_path() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let invoke_tx_result = account
         .execute_v3(vec![Call {

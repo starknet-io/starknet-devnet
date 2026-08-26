@@ -12,9 +12,7 @@ use std::sync::Arc;
 use alloy::hex::FromHex;
 use alloy::primitives::{Address, U256};
 use serde_json::{Value, json};
-use starknet_rs_accounts::{
-    Account, AccountError, ConnectedAccount, ExecutionEncoding, SingleOwnerAccount,
-};
+use starknet_rs_accounts::{Account, AccountError, ConnectedAccount, SingleOwnerAccount};
 use starknet_rs_core::types::{
     BlockId, BlockTag, Call, ExecuteInvocation, ExecutionResult, Felt, FunctionCall,
     InvokeTransactionReceipt, InvokeTransactionResult, L1HandlerTransactionTrace,
@@ -30,7 +28,7 @@ use crate::assert_eq_prop;
 use crate::common::background_anvil::BackgroundAnvil;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    CHAIN_ID, DEFAULT_ETH_ACCOUNT_PRIVATE_KEY, L1_HANDLER_SELECTOR, MESSAGING_L1_CONTRACT_ADDRESS,
+    DEFAULT_ETH_ACCOUNT_PRIVATE_KEY, L1_HANDLER_SELECTOR, MESSAGING_L1_CONTRACT_ADDRESS,
     MESSAGING_L2_CONTRACT_ADDRESS, MESSAGING_WHITELISTED_L1_CONTRACT,
 };
 use crate::common::errors::RpcError;
@@ -159,15 +157,7 @@ pub(crate) async fn setup_devnet(
 > {
     let devnet = BackgroundDevnet::spawn_with_additional_args(devnet_args).await?;
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     let contract_address = deploy_l2_msg_contract(account.clone()).await?;
 

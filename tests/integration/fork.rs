@@ -84,10 +84,7 @@ async fn test_getting_non_existent_block_from_origin() {
 
 #[tokio::test]
 async fn test_forking_local_genesis_block() {
-    let origin_devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
     let origin_devnet_genesis_block =
         &origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
 
@@ -164,19 +161,9 @@ async fn test_getting_cairo0_class_from_fork() {
 
 #[tokio::test]
 async fn test_getting_cairo1_class_from_origin_and_fork() {
-    let origin_devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_simple_contract_artifacts();
 
@@ -216,7 +203,7 @@ async fn test_getting_cairo1_class_from_origin_and_fork() {
 async fn test_origin_declare_deploy_fork_invoke() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = origin_devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         origin_devnet.clone_provider(),
         signer.clone(),
@@ -309,7 +296,7 @@ async fn test_deploying_account_with_class_not_present_on_origin() {
 
     let fork_devnet = origin_devnet.fork().await.unwrap();
 
-    let (signer, _) = origin_devnet.get_first_predeployed_account().await;
+    let (signer, _) = origin_devnet.get_first_predeployed_account_credentials().await;
 
     let nonexistent_class_hash = Felt::from_hex_unchecked("0x123");
     let factory = OpenZeppelinAccountFactory::new(
@@ -353,7 +340,7 @@ async fn test_deploying_account_with_class_present_on_origin() {
     .await
     .unwrap();
 
-    let (signer, _) = origin_devnet.get_first_predeployed_account().await;
+    let (signer, _) = origin_devnet.get_first_predeployed_account_credentials().await;
 
     // fork, but first create a forkable origin block
     origin_devnet.create_block().await.unwrap();
@@ -395,7 +382,7 @@ async fn test_get_nonce_if_contract_deployed_on_origin() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
     let fork_devnet = origin_devnet.fork().await.unwrap();
 
-    let (_, account_address) = origin_devnet.get_first_predeployed_account().await;
+    let (_, account_address) = origin_devnet.get_first_predeployed_account_credentials().await;
 
     let nonce = fork_devnet
         .json_rpc_client
@@ -426,7 +413,7 @@ async fn test_get_storage_if_contract_deployed_on_origin() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
     let fork_devnet = origin_devnet.fork().await.unwrap();
 
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = origin_devnet.get_first_predeployed_account_credentials().await;
 
     let dummy_key = Felt::ONE;
     let dummy_value = fork_devnet
@@ -452,14 +439,7 @@ async fn test_deploying_on_origin_calling_on_fork() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
     // obtain account for deployment
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_simple_contract_artifacts();
 
@@ -489,14 +469,7 @@ async fn test_deploying_on_origin_calling_on_fork() {
 async fn changes_in_origin_after_forking_block_should_not_affect_fork_state() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_simple_contract_artifacts();
 
@@ -626,14 +599,7 @@ async fn test_block_count_increased() {
 async fn test_block_count_increased_on_state() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, account_address) = origin_devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_block_reader_contract_artifacts();
 

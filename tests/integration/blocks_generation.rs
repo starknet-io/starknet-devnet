@@ -187,7 +187,7 @@ async fn assert_balance(
 }
 
 async fn assert_get_nonce(devnet: &BackgroundDevnet) -> Result<(), anyhow::Error> {
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     let pre_confirmed_block_nonce = devnet
         .json_rpc_client
@@ -201,7 +201,7 @@ async fn assert_get_nonce(devnet: &BackgroundDevnet) -> Result<(), anyhow::Error
 }
 
 async fn assert_get_storage_at(devnet: &BackgroundDevnet) -> Result<(), anyhow::Error> {
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let key = Felt::ZERO;
 
     let pre_confirmed_block_storage = devnet
@@ -220,7 +220,7 @@ async fn assert_get_storage_at(devnet: &BackgroundDevnet) -> Result<(), anyhow::
 }
 
 async fn assert_get_class_hash_at(devnet: &BackgroundDevnet) -> Result<(), anyhow::Error> {
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     let pre_confirmed_block_class_hash = devnet
         .json_rpc_client
@@ -318,7 +318,7 @@ async fn blocks_on_demand_declarations() {
     let devnet_args = ["--block-generation-on", "demand"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let mut predeployed_account = SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -405,7 +405,7 @@ async fn blocks_on_demand_invoke_and_call() {
 
     let mut tx_hashes = Vec::new();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let mut predeployed_account = SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -633,7 +633,7 @@ async fn get_class_hash_at_block_on_demand() {
 #[tokio::test]
 async fn get_data_by_specifying_latest_block_hash_and_number() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let latest_block = devnet.get_latest_block_with_tx_hashes().await.unwrap();
     let block_ids =
         [BlockId::Hash(latest_block.block_hash), BlockId::Number(latest_block.block_number)];

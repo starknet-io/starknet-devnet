@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 use starknet_core::constants::CHARGEABLE_ACCOUNT_ADDRESS;
-use starknet_rs_accounts::{ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::Account;
 use starknet_rs_core::types::{
     DeclareTransactionV3, DeployAccountTransaction, Felt, InvokeTransactionV3, Transaction,
     TransactionFinalityStatus,
@@ -10,7 +10,6 @@ use starknet_rs_core::types::{
 use tokio_tungstenite::connect_async;
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, assert_no_notifications, declare_deploy_simple_contract, deploy_oz_account,
     receive_new_tx, receive_rpc_via_ws, send_dummy_mint_tx, subscribe_new_txs, unsubscribe,
@@ -130,18 +129,12 @@ async fn should_notify_for_filtered_address() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
     let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let predeployed_account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account().await;
 
     let subscription_id =
-        subscribe_new_txs(&mut ws, json!({ "sender_address": [account_address] })).await.unwrap();
+        subscribe_new_txs(&mut ws, json!({ "sender_address": [predeployed_account.address()] }))
+            .await
+            .unwrap();
 
     // Send the actual txs
     let (class_hash, _) = declare_deploy_simple_contract(&predeployed_account).await.unwrap();

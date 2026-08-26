@@ -38,7 +38,7 @@ async fn devnet_get_status_after_interaction() {
     );
 
     // Mint tokens to generate a transaction
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let mint_amount = 1_000_000u128;
     devnet.mint(account_address, mint_amount).await;
 

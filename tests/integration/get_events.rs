@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use starknet_rs_accounts::{Account, ConnectedAccount, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::{Account, ConnectedAccount};
 use starknet_rs_core::types::{
     BlockId, BlockStatus, BlockTag, Call, EmittedEvent, EventFilter, Felt, StarknetError,
 };
@@ -8,7 +8,7 @@ use starknet_rs_core::utils::{get_selector_from_name, get_udc_deployed_address};
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants::{self, MAINNET_URL, STRK_ERC20_CONTRACT_ADDRESS};
+use crate::common::constants::{MAINNET_URL, STRK_ERC20_CONTRACT_ADDRESS};
 use crate::common::utils::{get_events_contract_artifacts, new_contract_factory};
 
 async fn get_events_follow_continuation_token(
@@ -40,14 +40,7 @@ async fn get_events_follow_continuation_token(
 /// and deploy a contract that emits events. Then the events are fetched: first all in a single
 /// chunk, then in multiple chunks.
 async fn get_events_correct_chunking(devnet: &BackgroundDevnet, block_on_demand: bool) {
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let mut predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     predeployed_account.set_block_id(BlockId::Tag(BlockTag::PreConfirmed));
 
@@ -204,14 +197,7 @@ async fn get_events_errors() {
 #[tokio::test]
 async fn get_events_with_multiple_addresses() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let mut predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     predeployed_account.set_block_id(BlockId::Tag(BlockTag::PreConfirmed));
 

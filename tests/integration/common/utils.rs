@@ -12,8 +12,7 @@ use serde_json::json;
 use starknet_api::contract_class::compiled_class_hash::{HashVersion, HashableCompiledClass};
 use starknet_core::CasmContractClass;
 use starknet_rs_accounts::{
-    Account, AccountFactory, ArgentAccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory,
-    SingleOwnerAccount,
+    Account, AccountFactory, ArgentAccountFactory, OpenZeppelinAccountFactory, SingleOwnerAccount,
 };
 use starknet_rs_contract::{ContractFactory, UdcSelector};
 use starknet_rs_core::types::contract::SierraClass;
@@ -35,8 +34,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::background_devnet::BackgroundDevnet;
 use super::constants::{
-    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, CAIRO_1_CONTRACT_PATH, CHAIN_ID,
-    ETH_ERC20_CONTRACT_ADDRESS, UDC_CONTRACT_ADDRESS,
+    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, CAIRO_1_CONTRACT_PATH, ETH_ERC20_CONTRACT_ADDRESS,
+    UDC_CONTRACT_ADDRESS,
 };
 use super::safe_child::SafeChild;
 use crate::common::errors::RpcError;
@@ -152,14 +151,7 @@ pub struct ProofBearingTransactionDetails {
 pub async fn create_proof_bearing_transaction(
     devnet: &BackgroundDevnet,
 ) -> ProofBearingTransactionDetails {
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let tx_calls = vec![Call {
@@ -170,7 +162,7 @@ pub async fn create_proof_bearing_transaction(
 
     let tx_nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 

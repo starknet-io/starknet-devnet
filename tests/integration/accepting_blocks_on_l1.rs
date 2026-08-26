@@ -450,10 +450,7 @@ async fn should_fail_if_accepting_pre_confirmed() {
 
 #[tokio::test]
 async fn should_fail_if_accepting_rejected() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
     send_dummy_tx(&devnet).await;
     let aborted_blocks = devnet.abort_blocks(&BlockId::Tag(BlockTag::Latest)).await.unwrap();

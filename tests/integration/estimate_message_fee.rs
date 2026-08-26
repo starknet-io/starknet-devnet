@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::Account;
 use starknet_rs_core::types::{BlockId, BlockTag, EthAddress, Felt, MsgFromL1, StarknetError};
 use starknet_rs_core::utils::{UdcUniqueness, get_udc_deployed_address};
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants::{CHAIN_ID, L1_HANDLER_SELECTOR, MESSAGING_WHITELISTED_L1_CONTRACT};
+use crate::common::constants::{L1_HANDLER_SELECTOR, MESSAGING_WHITELISTED_L1_CONTRACT};
 use crate::common::utils::{get_messaging_contract_artifacts, new_contract_factory};
 
 #[tokio::test]
@@ -14,14 +14,7 @@ async fn estimate_message_fee() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     // get class
     let (contract_artifact, casm_hash) = get_messaging_contract_artifacts();
@@ -92,10 +85,7 @@ async fn estimate_message_fee_contract_not_found() {
 
 #[tokio::test]
 async fn estimate_message_fee_block_not_found() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
 
     let err = devnet
         .json_rpc_client
