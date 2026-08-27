@@ -6,7 +6,6 @@ use starknet_rs_providers::Provider;
 
 use crate::assert_eq_prop;
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, UniqueAutoDeletableFile, new_contract_factory, send_ctrl_c_signal_and_wait,
 };
@@ -16,7 +15,7 @@ static DUMMY_AMOUNT: u128 = 1;
 
 use std::sync::Arc;
 
-use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::Account;
 use starknet_rs_core::types::{DeclareTransaction, Felt, InvokeTransaction, Transaction};
 
 use crate::common::utils::get_events_contract_artifacts;
@@ -221,14 +220,7 @@ async fn declare_deploy() {
     .await
     .expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     let (cairo_1_contract, casm_class_hash) = get_events_contract_artifacts();
 

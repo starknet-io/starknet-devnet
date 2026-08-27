@@ -1,16 +1,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use starknet_rs_accounts::{
-    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory, SingleOwnerAccount,
-};
+use starknet_rs_accounts::{Account, AccountFactory, OpenZeppelinAccountFactory};
 use starknet_rs_core::types::{BlockId, BlockTag, Felt, StarknetError};
 use starknet_rs_core::utils::get_storage_var_address;
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_0_ACCOUNT_CONTRACT_HASH, CHAIN_ID, STRK_ERC20_CONTRACT_ADDRESS,
+    CAIRO_0_ACCOUNT_CONTRACT_HASH, CHAIN_ID, STRK_ERC20_CONTRACT_ADDRESS,
 };
 use crate::common::utils::{
     FeeUnit, assert_tx_succeeded_accepted, get_deployable_account_signer,
@@ -136,14 +134,7 @@ async fn assert_gas_price_unaffected_by_restart() {
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
     // get a predeployed account
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let predeployed_account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     // get class
     let (contract_artifact, casm_hash) = get_simple_contract_artifacts();
@@ -181,7 +172,7 @@ async fn assert_predeployed_account_is_prefunded_after_restart() {
     .await
     .unwrap();
 
-    let predeployed_account_address = devnet.get_first_predeployed_account().await.1;
+    let predeployed_account_address = devnet.get_first_predeployed_account_credentials().await.1;
 
     let balance_before =
         devnet.get_balance_latest(&predeployed_account_address, FeeUnit::Wei).await.unwrap();

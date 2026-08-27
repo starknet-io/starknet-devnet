@@ -3,9 +3,7 @@ use std::sync::Arc;
 use starknet_core::constants::{
     CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, CHARGEABLE_ACCOUNT_ADDRESS, STRK_ERC20_CONTRACT_ADDRESS,
 };
-use starknet_rs_accounts::{
-    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory, SingleOwnerAccount,
-};
+use starknet_rs_accounts::{Account, AccountFactory, OpenZeppelinAccountFactory};
 use starknet_rs_core::types::{
     ConfirmedBlockId, DeployedContractItem, ExecuteInvocation, Felt, InvokeTransactionTrace,
     StarknetError, TransactionTrace,
@@ -100,14 +98,7 @@ async fn get_invoke_trace_block_generation_on_demand() {
 async fn get_declare_trace() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     let (cairo_1_contract, casm_class_hash) = get_events_contract_artifacts();
 
@@ -130,7 +121,7 @@ async fn get_declare_trace() {
     if let TransactionTrace::Declare(declare_trace) = declare_tx_trace {
         let validate_invocation = declare_trace.validate_invocation.unwrap();
 
-        assert_eq!(validate_invocation.contract_address, account_address);
+        assert_eq!(validate_invocation.contract_address, predeployed_account.address());
         assert_eq!(
             validate_invocation.class_hash,
             Felt::from_hex_unchecked(CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH)
@@ -155,14 +146,7 @@ async fn get_declare_trace() {
 async fn test_contract_deployment_trace() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     let (cairo_1_contract, casm_class_hash) = get_events_contract_artifacts();
 

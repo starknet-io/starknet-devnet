@@ -8,6 +8,7 @@ use base64::Engine;
 use lazy_static::lazy_static;
 use reqwest::{Client, StatusCode};
 use serde_json::json;
+use starknet_rs_accounts::{ExecutionEncoding, SingleOwnerAccount};
 use starknet_rs_core::types::{
     BlockId, BlockTag, BlockWithTxHashes, BlockWithTxs, BroadcastedInvokeTransaction, Felt,
     FunctionCall, MaybePreConfirmedBlockWithTxHashes, MaybePreConfirmedBlockWithTxs,
@@ -43,6 +44,9 @@ pub struct BackgroundDevnet {
     pub url: String,
     rpc_url: Url,
 }
+
+pub type PredeployedAccount<'a> = SingleOwnerAccount<&'a JsonRpcClient<HttpTransport>, LocalWallet>;
+pub type OwnedPredeployedAccount = SingleOwnerAccount<JsonRpcClient<HttpTransport>, LocalWallet>;
 
 #[derive(Debug, Clone)]
 pub struct ProveTransactionResult {
@@ -443,8 +447,63 @@ impl BackgroundDevnet {
         }
     }
 
-    /// This method returns the private key and the address of the first predeployed account
-    pub async fn get_first_predeployed_account(&self) -> (LocalWallet, Felt) {
+    /// Returns an account connected to this Devnet's provider using the first predeployed account.
+    pub async fn get_first_predeployed_account(&self) -> PredeployedAccount<'_> {
+        self.get_first_predeployed_account_with_encoding(ExecutionEncoding::New).await
+    }
+
+    /// Returns the first predeployed account with an owned provider, allowing the account to be
+    /// moved into tasks or other `'static` contexts.
+    pub async fn get_first_predeployed_account_owned(&self) -> OwnedPredeployedAccount {
+        let (signer, account_address) = self.get_first_predeployed_account_credentials().await;
+        let chain_id = self.json_rpc_client.chain_id().await.unwrap();
+
+        SingleOwnerAccount::new(
+            self.clone_provider(),
+            signer,
+            account_address,
+            chain_id,
+            ExecutionEncoding::New,
+        )
+    }
+
+    /// Returns the connected account and a copy of its signer for tests that construct and sign
+    /// RPC transactions manually.
+    pub async fn get_first_predeployed_account_with_signer(
+        &self,
+    ) -> (PredeployedAccount<'_>, LocalWallet) {
+        self.get_first_predeployed_account_with_signer_and_encoding(ExecutionEncoding::New).await
+    }
+
+    /// Returns an account connected to this Devnet's provider using the requested execution
+    /// encoding.
+    pub async fn get_first_predeployed_account_with_encoding(
+        &self,
+        execution_encoding: ExecutionEncoding,
+    ) -> PredeployedAccount<'_> {
+        self.get_first_predeployed_account_with_signer_and_encoding(execution_encoding).await.0
+    }
+
+    /// Returns the connected account and signer using the requested execution encoding.
+    pub async fn get_first_predeployed_account_with_signer_and_encoding(
+        &self,
+        execution_encoding: ExecutionEncoding,
+    ) -> (PredeployedAccount<'_>, LocalWallet) {
+        let (signer, account_address) = self.get_first_predeployed_account_credentials().await;
+        let chain_id = self.json_rpc_client.chain_id().await.unwrap();
+
+        let account = SingleOwnerAccount::new(
+            &self.json_rpc_client,
+            signer.clone(),
+            account_address,
+            chain_id,
+            execution_encoding,
+        );
+        (account, signer)
+    }
+
+    /// Returns the signer and address of the first predeployed account.
+    pub async fn get_first_predeployed_account_credentials(&self) -> (LocalWallet, Felt) {
         let predeployed_accounts_json =
             self.send_custom_rpc("devnet_getPredeployedAccounts", json!({})).await.unwrap();
 

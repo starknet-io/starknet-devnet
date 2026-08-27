@@ -22,7 +22,7 @@ async fn test_failed_validation_with_expected_message() {
     let devnet = BackgroundDevnet::spawn_with_additional_args(&args).await.unwrap();
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer,
@@ -57,14 +57,7 @@ async fn test_declaration_rejected_if_casm_hash_not_matching() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = Arc::new(SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    ));
+    let account = Arc::new(devnet.get_first_predeployed_account_owned().await);
 
     let (contract_class, _) = get_simple_contract_artifacts();
     let dummy_casm_hash = Felt::ONE;
@@ -95,14 +88,7 @@ async fn test_declaration_rejected_if_casm_hash_not_matching() {
 async fn test_tx_status_content_of_failed_invoke() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (sierra, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);

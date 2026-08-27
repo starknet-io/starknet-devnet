@@ -38,10 +38,7 @@ async fn get_class_hash_at_for_undeployed_address() {
 
 #[tokio::test]
 async fn get_class_hash_at_by_block_number() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
     let contract_address = Felt::from_hex_unchecked(PREDEPLOYED_ACCOUNT_ADDRESS);
 
     let result =
@@ -51,10 +48,7 @@ async fn get_class_hash_at_by_block_number() {
 
 #[tokio::test]
 async fn get_class_hash_at_by_block_hash() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
     let contract_address = Felt::from_hex_unchecked(PREDEPLOYED_ACCOUNT_ADDRESS);
 
     let err = devnet

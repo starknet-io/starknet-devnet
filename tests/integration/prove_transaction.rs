@@ -20,20 +20,13 @@ fn transfer_call(recipient: Felt, amount: Felt) -> Call {
 #[tokio::test]
 async fn prove_transaction_endpoint_returns_proof_and_proof_facts() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -66,20 +59,13 @@ async fn prove_transaction_endpoint_returns_proof_and_proof_facts() {
 #[tokio::test]
 async fn invoke_with_valid_proof_is_accepted() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let tx_calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let tx_nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -152,20 +138,13 @@ async fn invoke_with_valid_proof_is_accepted() {
 #[tokio::test]
 async fn invoke_with_wrong_proof_is_rejected() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let tx_calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let tx_nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -243,14 +222,7 @@ async fn invoke_with_wrong_proof_is_rejected() {
 async fn invoke_without_proof_in_devnet_mode_is_accepted() {
     // In devnet proof mode (default), transactions without proof fields should still be accepted
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
@@ -263,20 +235,13 @@ async fn invoke_without_proof_in_devnet_mode_is_accepted() {
 async fn invoke_with_proof_only_and_no_proof_facts_is_rejected() {
     // Sending proof without proof_facts should fail
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let tx_calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let tx_nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -350,20 +315,13 @@ async fn invoke_with_proof_only_and_no_proof_facts_is_rejected() {
 #[tokio::test]
 async fn prove_transaction_is_deterministic() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -408,20 +366,13 @@ async fn prove_transaction_differs_on_different_block_ids() {
         devnet.create_block().await.unwrap();
     }
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -472,14 +423,7 @@ async fn invoke_in_proof_mode_none_accepts_without_proof_or_with_wrong_proof() {
         .await
         .expect("Could not start Devnet in proof-mode none");
 
-    let (none_signer, none_account_address) = devnet_none.get_first_predeployed_account().await;
-    let mut none_account = SingleOwnerAccount::new(
-        &devnet_none.json_rpc_client,
-        none_signer,
-        none_account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut none_account = devnet_none.get_first_predeployed_account().await;
     none_account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let tx_calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
@@ -498,7 +442,7 @@ async fn invoke_in_proof_mode_none_accepts_without_proof_or_with_wrong_proof() {
 
     let nonce_without_proof = devnet_none
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account.address())
         .await
         .unwrap();
     let fees_without_proof = none_account
@@ -530,7 +474,7 @@ async fn invoke_in_proof_mode_none_accepts_without_proof_or_with_wrong_proof() {
 
     let devnet_with_proofs = BackgroundDevnet::spawn().await.expect("Could not start proof devnet");
     let (proof_signer, proof_account_address) =
-        devnet_with_proofs.get_first_predeployed_account().await;
+        devnet_with_proofs.get_first_predeployed_account_credentials().await;
     let mut proof_account = SingleOwnerAccount::new(
         &devnet_with_proofs.json_rpc_client,
         proof_signer,
@@ -577,7 +521,7 @@ async fn invoke_in_proof_mode_none_accepts_without_proof_or_with_wrong_proof() {
 
     let nonce_with_valid_proof = devnet_none
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account.address())
         .await
         .unwrap();
     let fees_with_valid_proof = none_account
@@ -613,7 +557,7 @@ async fn invoke_in_proof_mode_none_accepts_without_proof_or_with_wrong_proof() {
 
     let nonce_with_wrong_proof = devnet_none
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account.address())
         .await
         .unwrap();
     let wrong_proof =
@@ -658,14 +602,7 @@ async fn invoke_in_proof_mode_none_rejects_wrong_proof_facts() {
         .await
         .expect("Could not start Devnet in proof-mode none");
 
-    let (none_signer, none_account_address) = devnet_none.get_first_predeployed_account().await;
-    let mut none_account = SingleOwnerAccount::new(
-        &devnet_none.json_rpc_client,
-        none_signer,
-        none_account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut none_account = devnet_none.get_first_predeployed_account().await;
     none_account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     // Need enough blocks for block-hash retention buffer
@@ -682,7 +619,7 @@ async fn invoke_in_proof_mode_none_rejects_wrong_proof_facts() {
     let tx_calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let nonce = devnet_none
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), none_account.address())
         .await
         .unwrap();
 
@@ -719,7 +656,6 @@ async fn invoke_in_proof_mode_none_rejects_wrong_proof_facts() {
 async fn prove_transaction_returns_l2_to_l1_messages_for_withdraw() {
     let (devnet, account, contract_address) =
         setup_devnet(&["--account-class", "cairo1"]).await.unwrap();
-    let account_address = account.address();
 
     // increase_balance for user before withdraw
     let user = Felt::ONE;
@@ -737,7 +673,7 @@ async fn prove_transaction_returns_l2_to_l1_messages_for_withdraw() {
 
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -848,20 +784,13 @@ async fn prove_transaction_returns_l2_to_l1_messages_for_withdraw() {
 #[tokio::test]
 async fn prove_transaction_returns_empty_messages_for_simple_transfer() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let calls = vec![transfer_call(Felt::ONE, Felt::from(1000u64))];
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 
@@ -901,14 +830,7 @@ async fn prove_transaction_returns_empty_messages_for_simple_transfer() {
 #[tokio::test]
 async fn prove_transaction_returns_error_on_execution_failure() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     // Call a non-existent contract to trigger execution failure
@@ -920,7 +842,7 @@ async fn prove_transaction_returns_error_on_execution_failure() {
 
     let nonce = devnet
         .json_rpc_client
-        .get_nonce(BlockId::Tag(BlockTag::Latest), account_address)
+        .get_nonce(BlockId::Tag(BlockTag::Latest), account.address())
         .await
         .unwrap();
 

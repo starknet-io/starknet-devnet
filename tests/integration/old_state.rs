@@ -19,7 +19,7 @@ use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_1_VERSION_ASSERTER_SIERRA_PATH, CHAIN_ID, ETH_ERC20_CONTRACT_ADDRESS,
+    CAIRO_1_VERSION_ASSERTER_SIERRA_PATH, CHAIN_ID, ETH_ERC20_CONTRACT_ADDRESS,
     UDC_CONTRACT_ADDRESS,
 };
 use crate::common::utils::{
@@ -29,19 +29,8 @@ use crate::common::utils::{
 
 #[tokio::test]
 async fn get_storage_from_an_old_state() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
+    let account = devnet.get_first_predeployed_account().await;
 
     devnet.create_block().await.unwrap();
     let BlockHashAndNumber { block_hash, .. } =
@@ -63,7 +52,7 @@ async fn get_storage_from_an_old_state() {
         .await
         .unwrap();
 
-    let storage_address = get_storage_var_address("ERC20_balances", &[account_address]).unwrap();
+    let storage_address = get_storage_var_address("ERC20_balances", &[account.address()]).unwrap();
 
     let latest_balance = devnet
         .json_rpc_client
@@ -93,10 +82,7 @@ async fn get_storage_from_an_old_state() {
 
 #[tokio::test]
 async fn minting_in_multiple_steps_and_getting_balance_at_each_block() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
     // create a block if there are no blocks before starting minting
     devnet.create_block().await.unwrap();
@@ -123,13 +109,10 @@ async fn minting_in_multiple_steps_and_getting_balance_at_each_block() {
 /// Fee estimation of invoke tx that reverts must fail; simulating the same tx must produce trace.
 #[tokio::test]
 async fn fee_estimation_and_simulation_of_deployment_at_old_block_should_not_yield_same_error() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -269,7 +252,7 @@ async fn test_getting_class_at_various_blocks() {
     let devnet_args = ["--state-archive-capacity", "full"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -326,12 +309,9 @@ async fn test_getting_class_at_various_blocks() {
 
 #[tokio::test]
 async fn test_nonce_retrieval_for_an_old_state() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .unwrap();
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -380,19 +360,8 @@ async fn test_nonce_retrieval_for_an_old_state() {
 
 #[tokio::test]
 async fn get_storage_with_response_flags() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
-            .await
-            .expect("Could not start Devnet");
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let devnet = BackgroundDevnet::spawn_forkable_devnet().await.expect("Could not start Devnet");
+    let account = devnet.get_first_predeployed_account().await;
 
     let recipient = Felt::ONE;
     let flags: Option<&[StorageResponseFlag]> =

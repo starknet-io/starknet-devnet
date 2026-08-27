@@ -22,7 +22,7 @@ use starknet_rs_signers::{LocalWallet, Signer, SigningKey};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, CAIRO_1_CONTRACT_PATH,
+    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH, CAIRO_1_CONTRACT_PATH,
     CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH, CAIRO_1_VERSION_ASSERTER_SIERRA_PATH, CHAIN_ID,
     ETH_ERC20_CONTRACT_ADDRESS, QUERY_VERSION_OFFSET, UDC_CONTRACT_ADDRESS,
 };
@@ -38,7 +38,7 @@ async fn simulate_declare_v3() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -239,7 +239,7 @@ async fn simulate_invoke_v3() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -365,14 +365,7 @@ async fn using_query_version_if_simulating() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let (account, signer) = devnet.get_first_predeployed_account_with_signer().await;
 
     // get class
     let (flattened_contract_artifact, casm_hash) =
@@ -433,14 +426,7 @@ async fn using_query_version_if_simulating() {
 async fn test_simulation_of_panicking_invoke() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        starknet_rs_accounts::ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);
@@ -499,14 +485,7 @@ async fn simulate_of_multiple_txs_shouldnt_return_an_error_if_invoke_transaction
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
 
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
@@ -544,7 +523,7 @@ async fn simulate_of_multiple_txs_shouldnt_return_an_error_if_invoke_transaction
             account.block_id(),
             [
                 BroadcastedTransaction::Declare(BroadcastedDeclareTransactionV3 {
-                    sender_address: account_address,
+                    sender_address: account.address(),
                     compiled_class_hash: casm_hash,
                     signature: vec![],
                     nonce: Felt::ZERO,
@@ -559,7 +538,7 @@ async fn simulate_of_multiple_txs_shouldnt_return_an_error_if_invoke_transaction
                 }),
                 BroadcastedTransaction::Invoke(BroadcastedInvokeTransaction {
                     broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
-                        sender_address: account_address,
+                        sender_address: account.address(),
                         calldata,
                         signature: vec![],
                         nonce: Felt::ONE,
@@ -598,14 +577,7 @@ async fn simulate_of_multiple_txs_shouldnt_return_an_error_if_invoke_transaction
 async fn simulate_of_multiple_txs_should_return_initial_reads_when_flag_present() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
 
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
@@ -633,7 +605,7 @@ async fn simulate_of_multiple_txs_should_return_initial_reads_when_flag_present(
 
     let transactions = [
         BroadcastedTransaction::Declare(BroadcastedDeclareTransactionV3 {
-            sender_address: account_address,
+            sender_address: account.address(),
             compiled_class_hash: casm_hash,
             signature: vec![],
             nonce: Felt::ZERO,
@@ -648,7 +620,7 @@ async fn simulate_of_multiple_txs_should_return_initial_reads_when_flag_present(
         }),
         BroadcastedTransaction::Invoke(BroadcastedInvokeTransaction {
             broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
-                sender_address: account_address,
+                sender_address: account.address(),
                 calldata,
                 signature: vec![],
                 nonce: Felt::ONE,
@@ -703,14 +675,7 @@ async fn simulate_of_multiple_txs_should_return_index_of_first_failing_transacti
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start devnet");
 
     // get account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        devnet.json_rpc_client.chain_id().await.unwrap(),
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
 
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
@@ -748,7 +713,7 @@ async fn simulate_of_multiple_txs_should_return_index_of_first_failing_transacti
             account.block_id(),
             [
                 BroadcastedTransaction::Declare(BroadcastedDeclareTransactionV3 {
-                    sender_address: account_address,
+                    sender_address: account.address(),
                     compiled_class_hash: casm_hash,
                     signature: vec![],
                     nonce: Felt::ZERO,
@@ -763,7 +728,7 @@ async fn simulate_of_multiple_txs_should_return_index_of_first_failing_transacti
                 }),
                 BroadcastedTransaction::Invoke(BroadcastedInvokeTransaction {
                     broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
-                        sender_address: account_address,
+                        sender_address: account.address(),
                         calldata,
                         signature: vec![],
                         nonce: Felt::ONE,
@@ -800,15 +765,7 @@ async fn simulate_with_gas_bounds_exceeding_balance_returns_error_if_charging_no
     let (sierra_artifact, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let gas = 1e11 as u64;
@@ -1020,15 +977,7 @@ async fn simulate_invoke_v3_with_fee_just_below_estimated_should_return_a_trace_
     let (sierra_artifact, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let mut account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let mut account = devnet.get_first_predeployed_account().await;
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
     let declare_result =
@@ -1075,15 +1024,7 @@ async fn simulate_invoke_declare_deploy_account_with_either_gas_or_gas_price_set
         .await
         .expect("Could not start Devnet");
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let call = Call {
         to: ETH_ERC20_CONTRACT_ADDRESS,
@@ -1125,7 +1066,7 @@ async fn simulate_invoke_declare_deploy_account_with_either_gas_or_gas_price_set
 
         let invoke_transaction = BroadcastedInvokeTransaction {
             broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
-                sender_address: account_address,
+                sender_address: account.address(),
                 calldata: calldata.clone(),
                 signature: vec![],
                 nonce,
@@ -1161,7 +1102,7 @@ async fn simulate_invoke_declare_deploy_account_with_either_gas_or_gas_price_set
             BroadcastedTransaction::DeployAccount(deploy_account_transaction);
 
         let declare_transaction = BroadcastedDeclareTransactionV3 {
-            sender_address: account_address,
+            sender_address: account.address(),
             compiled_class_hash: casm_hash,
             signature: vec![],
             nonce,
@@ -1219,15 +1160,7 @@ async fn simulate_invoke_v3_with_failing_execution_should_return_a_trace_of_reve
     let (sierra_artifact, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_PANICKING_CONTRACT_SIERRA_PATH);
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (_, contract_address) =
         declare_v3_deploy_v3(&account, sierra_artifact, casm_hash, &[]).await.unwrap();

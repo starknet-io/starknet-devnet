@@ -48,7 +48,7 @@ async fn correct_artifact_test_body(
 ) -> Result<(), anyhow::Error> {
     let devnet = BackgroundDevnet::spawn_with_additional_args(devnet_args).await?;
 
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let retrieved_class_hash = devnet
         .json_rpc_client
         .get_class_hash_at(BlockId::Tag(BlockTag::Latest), account_address)
@@ -220,7 +220,7 @@ async fn can_declare_deploy_invoke_using_predeployed_cairo1() {
     let cli_args = ["--account-class", "cairo1"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     can_declare_deploy_invoke_cairo1_using_account(&devnet, &signer, account_address).await;
 }
 
@@ -229,7 +229,7 @@ async fn can_declare_deploy_invoke_using_predeployed_custom() {
     let cli_args = ["--account-class-custom", CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     can_declare_deploy_invoke_cairo1_using_account(&devnet, &signer, account_address).await;
 }
 
@@ -254,7 +254,7 @@ async fn assert_supports_isrc6(
 #[tokio::test]
 async fn test_interface_support_of_predeployed_account() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     assert_supports_isrc6(&devnet, account_address).await.unwrap();
 }

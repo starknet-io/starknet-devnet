@@ -45,7 +45,7 @@ async fn test_getting_class() {
 async fn test_getting_class_of_declared_cairo1_contract() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -94,7 +94,7 @@ async fn test_getting_class_with_blocks_on_demand() {
     let devnet_args = ["--state-archive-capacity", "full", "--block-generation-on", "demand"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -166,7 +166,7 @@ async fn test_getting_class_after_block_abortion() {
     let devnet_args = ["--state-archive-capacity", "full"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
+    let (signer, account_address) = devnet.get_first_predeployed_account_credentials().await;
     let predeployed_account = Arc::new(SingleOwnerAccount::new(
         devnet.clone_provider(),
         signer.clone(),
@@ -232,7 +232,7 @@ async fn getting_compiled_casm_for_cairo0_or_non_existing_hash_should_return_cla
         .await
         .expect("Could not start Devnet");
 
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     let block_id = BlockId::Tag(BlockTag::Latest);
 
@@ -257,7 +257,7 @@ async fn getting_compiled_casm_for_cairo_1_should_succeed() {
     let (_, expected_casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH);
 
-    let (_, account_address) = devnet.get_first_predeployed_account().await;
+    let (_, account_address) = devnet.get_first_predeployed_account_credentials().await;
 
     let block_id = BlockId::Tag(BlockTag::Latest);
 

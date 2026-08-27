@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time;
 
 use serde_json::json;
-use starknet_rs_accounts::{Account, AccountError, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::{Account, AccountError};
 use starknet_rs_core::types::{
     BlockId, BlockTag, Call, Felt, FunctionCall, StarknetError, TransactionExecutionStatus,
     TransactionStatus,
@@ -11,7 +11,6 @@ use starknet_rs_core::utils::{get_selector_from_name, get_udc_deployed_address};
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants;
 use crate::common::utils::{
     UniqueAutoDeletableFile, assert_contains, declare_v3_deploy_v3, extract_message_error,
     extract_nested_error, get_block_reader_contract_artifacts,
@@ -50,14 +49,7 @@ fn assert_eq_with_buffer(val1: u64, val2: u64) {
 }
 
 pub async fn setup_timestamp_contract(devnet: &BackgroundDevnet) -> Felt {
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let predeployed_account = SingleOwnerAccount::new(
-        devnet.clone_provider(),
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let predeployed_account = devnet.get_first_predeployed_account_owned().await;
 
     // declare
     let (cairo_1_contract, casm_class_hash) = get_block_reader_contract_artifacts();
@@ -604,14 +596,7 @@ async fn correct_pre_confirmed_block_timestamp_after_setting() {
 async fn tx_resource_estimation_fails_unless_time_incremented() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_timestamp_asserter_contract_artifacts();
 
@@ -657,14 +642,7 @@ async fn tx_resource_estimation_fails_unless_time_incremented() {
 async fn tx_execution_fails_unless_time_incremented() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
-    let (signer, address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let account = devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_timestamp_asserter_contract_artifacts();
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::Account;
 use starknet_rs_core::types::{
     BroadcastedDeclareTransactionV3, DataAvailabilityMode, Felt, Transaction,
 };
@@ -13,7 +13,6 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants;
 use crate::common::utils::{
     FeeUnit, LocalFee, UniqueAutoDeletableFile, assert_no_notifications,
     get_simple_contract_artifacts, send_binary_rpc_via_ws, send_ctrl_c_signal_and_wait,
@@ -349,14 +348,7 @@ async fn should_declare_via_ws() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
 
     // Prepare account
-    let (signer, account_address) = devnet.get_first_predeployed_account().await;
-    let account = SingleOwnerAccount::new(
-        &devnet.json_rpc_client,
-        signer.clone(),
-        account_address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let (account, signer) = devnet.get_first_predeployed_account_with_signer().await;
 
     // Prepare class
     let (simple_class, casm_hash) = get_simple_contract_artifacts();
@@ -384,7 +376,7 @@ async fn should_declare_via_ws() {
 
     // Send the declaration tx via ws
     let sendable_declaration = BroadcastedDeclareTransactionV3 {
-        sender_address: account_address,
+        sender_address: account.address(),
         compiled_class_hash: casm_hash,
         signature: vec![signature.r, signature.s],
         nonce,

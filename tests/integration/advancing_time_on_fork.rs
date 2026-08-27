@@ -18,14 +18,7 @@ async fn tx_resource_estimation_fails_on_forked_devnet_with_impersonation_unless
 {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, address) = origin_devnet.get_first_predeployed_account().await;
-    let origin_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let origin_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_timestamp_asserter_contract_artifacts();
 
@@ -42,7 +35,7 @@ async fn tx_resource_estimation_fails_on_forked_devnet_with_impersonation_unless
     let fork_account = SingleOwnerAccount::new(
         &forked_devnet.json_rpc_client,
         LocalWallet::from(SigningKey::from_secret_scalar(Felt::TWO)),
-        address,
+        origin_account.address(),
         constants::CHAIN_ID,
         ExecutionEncoding::New,
     );
@@ -89,14 +82,7 @@ async fn tx_resource_estimation_fails_on_forked_devnet_with_impersonation_unless
 async fn tx_execution_fails_on_forked_devnet_with_impersonation_unless_time_incremented() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
 
-    let (signer, address) = origin_devnet.get_first_predeployed_account().await;
-    let origin_account = SingleOwnerAccount::new(
-        &origin_devnet.json_rpc_client,
-        signer,
-        address,
-        constants::CHAIN_ID,
-        ExecutionEncoding::New,
-    );
+    let origin_account = origin_devnet.get_first_predeployed_account().await;
 
     let (contract_class, casm_hash) = get_timestamp_asserter_contract_artifacts();
 
@@ -113,7 +99,7 @@ async fn tx_execution_fails_on_forked_devnet_with_impersonation_unless_time_incr
     let fork_account = SingleOwnerAccount::new(
         &forked_devnet.json_rpc_client,
         LocalWallet::from(SigningKey::from_secret_scalar(Felt::TWO)),
-        address,
+        origin_account.address(),
         constants::CHAIN_ID,
         ExecutionEncoding::New,
     );
