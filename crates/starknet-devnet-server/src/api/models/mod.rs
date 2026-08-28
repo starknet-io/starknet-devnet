@@ -24,7 +24,7 @@ use starknet_types::rpc::transaction_receipt::FeeUnit;
 use starknet_types::rpc::transactions::{
     BroadcastedDeclareTransaction, BroadcastedDeployAccountTransaction,
     BroadcastedInvokeTransaction, BroadcastedTransaction, EventFilter, FunctionCall,
-    SimulationFlag, TraceFlag, TransactionFinalityStatus,
+    SimulationFlag, TraceFlag, TransactionFinalityStatus, TransactionWithHash,
 };
 use starknet_types::serde_helpers::dec_string::deserialize_biguint;
 use starknet_types::starknet_api::block::BlockNumber;
@@ -48,6 +48,81 @@ where
         AddressOrVec::Single(addr) => vec![addr],
         AddressOrVec::Multiple(addrs) => addrs,
     }))
+}
+
+#[cfg(test)]
+mod mempool_model_tests {
+    use starknet_rs_core::types::Felt;
+
+    use super::{
+        MempoolConfigResponse, MempoolOrderingValue, MempoolResponse,
+        MempoolTransactionPhase, MempoolTransactionResponse, PreconfirmTransactionsRequest,
+    };
+
+    #[test]
+    fn validates_preconfirmation_selection() {
+        assert!(
+            PreconfirmTransactionsRequest {
+                max_transactions: Some(1),
+                transaction_hashes: Some(vec![Felt::ONE]),
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            PreconfirmTransactionsRequest {
+                max_transactions: Some(0),
+                transaction_hashes: None,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(PreconfirmTransactionsRequest::default().validate().is_ok());
+    }
+
+    #[test]
+    fn serializes_mempool_response_shape() {
+        let response = MempoolResponse {
+            config: MempoolConfigResponse {
+                ordering: MempoolOrderingValue::Fifo,
+                random_seed: 42,
+                max_transactions_per_block: 500,
+            },
+            transactions: vec![MempoolTransactionResponse {
+                transaction_hash: Felt::ONE,
+                status: MempoolTransactionPhase::Received,
+                arrival_id: 7,
+                sender_address: None,
+                nonce: Some(Felt::ZERO),
+                tip: Felt::TWO,
+                transaction: None,
+            }],
+            pre_confirmed_transaction_hashes: vec![],
+            remaining_block_capacity: 500,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "config": {
+                    "ordering": "fifo",
+                    "random_seed": 42,
+                    "max_transactions_per_block": 500
+                },
+                "transactions": [{
+                    "transaction_hash": "0x1",
+                    "status": "RECEIVED",
+                    "arrival_id": 7,
+                    "sender_address": null,
+                    "nonce": "0x0",
+                    "tip": "0x2",
+                    "transaction": null
+                }],
+                "pre_confirmed_transaction_hashes": [],
+                "remaining_block_capacity": 500
+            })
+        );
+    }
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -405,6 +480,119 @@ pub type DumpResponseBody = Option<Vec<RpcMethodCall>>;
 #[derive(Serialize)]
 pub struct CreatedBlock {
     pub block_hash: BlockHash,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetMempoolRequest {
+    #[serde(default)]
+    pub include_transactions: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveFromMempoolRequest {
+    pub transaction_hash: TransactionHash,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreconfirmTransactionsRequest {
+    pub max_transactions: Option<usize>,
+    pub transaction_hashes: Option<Vec<TransactionHash>>,
+}
+
+impl PreconfirmTransactionsRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.max_transactions.is_some() && self.transaction_hashes.is_some() {
+            return Err("max_transactions and transaction_hashes are mutually exclusive");
+        }
+        if self.max_transactions == Some(0) {
+            return Err("max_transactions must be positive");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MempoolOrderingValue {
+    Fifo,
+    Starknet,
+    Random,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetMempoolConfigRequest {
+    pub ordering: Option<MempoolOrderingValue>,
+    pub random_seed: Option<u64>,
+    pub max_transactions_per_block: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct MempoolConfigResponse {
+    pub ordering: MempoolOrderingValue,
+    pub random_seed: u64,
+    pub max_transactions_per_block: usize,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MempoolTransactionPhase {
+    Received,
+    Candidate,
+    PreConfirmed,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MempoolTransactionResponse {
+    pub transaction_hash: TransactionHash,
+    pub status: MempoolTransactionPhase,
+    pub arrival_id: u64,
+    pub sender_address: Option<ContractAddress>,
+    pub nonce: Option<Felt>,
+    pub tip: Felt,
+    pub transaction: Option<TransactionWithHash>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MempoolResponse {
+    pub config: MempoolConfigResponse,
+    pub transactions: Vec<MempoolTransactionResponse>,
+    pub pre_confirmed_transaction_hashes: Vec<TransactionHash>,
+    pub remaining_block_capacity: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RemovedFromMempoolResponse {
+    pub transaction_hash: TransactionHash,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ClearedMempoolResponse {
+    pub removed: Vec<TransactionHash>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MempoolProcessingFailure {
+    pub transaction_hash: TransactionHash,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PreconfirmTransactionsResponse {
+    #[serde(skip)]
+    pub selected: Vec<TransactionHash>,
+    pub pre_confirmed: Vec<TransactionHash>,
+    pub rejected: Vec<MempoolProcessingFailure>,
+    pub blocked: Vec<MempoolProcessingFailure>,
+    pub block_full: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AbortedPreconfirmedBlockResponse {
+    pub requeued: Vec<TransactionHash>,
 }
 
 #[derive(Deserialize)]

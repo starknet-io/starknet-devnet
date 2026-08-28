@@ -78,7 +78,12 @@ To retrieve the current configuration of Devnet, as specified via [CLI](running/
     "timeout": 120,
     "restricted_methods": null
   },
-  "block_generation": null,
+  "block_generation_on": "mempool",
+  "mempool_config": {
+    "ordering": "fifo",
+    "random_seed": 4063802897,
+    "max_transactions_per_block": 500
+  },
   "lite_mode": false,
   "eth_erc20_class_hash": "0x046ded64ae2dead6448e247234bab192a9c483644395b66f2155f2614e5804b0",
   "strk_erc20_class_hash": "0x046ded64ae2dead6448e247234bab192a9c483644395b66f2155f2614e5804b0"

@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use starknet_core::StarknetBlock;
+use starknet_core::starknet::mempool::MempoolPhase;
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_types::emitted_event::SubscriptionEmittedEvent;
 use starknet_types::rpc::block::{BlockId, BlockTag, ReorgData};
@@ -17,10 +19,12 @@ use crate::api::models::{
     BroadcastedDeclareTransactionInput, BroadcastedDeployAccountTransactionEnumWrapper,
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionEnumWrapper,
     BroadcastedInvokeTransactionInput, CallInput, ClassHashInput, DevnetSpecRequest,
-    EstimateFeeInput, EventsInput, GetStorageInput, JsonRpcRequest, JsonRpcResponse,
-    JsonRpcWsRequest, ProveTransactionInput, SimulateTransactionsInput, StarknetSpecExtRequest,
-    StarknetSpecRequest, StateUpdateInput, ToRpcResponseResult, TransactionHashAndFlagsInput,
-    TransactionHashInput, to_json_rpc_request,
+    DevnetResponse, EstimateFeeInput, EventsInput, GetMempoolRequest, GetStorageInput,
+    JsonRpcRequest, JsonRpcResponse, JsonRpcWsRequest, PreconfirmTransactionsRequest,
+    ProveTransactionInput,
+    RemoveFromMempoolRequest, SetMempoolConfigRequest, SimulateTransactionsInput,
+    StarknetSpecExtRequest, StarknetSpecRequest, StateUpdateInput, ToRpcResponseResult,
+    TransactionHashAndFlagsInput, TransactionHashInput, to_json_rpc_request,
 };
 use crate::api::origin_forwarder::OriginForwarder;
 use crate::api::{Api, ApiError, error};
@@ -28,7 +32,7 @@ use crate::dump_util::dump_event;
 use crate::restrictive_mode::is_json_rpc_method_restricted;
 use crate::rpc_core;
 use crate::rpc_core::error::{ErrorCode, RpcError};
-use crate::rpc_core::request::{Request, RpcCall, RpcMethodCall};
+use crate::rpc_core::request::{Request, RequestParams, RpcCall, RpcMethodCall};
 use crate::rpc_core::response::{Response, ResponseResult, RpcResponse};
 use crate::rpc_handler::{RpcHandler, handle_request};
 use crate::subscribe::{
@@ -70,12 +74,16 @@ impl RpcHandler for JsonRpcHandler {
             None
         };
 
-        let old_pre_confirmed_block =
-            if request.requires_notifying() && self.api.config.uses_pre_confirmed_block() {
-                Some(self.get_block_by_tag(BlockTag::PreConfirmed).await)
-            } else {
-                None
-            };
+        let old_pre_confirmed_block = if request.requires_notifying() {
+            Some(self.get_block_by_tag(BlockTag::PreConfirmed).await)
+        } else {
+            None
+        };
+        let old_mempool_phases = if request.requires_notifying() {
+            Some(self.get_mempool_phases().await)
+        } else {
+            None
+        };
 
         let starknet_resp = self.execute(request).await;
 
@@ -89,14 +97,20 @@ impl RpcHandler for JsonRpcHandler {
             return forwarder.call(&original_call).await;
         }
 
+        let dump_event = canonical_dump_event(&original_call, &starknet_resp);
         if starknet_resp.is_ok()
             && is_request_dumpable
-            && let Err(e) = self.update_dump(&original_call).await
+            && let Err(e) = self.update_dump(&dump_event).await
         {
             return ResponseResult::Error(e);
         }
 
         if let Err(e) = self.broadcast_changes(old_latest_block, old_pre_confirmed_block).await {
+            return ResponseResult::Error(e.api_error_to_rpc_error());
+        }
+        if let Some(old_mempool_phases) = old_mempool_phases
+            && let Err(e) = self.broadcast_mempool_status_changes(old_mempool_phases).await
+        {
             return ResponseResult::Error(e.api_error_to_rpc_error());
         }
 
@@ -166,6 +180,25 @@ impl RpcHandler for JsonRpcHandler {
     }
 }
 
+fn canonical_dump_event(
+    original_call: &RpcMethodCall,
+    response: &Result<JsonRpcResponse, error::ApiError>,
+) -> RpcMethodCall {
+    let Ok(JsonRpcResponse::Devnet(DevnetResponse::PreconfirmedTransactions(result))) = response
+    else {
+        return original_call.clone();
+    };
+
+    let mut event = original_call.clone();
+    event.params = RequestParams::Object(
+        serde_json::json!({ "transaction_hashes": &result.selected })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    event
+}
+
 impl JsonRpcHandler {
     pub fn new(api: Api) -> JsonRpcHandler {
         let origin_caller = if let (Some(url), Some(block_number)) =
@@ -190,6 +223,51 @@ impl JsonRpcHandler {
         }
     }
 
+    async fn get_mempool_phases(
+        &self,
+    ) -> HashMap<starknet_types::felt::TransactionHash, MempoolPhase> {
+        self.api
+            .starknet
+            .lock()
+            .await
+            .mempool()
+            .entries()
+            .map(|(hash, entry)| (*hash, entry.phase))
+            .collect()
+    }
+
+    async fn broadcast_mempool_status_changes(
+        &self,
+        old_phases: HashMap<starknet_types::felt::TransactionHash, MempoolPhase>,
+    ) -> Result<(), error::ApiError> {
+        let starknet = self.api.starknet.lock().await;
+        let notifications = starknet
+            .mempool()
+            .entries()
+            .filter_map(|(transaction_hash, entry)| {
+                let finality_status = match entry.phase {
+                    MempoolPhase::Received => TransactionFinalityStatus::Received,
+                    MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,
+                    MempoolPhase::PreConfirmed => return None,
+                };
+                (old_phases.get(transaction_hash) != Some(&entry.phase)).then(|| {
+                    NotificationData::TransactionStatus(NewTransactionStatus {
+                        transaction_hash: *transaction_hash,
+                        status: starknet_types::rpc::transactions::TransactionStatus::pre_execution(
+                            finality_status,
+                        ),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        drop(starknet);
+
+        if !notifications.is_empty() {
+            self.api.sockets.lock().await.notify_subscribers(&notifications).await;
+        }
+        Ok(())
+    }
+
     async fn broadcast_pre_confirmed_tx_changes(
         &self,
         old_pre_confirmed_block: StarknetBlock,
@@ -198,40 +276,13 @@ impl JsonRpcHandler {
         let old_pre_confirmed_txs = old_pre_confirmed_block.get_transactions();
         let new_pre_confirmed_txs = new_pre_confirmed_block.get_transactions();
 
-        if new_pre_confirmed_txs.len() > old_pre_confirmed_txs.len() {
-            #[allow(clippy::expect_used)]
-            let new_tx_hash = new_pre_confirmed_txs.last().expect("has at least one element");
-
+        let appended_tx_hashes = appended_preconfirmed_hashes(
+            old_pre_confirmed_txs,
+            new_pre_confirmed_txs,
+        );
+        if !appended_tx_hashes.is_empty() {
             let mut notifications = vec![];
             let starknet = self.api.starknet.lock().await;
-
-            let status = starknet
-                .get_transaction_execution_and_finality_status(*new_tx_hash)
-                .map_err(error::ApiError::StarknetDevnetError)?;
-            notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
-                transaction_hash: *new_tx_hash,
-                status,
-            }));
-
-            let tx = starknet
-                .get_transaction_by_hash(*new_tx_hash)
-                .map_err(error::ApiError::StarknetDevnetError)?;
-            notifications.push(NotificationData::NewTransaction(NewTransactionNotification {
-                tx: tx.clone(),
-                finality_status: TransactionFinalityStatus::PreConfirmed,
-            }));
-
-            let receipt = starknet
-                .get_transaction_receipt_by_hash(new_tx_hash)
-                .map_err(error::ApiError::StarknetDevnetError)?;
-
-            notifications.push(NotificationData::NewTransactionReceipt(
-                NewTransactionReceiptNotification {
-                    tx_receipt: receipt,
-                    sender_address: tx.get_sender_address(),
-                },
-            ));
-
             let events = starknet.get_unlimited_events(
                 Some(BlockId::Tag(BlockTag::PreConfirmed)),
                 Some(BlockId::Tag(BlockTag::PreConfirmed)),
@@ -240,14 +291,46 @@ impl JsonRpcHandler {
                 None, // pre-confirmed block only has pre-confirmed txs
             )?;
 
-            drop(starknet); // Drop immediately after last use
-
-            for emitted_event in events.into_iter().filter(|e| &e.transaction_hash == new_tx_hash) {
-                notifications.push(NotificationData::Event(SubscriptionEmittedEvent {
-                    emitted_event,
-                    finality_status: TransactionFinalityStatus::PreConfirmed,
+            for new_tx_hash in appended_tx_hashes {
+                let status = starknet
+                    .get_transaction_execution_and_finality_status(*new_tx_hash)
+                    .map_err(error::ApiError::StarknetDevnetError)?;
+                notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
+                    transaction_hash: *new_tx_hash,
+                    status,
                 }));
+
+                let tx = starknet
+                    .get_transaction_by_hash(*new_tx_hash)
+                    .map_err(error::ApiError::StarknetDevnetError)?;
+                notifications.push(NotificationData::NewTransaction(
+                    NewTransactionNotification {
+                        tx: tx.clone(),
+                        finality_status: TransactionFinalityStatus::PreConfirmed,
+                    },
+                ));
+
+                let receipt = starknet
+                    .get_transaction_receipt_by_hash(new_tx_hash)
+                    .map_err(error::ApiError::StarknetDevnetError)?;
+                notifications.push(NotificationData::NewTransactionReceipt(
+                    NewTransactionReceiptNotification {
+                        tx_receipt: receipt,
+                        sender_address: tx.get_sender_address(),
+                    },
+                ));
+
+                for emitted_event in
+                    events.iter().filter(|event| &event.transaction_hash == new_tx_hash)
+                {
+                    notifications.push(NotificationData::Event(SubscriptionEmittedEvent {
+                        emitted_event: emitted_event.clone(),
+                        finality_status: TransactionFinalityStatus::PreConfirmed,
+                    }));
+                }
             }
+
+            drop(starknet); // Drop immediately after last use
 
             self.api.sockets.lock().await.notify_subscribers(&notifications).await;
         }
@@ -537,6 +620,23 @@ impl JsonRpcHandler {
                 self.postman_consume_message_from_l2(message).await
             }
             DevnetSpecRequest::CreateBlock => self.create_block().await,
+            DevnetSpecRequest::GetMempool(request) => {
+                self.get_mempool(request.unwrap_or_default()).await
+            }
+            DevnetSpecRequest::RemoveFromMempool(RemoveFromMempoolRequest {
+                transaction_hash,
+            }) => self.remove_from_mempool(transaction_hash).await,
+            DevnetSpecRequest::ClearMempool => self.clear_mempool().await,
+            DevnetSpecRequest::PreconfirmTransactions(request) => {
+                self.preconfirm_transactions(request.unwrap_or_default()).await
+            }
+            DevnetSpecRequest::SetMempoolConfig(request) => {
+                self.set_mempool_config(request).await
+            }
+            DevnetSpecRequest::SealBlock => self.seal_block().await,
+            DevnetSpecRequest::AbortPreconfirmedBlock => {
+                self.abort_preconfirmed_block().await
+            }
             DevnetSpecRequest::AbortBlocks(data) => self.abort_blocks(data).await,
             DevnetSpecRequest::AcceptOnL1(data) => self.accept_on_l1(data).await,
             DevnetSpecRequest::SetGasPrice(data) => self.set_gas_price(data).await,
@@ -672,5 +772,39 @@ impl JsonRpcHandler {
             }
         }
         Ok(())
+    }
+}
+
+fn appended_preconfirmed_hashes<'a>(
+    old: &[starknet_types::felt::TransactionHash],
+    new: &'a [starknet_types::felt::TransactionHash],
+) -> &'a [starknet_types::felt::TransactionHash] {
+    if new.starts_with(old) {
+        &new[old.len()..]
+    } else {
+        &[]
+    }
+}
+
+#[cfg(test)]
+mod mempool_notification_tests {
+    use starknet_rs_core::types::Felt;
+
+    use super::appended_preconfirmed_hashes;
+
+    #[test]
+    fn returns_every_appended_preconfirmed_transaction() {
+        let old = [Felt::ONE];
+        let new = [Felt::ONE, Felt::TWO, Felt::THREE];
+
+        assert_eq!(appended_preconfirmed_hashes(&old, &new), &new[1..]);
+    }
+
+    #[test]
+    fn does_not_treat_replacement_as_append() {
+        let old = [Felt::ONE];
+        let new = [Felt::TWO, Felt::THREE];
+
+        assert!(appended_preconfirmed_hashes(&old, &new).is_empty());
     }
 }

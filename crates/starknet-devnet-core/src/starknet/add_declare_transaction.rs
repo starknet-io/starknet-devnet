@@ -1,5 +1,4 @@
 use blockifier::transaction::account_transaction::ExecutionFlags;
-use blockifier::transaction::transactions::ExecutableTransaction;
 use starknet_api::contract_class::compiled_class_hash::{HashVersion, HashableCompiledClass};
 use starknet_types::compile_sierra_contract;
 use starknet_types::contract_class::ContractClass;
@@ -12,7 +11,7 @@ use starknet_types::rpc::transactions::{
 use super::starknet_config::ClassSizeConfig;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
 use crate::starknet::Starknet;
-use crate::state::CustomState;
+use crate::starknet::mempool::{PendingDeclaration, PreparedTransaction};
 
 fn check_class_size(
     executable_tx: &starknet_api::executable_transaction::DeclareTransaction,
@@ -91,7 +90,7 @@ pub fn add_declare_transaction(
     )?);
 
     let transaction = TransactionWithHash::new(transaction_hash, declare_transaction);
-    let execution_info = blockifier::transaction::account_transaction::AccountTransaction {
+    let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::Declare(executable_tx),
         execution_flags: ExecutionFlags {
             only_query: false,
@@ -99,16 +98,14 @@ pub fn add_declare_transaction(
             validate,
             strict_nonce_check: true, // Starknet 0.14: declare txs do not allow nonce supersession
         },
-    }
-    .execute(&mut starknet.pre_confirmed_state.state, &starknet.block_context)?;
+    };
 
-    // if tx successful, store the class
-    if !execution_info.is_reverted() {
-        let state = starknet.get_state();
-        state.declare_contract_class(class_hash, casm_hash, contract_class)?;
-    }
-
-    starknet.handle_accepted_transaction(transaction, execution_info)?;
+    let prepared = PreparedTransaction::account(
+        transaction,
+        executable,
+        Some(PendingDeclaration { class_hash, casm_hash, contract_class }),
+    );
+    starknet.submit_prepared_transaction(prepared)?;
 
     Ok((transaction_hash, class_hash))
 }

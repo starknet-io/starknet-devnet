@@ -234,7 +234,8 @@ impl JsonRpcHandler {
         transaction_hash: TransactionHash,
         response_flags: Option<Vec<TransactionResponseFlag>>,
     ) -> StrictRpcResult {
-        match self.api.starknet.lock().await.get_transaction_by_hash(transaction_hash) {
+        let starknet = self.api.starknet.lock().await;
+        match starknet.get_transaction_by_hash(transaction_hash) {
             Ok(transaction) => {
                 let transaction = if Self::include_proof_facts(response_flags) {
                     transaction.clone_with_proof_facts()
@@ -244,7 +245,17 @@ impl JsonRpcHandler {
 
                 Ok(StarknetResponse::Transaction(transaction).into())
             }
-            Err(Error::NoTransaction) => Err(ApiError::TransactionNotFound),
+            Err(Error::NoTransaction) => {
+                let transaction = starknet
+                    .get_queued_transaction(&transaction_hash)
+                    .ok_or(ApiError::TransactionNotFound)?;
+                let transaction = if Self::include_proof_facts(response_flags) {
+                    transaction.clone_with_proof_facts()
+                } else {
+                    transaction.clone_without_proof_facts()
+                };
+                Ok(StarknetResponse::Transaction(transaction).into())
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -254,15 +265,28 @@ impl JsonRpcHandler {
         &self,
         transaction_hash: TransactionHash,
     ) -> StrictRpcResult {
-        match self
-            .api
-            .starknet
-            .lock()
-            .await
-            .get_transaction_execution_and_finality_status(transaction_hash)
-        {
+        let starknet = self.api.starknet.lock().await;
+        match starknet.get_transaction_execution_and_finality_status(transaction_hash) {
             Ok(tx_status) => Ok(StarknetResponse::TransactionStatusByHash(tx_status).into()),
-            Err(Error::NoTransaction) => Err(ApiError::TransactionNotFound),
+            Err(Error::NoTransaction) => {
+                use starknet_core::starknet::mempool::MempoolPhase;
+                use starknet_types::rpc::transactions::{
+                    TransactionFinalityStatus, TransactionStatus,
+                };
+
+                let finality_status = match starknet
+                    .get_queued_transaction_phase(&transaction_hash)
+                    .ok_or(ApiError::TransactionNotFound)?
+                {
+                    MempoolPhase::Received => TransactionFinalityStatus::Received,
+                    MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,
+                    MempoolPhase::PreConfirmed => TransactionFinalityStatus::PreConfirmed,
+                };
+                Ok(StarknetResponse::TransactionStatusByHash(
+                    TransactionStatus::pre_execution(finality_status),
+                )
+                .into())
+            }
             Err(err) => Err(err.into()),
         }
     }

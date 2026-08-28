@@ -30,6 +30,20 @@ $ <VAR1>=<VALUE> <VAR2>=<VALUE> starknet-devnet
 
 To see the exact variable names, use [`--help`](#help).
 
+## Block building and mempool configuration
+
+`--block-generation-on transaction` executes and seals every submitted transaction immediately and remains the default. `demand` executes transactions into a live pre-confirmed block and seals only on request. `mempool` admits transactions as `RECEIVED` and waits for explicit [mempool and block-building requests](../mempool). A bare positive integer retains the deprecated periodic-sealing behavior for backward compatibility.
+
+Configure manual mempool ordering and block capacity with:
+
+```bash
+$ starknet-devnet --block-generation-on mempool --mempool-ordering starknet --mempool-max-transactions-per-block 500
+```
+
+The available policies are `fifo`, `starknet`, and `random`. Use `--mempool-random-seed <SEED>` for reproducible random selection; it defaults to the Devnet account seed. Equivalent environment variables are `MEMPOOL_ORDERING`, `MEMPOOL_RANDOM_SEED`, and `MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK`.
+
+`mempool:<N>` is reserved for a future streaming builder and is rejected in this release. A bare `<N>` is not a mempool polling interval: transactions are pre-confirmed immediately and only block sealing occurs every N seconds.
+
 ### Precedence
 
 If both a CLI argument and an environment variable are passed for a parameter, the CLI argument takes precedence. If none are provided, the default value is used. E.g. if running Devnet with the following command, seed value 42 will be used:

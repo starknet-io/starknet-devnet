@@ -1,5 +1,4 @@
 use blockifier::transaction::account_transaction::ExecutionFlags;
-use blockifier::transaction::transactions::ExecutableTransaction;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::TransactionHash;
 use starknet_types::rpc::transactions::invoke_transaction_v3::InvokeTransactionV3;
@@ -11,6 +10,7 @@ use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
 use crate::starknet::proofs::verify_proof;
 use crate::starknet::starknet_config::ProofMode;
+use crate::starknet::mempool::PreparedTransaction;
 
 pub fn add_invoke_transaction(
     starknet: &mut Starknet,
@@ -67,14 +67,11 @@ pub fn add_invoke_transaction(
         &ContractAddress::from(sn_api_transaction.sender_address()),
     )?);
 
-    let block_context = starknet.block_context.clone();
+    let strict_nonce_check = broadcasted_invoke_transaction.requires_strict_nonce_check(
+        starknet.config.requires_strict_nonce_check(),
+    );
 
-    let strict_nonce_check = broadcasted_invoke_transaction
-        .requires_strict_nonce_check(starknet.config.uses_pre_confirmed_block());
-
-    let state = &mut starknet.get_state().state;
-
-    let execution_info = blockifier::transaction::account_transaction::AccountTransaction {
+    let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::Invoke(sn_api_transaction),
         execution_flags: ExecutionFlags {
             only_query: false,
@@ -82,14 +79,12 @@ pub fn add_invoke_transaction(
             validate,
             strict_nonce_check,
         },
-    }
-    .execute(state, &block_context);
-
-    let execution_info = execution_info?;
+    };
 
     let transaction = TransactionWithHash::new(transaction_hash, invoke_transaction);
 
-    starknet.handle_accepted_transaction(transaction, execution_info)?;
+    let prepared = PreparedTransaction::account(transaction, executable, None);
+    starknet.submit_prepared_transaction(prepared)?;
 
     Ok(transaction_hash)
 }

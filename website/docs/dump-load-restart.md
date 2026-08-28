@@ -116,15 +116,17 @@ The `path` and `events` parameters are mutually exclusive. Passing both, or neit
 
 Currently, dumping produces a list of reproducible Devnet actions (state-changing requests and transactions). Conversely, loading is implemented as the re-execution of transactions from a dump. This means that timestamps of `StarknetBlock` will be different on each load. This is due to the nature of Devnet's dependencies, which prevent Devnet's state from being serialized.
 
+In [mempool mode](./mempool), a policy-driven processing action is dumped as the exact ordered transaction hashes that were selected. Mempool configuration changes, removal, clearing, strict sealing, and proposal abortion are also recorded. This makes loading deterministic even for seeded-random ordering and avoids depending on wall-clock timing or policy defaults.
+
 Dumping and loading are not guaranteed to work across versions. I.e. if you dumped one version of Devnet, do not expect it to be loadable with a different version.
 
-If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. The same applies for dumping a Devnet in `--block-generation-on demand` mode.
+If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. The same applies to the block-generation and mempool configuration used by the dumped Devnet.
 
 Loading does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 
 ## Restarting
 
-Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup.
+Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup. Restarting also clears all received and candidate transactions and the open pre-confirmed proposal.
 
 Restarting does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 

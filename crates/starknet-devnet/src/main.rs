@@ -48,6 +48,14 @@ mod metrics;
 
 const REQUEST_LOG_ENV_VAR: &str = "request";
 const RESPONSE_LOG_ENV_VAR: &str = "response";
+const LEGACY_INTERVAL_DEPRECATION_WARNING: &str = "--block-generation-on <N> uses the deprecated legacy periodic-sealing mode. Its behavior is unchanged: transactions are pre-confirmed immediately and the current block is sealed every N seconds. A production-like mempool:<N> mode is planned for a later release. Until then, keep using <N> for compatibility or use --block-generation-on mempool with explicit Devnet mempool/block methods.";
+
+fn legacy_interval_deprecation_warning(
+    block_generation_on: BlockGenerationOn,
+) -> Option<&'static str> {
+    matches!(block_generation_on, BlockGenerationOn::Interval(_))
+        .then_some(LEGACY_INTERVAL_DEPRECATION_WARNING)
+}
 
 /// Configures tracing with default level INFO,
 /// If the environment variable `RUST_LOG` is set, it will be used instead.
@@ -309,6 +317,11 @@ async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let (mut starknet_config, server_config) = args.to_config()?;
 
+    if let Some(message) = legacy_interval_deprecation_warning(starknet_config.block_generation_on)
+    {
+        warn!("{message}");
+    }
+
     // If fork url is provided, then set fork config and chain_id from forked network
     if let Some(url) = starknet_config.fork_config.url.as_ref() {
         let json_rpc_client = JsonRpcClient::new(HttpTransport::new(url.clone()));
@@ -393,9 +406,11 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     if let BlockGenerationOn::Interval(seconds) = starknet_config.block_generation_on {
-        // use JoinHandle to run block interval creation as a task
+        // Legacy interval mode only seals the current pre-confirmed block. Transaction selection
+        // and execution happen synchronously when the transaction is submitted.
         let full_address = format!("http://{address}");
-        let block_interval_handle = task::spawn(create_block_interval(seconds, full_address));
+        let block_interval_handle =
+            task::spawn(seal_block_on_legacy_interval(seconds, full_address));
 
         tasks.push(block_interval_handle);
     }
@@ -419,7 +434,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 #[allow(clippy::expect_used)]
-async fn create_block_interval(
+async fn seal_block_on_legacy_interval(
     block_interval_seconds: u64,
     devnet_address: String,
 ) -> Result<(), std::io::Error> {
@@ -433,7 +448,7 @@ async fn create_block_interval(
     };
 
     let devnet_client = reqwest::Client::new();
-    let block_req_body = json!({ "jsonrpc": "2.0", "id": 0, "method": "devnet_createBlock" });
+    let seal_block_req_body = json!({ "jsonrpc": "2.0", "id": 0, "method": "devnet_sealBlock" });
 
     // avoid creating block instantly after startup
     sleep(Duration::from_secs(block_interval_seconds)).await;
@@ -443,9 +458,9 @@ async fn create_block_interval(
         tokio::select! {
             _ = interval.tick() => {
                 // By sending a request, we take care of: 1) dumping 2) notifying subscribers
-                match devnet_client.post(&devnet_address).json(&block_req_body).send().await {
-                    Ok(_) => info!("Generating block on time interval"),
-                    Err(e) => error!("Failed block creation on time interval: {e:?}")
+                match devnet_client.post(&devnet_address).json(&seal_block_req_body).send().await {
+                    Ok(_) => info!("Sealing block on legacy time interval"),
+                    Err(e) => error!("Failed block sealing on legacy time interval: {e:?}")
                 }
             }
             _ = sigint.recv() => {
@@ -471,7 +486,25 @@ mod tests {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::EnvFilter;
 
-    use crate::configure_tracing;
+    use crate::{
+        LEGACY_INTERVAL_DEPRECATION_WARNING, configure_tracing, legacy_interval_deprecation_warning,
+    };
+    use starknet_core::starknet::starknet_config::BlockGenerationOn;
+
+    #[test]
+    fn legacy_interval_warning_describes_unchanged_sealing_behavior_and_migration() {
+        assert_eq!(
+            legacy_interval_deprecation_warning(BlockGenerationOn::Interval(10)),
+            Some(LEGACY_INTERVAL_DEPRECATION_WARNING)
+        );
+        assert_eq!(
+            LEGACY_INTERVAL_DEPRECATION_WARNING,
+            "--block-generation-on <N> uses the deprecated legacy periodic-sealing mode. Its behavior is unchanged: transactions are pre-confirmed immediately and the current block is sealed every N seconds. A production-like mempool:<N> mode is planned for a later release. Until then, keep using <N> for compatibility or use --block-generation-on mempool with explicit Devnet mempool/block methods."
+        );
+        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Transaction), None);
+        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Demand), None);
+        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Mempool), None);
+    }
 
     #[test]
     fn test_generated_log_level_from_empty_environment_variable_is_info() {
