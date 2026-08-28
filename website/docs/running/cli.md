@@ -42,7 +42,7 @@ $ starknet-devnet --block-generation-on mempool --mempool-ordering starknet --me
 
 The available policies are `fifo`, `starknet`, and `random`. Use `--mempool-random-seed <SEED>` for reproducible random selection; it defaults to the Devnet account seed. Equivalent environment variables are `MEMPOOL_ORDERING`, `MEMPOOL_RANDOM_SEED`, and `MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK`.
 
-`mempool:<N>` is reserved for a future streaming builder and is rejected in this release. A bare `<N>` is not a mempool polling interval: transactions are pre-confirmed immediately and only block sealing occurs every N seconds.
+A bare positive integer `N` retains the deprecated periodic-sealing behavior for backward compatibility: transactions are pre-confirmed immediately and only block sealing occurs every N seconds. Prefer `--block-generation-on mempool` for Starknet-like policy-driven construction.
 
 ### Precedence
 

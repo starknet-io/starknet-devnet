@@ -282,9 +282,9 @@ impl JsonRpcHandler {
                     MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,
                     MempoolPhase::PreConfirmed => TransactionFinalityStatus::PreConfirmed,
                 };
-                Ok(StarknetResponse::TransactionStatusByHash(
-                    TransactionStatus::pre_execution(finality_status),
-                )
+                Ok(StarknetResponse::TransactionStatusByHash(TransactionStatus::pre_execution(
+                    finality_status,
+                ))
                 .into())
             }
             Err(err) => Err(err.into()),

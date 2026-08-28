@@ -349,8 +349,7 @@ impl JsonRpcHandler {
 
         let starknet = self.api.starknet.lock().await;
 
-        if let Ok(status) =
-            starknet.get_transaction_execution_and_finality_status(transaction_hash)
+        if let Ok(status) = starknet.get_transaction_execution_and_finality_status(transaction_hash)
         {
             let notification = NotificationData::TransactionStatus(NewTransactionStatus {
                 transaction_hash,
@@ -359,9 +358,7 @@ impl JsonRpcHandler {
             socket_context.notify(subscription_id, &subscription, notification).await;
         } else if let Some(phase) = starknet.get_queued_transaction_phase(&transaction_hash) {
             use starknet_core::starknet::mempool::MempoolPhase;
-            use starknet_types::rpc::transactions::{
-                TransactionFinalityStatus, TransactionStatus,
-            };
+            use starknet_types::rpc::transactions::{TransactionFinalityStatus, TransactionStatus};
 
             let finality_status = match phase {
                 MempoolPhase::Received => TransactionFinalityStatus::Received,

@@ -1,8 +1,8 @@
-use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_core::starknet::mempool::{
     BuildFailure, MempoolConfig, MempoolConfigUpdate, MempoolOrdering, MempoolPhase,
     MempoolSelection,
 };
+use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::{TransactionHash, felt_from_prefixed_hex};
@@ -24,8 +24,8 @@ use super::models::{
 use crate::api::JsonRpcHandler;
 use crate::api::account_helpers::{get_balance, get_erc20_fee_unit_address};
 use crate::api::models::{
-    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock,
-    AbortedPreconfirmedBlockResponse, ClearedMempoolResponse, DumpRequest, FlushParameters,
+    AbortedBlocks, AbortedPreconfirmedBlockResponse, AbortingBlocks, AcceptOnL1Request,
+    AcceptedOnL1Blocks, ClearedMempoolResponse, CreatedBlock, DumpRequest, FlushParameters,
     FlushedMessages, GetMempoolRequest, IncreaseTime, IncreaseTimeResponse, LoadRequest,
     MempoolConfigResponse, MempoolOrderingValue, MempoolProcessingFailure, MempoolResponse,
     MempoolTransactionPhase, MempoolTransactionResponse, MessageHash, MessagingLoadAddress,
@@ -294,15 +294,10 @@ impl JsonRpcHandler {
     }
 
     /// devnet_removeFromMempool
-    pub async fn remove_from_mempool(
-        &self,
-        transaction_hash: TransactionHash,
-    ) -> StrictRpcResult {
+    pub async fn remove_from_mempool(&self, transaction_hash: TransactionHash) -> StrictRpcResult {
         self.api.starknet.lock().await.remove_from_mempool(transaction_hash)?;
-        Ok(DevnetResponse::RemovedFromMempool(RemovedFromMempoolResponse {
-            transaction_hash,
-        })
-        .into())
+        Ok(DevnetResponse::RemovedFromMempool(RemovedFromMempoolResponse { transaction_hash })
+            .into())
     }
 
     /// devnet_clearMempool
@@ -334,10 +329,7 @@ impl JsonRpcHandler {
     }
 
     /// devnet_setMempoolConfig
-    pub async fn set_mempool_config(
-        &self,
-        request: SetMempoolConfigRequest,
-    ) -> StrictRpcResult {
+    pub async fn set_mempool_config(&self, request: SetMempoolConfigRequest) -> StrictRpcResult {
         let config = self.api.starknet.lock().await.set_mempool_config(MempoolConfigUpdate {
             ordering: request.ordering.map(Into::into),
             random_seed: request.random_seed,
@@ -355,10 +347,8 @@ impl JsonRpcHandler {
     /// devnet_abortPreconfirmedBlock
     pub async fn abort_preconfirmed_block(&self) -> StrictRpcResult {
         let requeued = self.api.starknet.lock().await.abort_preconfirmed_block()?;
-        Ok(DevnetResponse::AbortedPreconfirmedBlock(AbortedPreconfirmedBlockResponse {
-            requeued,
-        })
-        .into())
+        Ok(DevnetResponse::AbortedPreconfirmedBlock(AbortedPreconfirmedBlockResponse { requeued })
+            .into())
     }
 
     /// devnet_abortBlocks

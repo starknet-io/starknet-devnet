@@ -243,9 +243,12 @@ impl ApiError {
 
                 api_err.api_error_to_rpc_error()
             }
-            ApiError::StarknetDevnetError(
-                starknet_core::error::Error::DuplicateTransaction { .. },
-            ) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
+            ApiError::StarknetDevnetError(starknet_core::error::Error::DuplicateTransaction {
+                ..
+            }) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
+            ApiError::StarknetDevnetError(starknet_core::error::Error::NonceConflict {
+                ..
+            }) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
             ApiError::StarknetDevnetError(error) => RpcError {
                 code: crate::rpc_core::error::ErrorCode::ServerError(WILDCARD_RPC_ERROR_CODE),
                 message: anyhow::format_err!(error).root_cause().to_string().into(),
@@ -398,7 +401,11 @@ mod tests {
 
     #[test]
     fn duplicate_transaction_error() {
-        error_expected_code_and_message(ApiError::DuplicateTransaction, 59, "Duplicate transaction");
+        error_expected_code_and_message(
+            ApiError::DuplicateTransaction,
+            59,
+            "Duplicate transaction",
+        );
     }
 
     #[test]

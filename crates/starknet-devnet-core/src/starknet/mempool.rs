@@ -112,6 +112,31 @@ impl PreparedTransaction {
             lane: MempoolLane::System,
         }
     }
+
+    /// Admin/system account-tx variant used by `devnet_mint` and similar administrative actions.
+    /// Behaves identically to `account` except for the lane marker, which causes
+    /// `submit_system_prepared_transaction` to execute regardless of the configured block
+    /// generation mode, so balance changes remain immediately observable in `mempool` mode.
+    pub(crate) fn system_account(
+        transaction: TransactionWithHash,
+        executable: AccountTransaction,
+        declaration: Option<PendingDeclaration>,
+    ) -> Self {
+        let account_address = Some(executable.sender_address().into());
+        let nonce = Some(executable.nonce());
+        let tip = executable.tip().0;
+        let max_l2_gas_price = executable.resource_bounds().get_l2_bounds().max_price_per_unit.0;
+        Self {
+            transaction,
+            executable: ExecutableTransaction::Account(executable),
+            declaration,
+            account_address,
+            nonce,
+            tip,
+            max_l2_gas_price,
+            lane: MempoolLane::System,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -203,9 +228,7 @@ impl Mempool {
         if let (Some(address), Some(nonce)) = (prepared.account_address, prepared.nonce)
             && self.account_nonce_index.contains_key(&(address, nonce))
         {
-            return Err(Error::UnsupportedAction {
-                msg: format!("A transaction for account {address:#x} and nonce {:#x} already exists", nonce.0),
-            });
+            return Err(Error::NonceConflict { address, nonce });
         }
 
         let entry = MempoolEntry {
@@ -227,10 +250,7 @@ impl Mempool {
         Ok(hash)
     }
 
-    pub(crate) fn remove_received(
-        &mut self,
-        hash: &TransactionHash,
-    ) -> DevnetResult<MempoolEntry> {
+    pub(crate) fn remove_received(&mut self, hash: &TransactionHash) -> DevnetResult<MempoolEntry> {
         let phase = self.entries.get(hash).ok_or(Error::NoTransaction)?.phase;
         if phase != MempoolPhase::Received {
             return Err(Error::UnsupportedAction {
@@ -247,6 +267,15 @@ impl Mempool {
             .filter_map(|(hash, entry)| (entry.phase == MempoolPhase::Received).then_some(*hash))
             .collect::<Vec<_>>();
         hashes.iter().filter_map(|hash| self.remove_entry(hash)).collect()
+    }
+
+    /// Drop every entry, the open proposal, and the policy selection counter.
+    /// Used by accepted-block abortion and restart to model a complete reset of pool state.
+    pub(crate) fn clear_all(&mut self) {
+        self.entries.clear();
+        self.account_nonce_index.clear();
+        self.proposal.clear();
+        self.selection_counter = 0;
     }
 
     pub(crate) fn remove_entry(&mut self, hash: &TransactionHash) -> Option<MempoolEntry> {
@@ -267,9 +296,9 @@ impl Mempool {
             return None;
         }
         let selected = match self.config.ordering {
-            MempoolOrdering::Fifo => eligible
-                .iter()
-                .min_by_key(|hash| self.entries[*hash].arrival_id),
+            MempoolOrdering::Fifo => {
+                eligible.iter().min_by_key(|hash| self.entries[*hash].arrival_id)
+            }
             MempoolOrdering::Starknet => eligible.iter().max_by(|left, right| {
                 let left = &self.entries[*left];
                 let right = &self.entries[*right];
@@ -289,7 +318,8 @@ impl Mempool {
                 })
             }),
             MempoolOrdering::Random => {
-                let mixed = splitmix64(self.config.random_seed ^ block_number ^ self.selection_counter);
+                let mixed =
+                    splitmix64(self.config.random_seed ^ block_number ^ self.selection_counter);
                 eligible.get((mixed as usize) % eligible.len())
             }
         }
@@ -298,10 +328,15 @@ impl Mempool {
         selected
     }
 
-    pub(crate) fn mark_candidate(&mut self, hash: &TransactionHash) -> DevnetResult<PreparedTransaction> {
+    pub(crate) fn mark_candidate(
+        &mut self,
+        hash: &TransactionHash,
+    ) -> DevnetResult<PreparedTransaction> {
         let entry = self.entries.get_mut(hash).ok_or(Error::NoTransaction)?;
         if entry.phase != MempoolPhase::Received {
-            return Err(Error::UnsupportedAction { msg: format!("Transaction {hash:#x} is not RECEIVED") });
+            return Err(Error::UnsupportedAction {
+                msg: format!("Transaction {hash:#x} is not RECEIVED"),
+            });
         }
         entry.phase = MempoolPhase::Candidate;
         Ok(entry.prepared.clone())
@@ -310,7 +345,9 @@ impl Mempool {
     pub(crate) fn mark_pre_confirmed(&mut self, hash: &TransactionHash) -> DevnetResult<()> {
         let entry = self.entries.get_mut(hash).ok_or(Error::NoTransaction)?;
         if entry.phase != MempoolPhase::Candidate {
-            return Err(Error::UnexpectedInternalError { msg: format!("Transaction {hash:#x} was not selected") });
+            return Err(Error::UnexpectedInternalError {
+                msg: format!("Transaction {hash:#x} was not selected"),
+            });
         }
         entry.phase = MempoolPhase::PreConfirmed;
         self.proposal.push(*hash);
@@ -345,9 +382,14 @@ impl Mempool {
         hashes
     }
 
-    pub(crate) fn set_config(&mut self, update: MempoolConfigUpdate) -> DevnetResult<MempoolConfig> {
+    pub(crate) fn set_config(
+        &mut self,
+        update: MempoolConfigUpdate,
+    ) -> DevnetResult<MempoolConfig> {
         if update.max_transactions_per_block == Some(0) {
-            return Err(Error::UnsupportedAction { msg: "Mempool block capacity must be positive".into() });
+            return Err(Error::UnsupportedAction {
+                msg: "Mempool block capacity must be positive".into(),
+            });
         }
         if let Some(ordering) = update.ordering {
             self.config.ordering = ordering;
@@ -377,20 +419,25 @@ mod tests {
     #[test]
     fn capacity_cannot_be_zero() {
         let mut pool = super::Mempool::new(MempoolConfig::default());
-        assert!(pool.set_config(MempoolConfigUpdate {
-            max_transactions_per_block: Some(0),
-            ..Default::default()
-        }).is_err());
+        assert!(
+            pool.set_config(MempoolConfigUpdate {
+                max_transactions_per_block: Some(0),
+                ..Default::default()
+            })
+            .is_err()
+        );
     }
 
     #[test]
     fn config_can_be_updated_partially() {
         let mut pool = super::Mempool::new(MempoolConfig::default());
-        let config = pool.set_config(MempoolConfigUpdate {
-            ordering: Some(MempoolOrdering::Random),
-            random_seed: Some(17),
-            ..Default::default()
-        }).unwrap();
+        let config = pool
+            .set_config(MempoolConfigUpdate {
+                ordering: Some(MempoolOrdering::Random),
+                random_seed: Some(17),
+                ..Default::default()
+            })
+            .unwrap();
         assert_eq!(config.ordering, MempoolOrdering::Random);
         assert_eq!(config.random_seed, 17);
         assert_eq!(config.max_transactions_per_block, 500);

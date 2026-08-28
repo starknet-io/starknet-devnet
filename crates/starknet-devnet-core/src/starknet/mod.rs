@@ -278,7 +278,8 @@ impl Starknet {
         };
         if entry.phase != mempool::MempoolPhase::Received {
             return Ok(TransactionEligibility::Blocked(format!(
-                "transaction is {:?}", entry.phase
+                "transaction is {:?}",
+                entry.phase
             )));
         }
         let (Some(address), Some(incoming_nonce)) = (entry.account_address, entry.nonce) else {
@@ -288,10 +289,12 @@ impl Starknet {
         Ok(match incoming_nonce.cmp(&account_nonce) {
             std::cmp::Ordering::Equal => TransactionEligibility::Eligible,
             std::cmp::Ordering::Greater => TransactionEligibility::Blocked(format!(
-                "nonce gap: expected {:#x}, got {:#x}", account_nonce.0, incoming_nonce.0
+                "nonce gap: expected {:#x}, got {:#x}",
+                account_nonce.0, incoming_nonce.0
             )),
             std::cmp::Ordering::Less => TransactionEligibility::Stale(format!(
-                "stale nonce: expected {:#x}, got {:#x}", account_nonce.0, incoming_nonce.0
+                "stale nonce: expected {:#x}, got {:#x}",
+                account_nonce.0, incoming_nonce.0
             )),
         })
     }
@@ -378,17 +381,11 @@ impl Starknet {
                     }
                 },
                 TransactionEligibility::Blocked(reason) => {
-                    outcome.blocked.push(mempool::BuildFailure {
-                        transaction_hash: hash,
-                        reason,
-                    });
+                    outcome.blocked.push(mempool::BuildFailure { transaction_hash: hash, reason });
                 }
                 TransactionEligibility::Stale(reason) => {
                     self.mempool.remove_entry(&hash);
-                    outcome.rejected.push(mempool::BuildFailure {
-                        transaction_hash: hash,
-                        reason,
-                    });
+                    outcome.rejected.push(mempool::BuildFailure { transaction_hash: hash, reason });
                 }
             }
         }
@@ -840,19 +837,6 @@ impl Starknet {
         // Update transaction count metric
         crate::metrics::TRANSACTION_COUNT.inc();
 
-        Ok(())
-    }
-
-    /// Compatibility entry point for system transactions which are executed outside the pool.
-    pub(crate) fn handle_accepted_transaction(
-        &mut self,
-        transaction: TransactionWithHash,
-        tx_info: TransactionExecutionInfo,
-    ) -> DevnetResult<()> {
-        self.append_accepted_transaction(transaction, tx_info)?;
-        if self.config.seals_on_submission() {
-            self.generate_new_block_and_state();
-        }
         Ok(())
     }
 
@@ -1339,8 +1323,9 @@ impl Starknet {
         let mut invoke_tx = unsigned_tx;
         invoke_tx.common.signature = vec![signature.r, signature.s];
 
-        // apply the invoke tx
-        add_invoke_transaction::add_invoke_transaction(
+        // apply the invoke tx via the system lane so mint is force-processed even in
+        // mempool mode (per the v1 plan).
+        add_invoke_transaction::add_invoke_transaction_system(
             self,
             BroadcastedInvokeTransaction::V3(invoke_tx),
         )
@@ -1481,6 +1466,8 @@ impl Starknet {
         let new_pre_confirmed_block_number = old_pre_confirmed_block_number - aborted.len() as u64;
 
         self.set_block_number(new_pre_confirmed_block_number);
+
+        self.mempool.clear_all();
 
         // Reset metrics
         let old_tx_count = crate::metrics::TRANSACTION_COUNT.get();
@@ -1774,7 +1761,8 @@ impl Starknet {
         if let Some(transaction) = self.transactions.get(&transaction_hash) {
             return Ok(transaction.get_status());
         }
-        let phase = self.get_queued_transaction_phase(&transaction_hash).ok_or(Error::NoTransaction)?;
+        let phase =
+            self.get_queued_transaction_phase(&transaction_hash).ok_or(Error::NoTransaction)?;
         let finality = match phase {
             mempool::MempoolPhase::Received => TransactionFinalityStatus::Received,
             mempool::MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,

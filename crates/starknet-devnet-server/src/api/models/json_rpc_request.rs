@@ -616,11 +616,7 @@ mod requests_tests {
                     && request.max_transactions_per_block == Some(10)
         ));
 
-        for method in [
-            "devnet_clearMempool",
-            "devnet_sealBlock",
-            "devnet_abortPreconfirmedBlock",
-        ] {
+        for method in ["devnet_clearMempool", "devnet_sealBlock", "devnet_abortPreconfirmedBlock"] {
             assert_deserialization_succeeds(&format!(r#"{{"method":"{method}","params":[]}}"#));
         }
     }

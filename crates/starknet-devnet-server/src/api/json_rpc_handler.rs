@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::stream::SplitSink;
@@ -18,13 +18,11 @@ use crate::api::models::{
     BlockIdAndFlagsInput, BlockTransactionTracesInput, BroadcastedDeclareTransactionEnumWrapper,
     BroadcastedDeclareTransactionInput, BroadcastedDeployAccountTransactionEnumWrapper,
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionEnumWrapper,
-    BroadcastedInvokeTransactionInput, CallInput, ClassHashInput, DevnetSpecRequest,
-    DevnetResponse, EstimateFeeInput, EventsInput, GetMempoolRequest, GetStorageInput,
-    JsonRpcRequest, JsonRpcResponse, JsonRpcWsRequest, PreconfirmTransactionsRequest,
-    ProveTransactionInput,
-    RemoveFromMempoolRequest, SetMempoolConfigRequest, SimulateTransactionsInput,
-    StarknetSpecExtRequest, StarknetSpecRequest, StateUpdateInput, ToRpcResponseResult,
-    TransactionHashAndFlagsInput, TransactionHashInput, to_json_rpc_request,
+    BroadcastedInvokeTransactionInput, CallInput, ClassHashInput, DevnetResponse,
+    DevnetSpecRequest, EstimateFeeInput, EventsInput, GetStorageInput, JsonRpcRequest,
+    JsonRpcResponse, JsonRpcWsRequest, ProveTransactionInput, RemoveFromMempoolRequest,
+    SimulateTransactionsInput, StarknetSpecExtRequest, StarknetSpecRequest, StateUpdateInput,
+    ToRpcResponseResult, TransactionHashAndFlagsInput, TransactionHashInput, to_json_rpc_request,
 };
 use crate::api::origin_forwarder::OriginForwarder;
 use crate::api::{Api, ApiError, error};
@@ -79,11 +77,8 @@ impl RpcHandler for JsonRpcHandler {
         } else {
             None
         };
-        let old_mempool_phases = if request.requires_notifying() {
-            Some(self.get_mempool_phases().await)
-        } else {
-            None
-        };
+        let old_mempool_phases =
+            if request.requires_notifying() { Some(self.get_mempool_phases().await) } else { None };
 
         let starknet_resp = self.execute(request).await;
 
@@ -276,10 +271,8 @@ impl JsonRpcHandler {
         let old_pre_confirmed_txs = old_pre_confirmed_block.get_transactions();
         let new_pre_confirmed_txs = new_pre_confirmed_block.get_transactions();
 
-        let appended_tx_hashes = appended_preconfirmed_hashes(
-            old_pre_confirmed_txs,
-            new_pre_confirmed_txs,
-        );
+        let appended_tx_hashes =
+            appended_preconfirmed_hashes(old_pre_confirmed_txs, new_pre_confirmed_txs);
         if !appended_tx_hashes.is_empty() {
             let mut notifications = vec![];
             let starknet = self.api.starknet.lock().await;
@@ -303,12 +296,10 @@ impl JsonRpcHandler {
                 let tx = starknet
                     .get_transaction_by_hash(*new_tx_hash)
                     .map_err(error::ApiError::StarknetDevnetError)?;
-                notifications.push(NotificationData::NewTransaction(
-                    NewTransactionNotification {
-                        tx: tx.clone(),
-                        finality_status: TransactionFinalityStatus::PreConfirmed,
-                    },
-                ));
+                notifications.push(NotificationData::NewTransaction(NewTransactionNotification {
+                    tx: tx.clone(),
+                    finality_status: TransactionFinalityStatus::PreConfirmed,
+                }));
 
                 let receipt = starknet
                     .get_transaction_receipt_by_hash(new_tx_hash)
@@ -623,20 +614,16 @@ impl JsonRpcHandler {
             DevnetSpecRequest::GetMempool(request) => {
                 self.get_mempool(request.unwrap_or_default()).await
             }
-            DevnetSpecRequest::RemoveFromMempool(RemoveFromMempoolRequest {
-                transaction_hash,
-            }) => self.remove_from_mempool(transaction_hash).await,
+            DevnetSpecRequest::RemoveFromMempool(RemoveFromMempoolRequest { transaction_hash }) => {
+                self.remove_from_mempool(transaction_hash).await
+            }
             DevnetSpecRequest::ClearMempool => self.clear_mempool().await,
             DevnetSpecRequest::PreconfirmTransactions(request) => {
                 self.preconfirm_transactions(request.unwrap_or_default()).await
             }
-            DevnetSpecRequest::SetMempoolConfig(request) => {
-                self.set_mempool_config(request).await
-            }
+            DevnetSpecRequest::SetMempoolConfig(request) => self.set_mempool_config(request).await,
             DevnetSpecRequest::SealBlock => self.seal_block().await,
-            DevnetSpecRequest::AbortPreconfirmedBlock => {
-                self.abort_preconfirmed_block().await
-            }
+            DevnetSpecRequest::AbortPreconfirmedBlock => self.abort_preconfirmed_block().await,
             DevnetSpecRequest::AbortBlocks(data) => self.abort_blocks(data).await,
             DevnetSpecRequest::AcceptOnL1(data) => self.accept_on_l1(data).await,
             DevnetSpecRequest::SetGasPrice(data) => self.set_gas_price(data).await,
@@ -779,11 +766,7 @@ fn appended_preconfirmed_hashes<'a>(
     old: &[starknet_types::felt::TransactionHash],
     new: &'a [starknet_types::felt::TransactionHash],
 ) -> &'a [starknet_types::felt::TransactionHash] {
-    if new.starts_with(old) {
-        &new[old.len()..]
-    } else {
-        &[]
-    }
+    if new.starts_with(old) { &new[old.len()..] } else { &[] }
 }
 
 #[cfg(test)]

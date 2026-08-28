@@ -55,8 +55,8 @@ mod mempool_model_tests {
     use starknet_rs_core::types::Felt;
 
     use super::{
-        MempoolConfigResponse, MempoolOrderingValue, MempoolResponse,
-        MempoolTransactionPhase, MempoolTransactionResponse, PreconfirmTransactionsRequest,
+        MempoolConfigResponse, MempoolOrderingValue, MempoolResponse, MempoolTransactionPhase,
+        MempoolTransactionResponse, PreconfirmTransactionsRequest,
     };
 
     #[test]
@@ -70,12 +70,9 @@ mod mempool_model_tests {
             .is_err()
         );
         assert!(
-            PreconfirmTransactionsRequest {
-                max_transactions: Some(0),
-                transaction_hashes: None,
-            }
-            .validate()
-            .is_err()
+            PreconfirmTransactionsRequest { max_transactions: Some(0), transaction_hashes: None }
+                .validate()
+                .is_err()
         );
         assert!(PreconfirmTransactionsRequest::default().validate().is_ok());
     }

@@ -77,10 +77,6 @@ impl std::str::FromStr for BlockGenerationOn {
             "transaction" => Ok(BlockGenerationOn::Transaction),
             "demand" => Ok(BlockGenerationOn::Demand),
             "mempool" => Ok(BlockGenerationOn::Mempool),
-            value if value.starts_with("mempool:") => Err(Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                "mempool:<N> is reserved for the future streaming block builder",
-            )),
             value => {
                 let interval_value = value
                     .parse::<u64>()

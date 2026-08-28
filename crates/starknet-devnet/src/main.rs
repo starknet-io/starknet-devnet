@@ -48,14 +48,6 @@ mod metrics;
 
 const REQUEST_LOG_ENV_VAR: &str = "request";
 const RESPONSE_LOG_ENV_VAR: &str = "response";
-const LEGACY_INTERVAL_DEPRECATION_WARNING: &str = "--block-generation-on <N> uses the deprecated legacy periodic-sealing mode. Its behavior is unchanged: transactions are pre-confirmed immediately and the current block is sealed every N seconds. A production-like mempool:<N> mode is planned for a later release. Until then, keep using <N> for compatibility or use --block-generation-on mempool with explicit Devnet mempool/block methods.";
-
-fn legacy_interval_deprecation_warning(
-    block_generation_on: BlockGenerationOn,
-) -> Option<&'static str> {
-    matches!(block_generation_on, BlockGenerationOn::Interval(_))
-        .then_some(LEGACY_INTERVAL_DEPRECATION_WARNING)
-}
 
 /// Configures tracing with default level INFO,
 /// If the environment variable `RUST_LOG` is set, it will be used instead.
@@ -317,11 +309,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let (mut starknet_config, server_config) = args.to_config()?;
 
-    if let Some(message) = legacy_interval_deprecation_warning(starknet_config.block_generation_on)
-    {
-        warn!("{message}");
-    }
-
     // If fork url is provided, then set fork config and chain_id from forked network
     if let Some(url) = starknet_config.fork_config.url.as_ref() {
         let json_rpc_client = JsonRpcClient::new(HttpTransport::new(url.clone()));
@@ -486,25 +473,7 @@ mod tests {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::EnvFilter;
 
-    use crate::{
-        LEGACY_INTERVAL_DEPRECATION_WARNING, configure_tracing, legacy_interval_deprecation_warning,
-    };
-    use starknet_core::starknet::starknet_config::BlockGenerationOn;
-
-    #[test]
-    fn legacy_interval_warning_describes_unchanged_sealing_behavior_and_migration() {
-        assert_eq!(
-            legacy_interval_deprecation_warning(BlockGenerationOn::Interval(10)),
-            Some(LEGACY_INTERVAL_DEPRECATION_WARNING)
-        );
-        assert_eq!(
-            LEGACY_INTERVAL_DEPRECATION_WARNING,
-            "--block-generation-on <N> uses the deprecated legacy periodic-sealing mode. Its behavior is unchanged: transactions are pre-confirmed immediately and the current block is sealed every N seconds. A production-like mempool:<N> mode is planned for a later release. Until then, keep using <N> for compatibility or use --block-generation-on mempool with explicit Devnet mempool/block methods."
-        );
-        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Transaction), None);
-        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Demand), None);
-        assert_eq!(legacy_interval_deprecation_warning(BlockGenerationOn::Mempool), None);
-    }
+    use crate::configure_tracing;
 
     #[test]
     fn test_generated_log_level_from_empty_environment_variable_is_info() {

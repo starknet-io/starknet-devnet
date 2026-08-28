@@ -55,9 +55,7 @@ pub(crate) struct Args {
     #[arg(env = "ACCOUNT_CLASS_CUSTOM")]
     #[arg(value_name = "PATH")]
     #[arg(conflicts_with = "account_class_choice")]
-    #[arg(
-        help = "Specify the path to a Cairo Sierra artifact to be used by predeployed accounts;"
-    )]
+    #[arg(help = "Specify the path to a Cairo Sierra artifact to be used by predeployed accounts;")]
     account_class_custom: Option<AccountClassWrapper>,
 
     #[arg(long = "predeclare-argent")]
@@ -99,9 +97,7 @@ pub(crate) struct Args {
     #[arg(env = "PORT")]
     #[arg(value_name = "PORT")]
     #[arg(default_value_t = DEVNET_DEFAULT_PORT)]
-    #[arg(
-        help = "Specify the port to listen at; If 0, acquires a random free port and prints it;"
-    )]
+    #[arg(help = "Specify the port to listen at; If 0, acquires a random free port and prints it;")]
     port: u16,
 
     // Set start time in seconds
@@ -215,7 +211,8 @@ pub(crate) struct Args {
 - \"transaction\" - new block generated on each transaction
 - \"demand\" - new block creatable solely by calling the devnet_createBlock JSON-RPC method
 - \"mempool\" - transactions remain received until processed by a Devnet mempool/block method
-- <INTERVAL> - deprecated legacy mode that pre-confirms transactions immediately and seals the current block periodically
+- <INTERVAL> - deprecated legacy mode that pre-confirms transactions immediately and seals the \
+                  current block periodically
 
 Calling devnet_createBlock JSON-RPC method is also an option in modes other than \"demand\".")]
     block_generation_on: BlockGenerationOn,
@@ -224,17 +221,15 @@ Calling devnet_createBlock JSON-RPC method is also an option in modes other than
     #[arg(env = "MEMPOOL_ORDERING")]
     #[arg(value_name = "POLICY")]
     #[arg(default_value = "fifo")]
-    #[arg(
-        help = "Specify transaction ordering for mempool block building. Possible values are: fifo, starknet, random;"
-    )]
+    #[arg(help = "Specify transaction ordering for mempool block building. Possible values are: \
+                  fifo, starknet, random;")]
     mempool_ordering: MempoolOrderingArg,
 
     #[arg(long = "mempool-random-seed")]
     #[arg(env = "MEMPOOL_RANDOM_SEED")]
     #[arg(value_name = "SEED")]
-    #[arg(
-        help = "Specify the deterministic seed for random mempool ordering; defaults to the Devnet seed;"
-    )]
+    #[arg(help = "Specify the deterministic seed for random mempool ordering; defaults to the \
+                  Devnet seed;")]
     mempool_random_seed: Option<u64>,
 
     #[arg(long = "mempool-max-transactions-per-block")]
@@ -436,13 +431,6 @@ impl Args {
 }
 
 fn parse_block_generation_on(value: &str) -> Result<BlockGenerationOn, String> {
-    if value.starts_with("mempool:") {
-        return Err(
-            "mempool:<N> is reserved for the future streaming block-builder mode and is not available yet; use mempool with explicit Devnet mempool/block methods"
-                .to_string(),
-        );
-    }
-
     value.parse().map_err(|_| {
         "expected transaction, demand, mempool, or a positive integer interval".to_string()
     })
@@ -843,13 +831,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reserved_streaming_mempool_mode_with_targeted_message() {
+    fn rejects_malformed_block_generation_values() {
         let err = Args::try_parse_from(["--", "--block-generation-on", "mempool:10"])
-            .expect_err("streaming mempool mode is reserved for a later release");
-
-        assert!(err.to_string().contains(
-            "mempool:<N> is reserved for the future streaming block-builder mode and is not available yet; use mempool with explicit Devnet mempool/block methods"
-        ));
+            .expect_err("malformed block-generation-on values must be rejected");
+        let message = err.to_string();
+        assert!(
+            message
+                .contains("expected transaction, demand, mempool, or a positive integer interval"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[test]

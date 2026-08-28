@@ -46,7 +46,7 @@ The mempool can be inspected and manipulated through [Devnet's mempool methods](
 
 The bare numeric `--block-generation-on <INTERVAL>` form is a deprecated compatibility mode. Transactions are still executed and pre-confirmed immediately, exactly as in [`demand` mode](#creating-blocks-on-demand); the timer only seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer.
 
-Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. The reserved `mempool:<INTERVAL>` production-like streaming builder is planned for a later release and is rejected by this release.
+Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. A bare numeric `--block-generation-on <INTERVAL>` is a deprecated compatibility mode that retains the legacy periodic-sealing cadence.
 
 Consider this example of spawning Devnet at moment `t`:
 

@@ -28,6 +28,7 @@ mod get_events;
 mod get_transaction_by_block_id_and_index;
 mod get_transaction_by_hash;
 mod get_transaction_receipt_by_hash;
+mod mempool;
 mod messaging;
 mod minting;
 mod old_state;

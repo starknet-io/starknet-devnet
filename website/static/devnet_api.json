@@ -404,7 +404,15 @@
                     "type": ["object", "null"]
                   }
                 },
-                "required": ["transaction_hash", "status", "arrival_id", "sender_address", "nonce", "tip", "transaction"]
+                "required": [
+                  "transaction_hash",
+                  "status",
+                  "arrival_id",
+                  "sender_address",
+                  "nonce",
+                  "tip",
+                  "transaction"
+                ]
               }
             },
             "pre_confirmed_transaction_hashes": {
@@ -418,7 +426,12 @@
               "minimum": 0
             }
           },
-          "required": ["config", "transactions", "pre_confirmed_transaction_hashes", "remaining_block_capacity"]
+          "required": [
+            "config",
+            "transactions",
+            "pre_confirmed_transaction_hashes",
+            "remaining_block_capacity"
+          ]
         }
       },
       "errors": [

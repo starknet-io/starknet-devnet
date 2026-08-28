@@ -119,7 +119,3 @@ Remove every received transaction with `devnet_clearMempool`. Neither method rem
 ## Restarting, dumping, and loading
 
 Restarting clears the entire mempool and open proposal. Dumping records admission and each exact selected-hash sequence, configuration update, removal, clear, seal, and abort action so loading reproduces deterministic ordering without relying on timing or current policy defaults. Use the same startup account, class, block-generation, and mempool configuration when loading events into another Devnet instance.
-
-## Future streaming builder
-
-`mempool:<N>` is reserved for a future production-like streaming builder in which `N` is the maximum proposal-building duration rather than a periodic sealing cadence. This release rejects that value. The future scheduler will repeatedly call the same selection, preconfirmation, and strict-sealing operations documented here.

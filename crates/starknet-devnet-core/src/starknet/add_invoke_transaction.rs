@@ -8,13 +8,31 @@ use starknet_types::rpc::transactions::{
 
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
+use crate::starknet::mempool::{MempoolLane, PreparedTransaction};
 use crate::starknet::proofs::verify_proof;
 use crate::starknet::starknet_config::ProofMode;
-use crate::starknet::mempool::PreparedTransaction;
 
 pub fn add_invoke_transaction(
     starknet: &mut Starknet,
     broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+) -> DevnetResult<TransactionHash> {
+    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::User)
+}
+
+/// Like [`add_invoke_transaction`] but submits on the system lane, so execution happens
+/// regardless of the configured block-generation mode. Used by `devnet_mint` so its balance
+/// change is observable immediately even in `mempool` mode (per the v1 plan).
+pub fn add_invoke_transaction_system(
+    starknet: &mut Starknet,
+    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+) -> DevnetResult<TransactionHash> {
+    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::System)
+}
+
+fn add_invoke_transaction_in_lane(
+    starknet: &mut Starknet,
+    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+    lane: MempoolLane,
 ) -> DevnetResult<TransactionHash> {
     if !broadcasted_invoke_transaction.are_gas_bounds_valid() {
         return Err(TransactionValidationError::InsufficientResourcesForValidate.into());
@@ -67,9 +85,8 @@ pub fn add_invoke_transaction(
         &ContractAddress::from(sn_api_transaction.sender_address()),
     )?);
 
-    let strict_nonce_check = broadcasted_invoke_transaction.requires_strict_nonce_check(
-        starknet.config.requires_strict_nonce_check(),
-    );
+    let strict_nonce_check = broadcasted_invoke_transaction
+        .requires_strict_nonce_check(starknet.config.requires_strict_nonce_check());
 
     let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::Invoke(sn_api_transaction),
@@ -83,8 +100,14 @@ pub fn add_invoke_transaction(
 
     let transaction = TransactionWithHash::new(transaction_hash, invoke_transaction);
 
-    let prepared = PreparedTransaction::account(transaction, executable, None);
-    starknet.submit_prepared_transaction(prepared)?;
+    let prepared = match lane {
+        MempoolLane::User => PreparedTransaction::account(transaction, executable, None),
+        MempoolLane::System => PreparedTransaction::system_account(transaction, executable, None),
+    };
+    let transaction_hash = match lane {
+        MempoolLane::User => starknet.submit_prepared_transaction(prepared)?,
+        MempoolLane::System => starknet.submit_system_prepared_transaction(prepared)?,
+    };
 
     Ok(transaction_hash)
 }
@@ -390,6 +413,14 @@ mod tests {
                 (address, account_nonce, incoming_tx_nonce),
                 (account_address, Nonce(Felt::ONE), Nonce(Felt::from(tx_nonce)))
             ),
+            // In Demand mode, the prior tx is still in the mempool (pre-confirmed but not
+            // sealed), so the new tx is rejected at mempool admission with a typed
+            // `NonceConflict` (mapped to RPC code 59) instead of reaching blockifier's nonce
+            // check.
+            Err(Error::NonceConflict { address, nonce }) => {
+                assert_eq!(address, account_address);
+                assert_eq!(nonce, Nonce(Felt::from(tx_nonce)));
+            }
             other => panic!("Unexpected result: {other:?}"),
         }
     }
