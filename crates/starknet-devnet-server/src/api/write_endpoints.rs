@@ -261,10 +261,9 @@ impl JsonRpcHandler {
     pub async fn create_block(&self) -> StrictRpcResult {
         let mut starknet = self.api.starknet.lock().await;
 
-        starknet.create_block();
-        let block = starknet.get_latest_block()?;
+        let block_hash = starknet.create_block_strict()?;
 
-        Ok(DevnetResponse::CreatedBlock(CreatedBlock { block_hash: block.block_hash() }).into())
+        Ok(DevnetResponse::CreatedBlock(CreatedBlock { block_hash }).into())
     }
 
     /// devnet_getMempool

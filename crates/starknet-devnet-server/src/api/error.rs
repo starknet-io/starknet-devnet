@@ -247,8 +247,15 @@ impl ApiError {
                 ..
             }) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
             ApiError::StarknetDevnetError(starknet_core::error::Error::NonceConflict {
-                ..
-            }) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
+                address,
+                nonce,
+            }) => ApiError::UnsupportedAction {
+                msg: format!(
+                    "A transaction for account {address:#x} with nonce {nonce} is already in the \
+                     mempool"
+                ),
+            }
+            .api_error_to_rpc_error(),
             ApiError::StarknetDevnetError(error) => RpcError {
                 code: crate::rpc_core::error::ErrorCode::ServerError(WILDCARD_RPC_ERROR_CODE),
                 message: anyhow::format_err!(error).root_cause().to_string().into(),
@@ -406,6 +413,18 @@ mod tests {
             59,
             "Duplicate transaction",
         );
+    }
+
+    #[test]
+    fn nonce_conflict_is_an_invalid_request_not_a_duplicate_hash() {
+        let error = ApiError::StarknetDevnetError(starknet_core::error::Error::NonceConflict {
+            address: ContractAddress::zero(),
+            nonce: Nonce(Felt::ONE),
+        })
+        .api_error_to_rpc_error();
+
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert!(error.message.contains("already in the mempool"));
     }
 
     #[test]

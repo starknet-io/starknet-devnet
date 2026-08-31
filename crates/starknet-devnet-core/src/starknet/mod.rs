@@ -92,6 +92,7 @@ mod add_declare_transaction;
 mod add_deploy_account_transaction;
 mod add_invoke_transaction;
 mod add_l1_handler_transaction;
+pub mod block_builder;
 mod cheats;
 pub(crate) mod defaulter;
 mod estimations;
@@ -176,6 +177,10 @@ impl Starknet {
         &self.mempool
     }
 
+    pub fn block_builder(&mut self) -> block_builder::BlockBuilder<'_> {
+        block_builder::BlockBuilder::new(self)
+    }
+
     pub fn remove_from_mempool(
         &mut self,
         transaction_hash: TransactionHash,
@@ -218,7 +223,24 @@ impl Starknet {
         &mut self,
         prepared: mempool::PreparedTransaction,
     ) -> DevnetResult<TransactionHash> {
-        let transaction_hash = self.mempool.admit(prepared)?;
+        let transaction_hash = *prepared.transaction.get_transaction_hash();
+        if self.transactions.get(&transaction_hash).is_some() {
+            return Err(Error::DuplicateTransaction { transaction_hash });
+        }
+        let transaction_hash = match self.mempool.admit(prepared) {
+            Err(Error::NonceConflict { address, nonce })
+                if self.config.executes_on_submission() =>
+            {
+                let account_nonce = self.pre_confirmed_state.state.get_nonce_at(address.into())?;
+                return Err(TransactionValidationError::InvalidTransactionNonce {
+                    address,
+                    account_nonce,
+                    incoming_tx_nonce: nonce,
+                }
+                .into());
+            }
+            result => result?,
+        };
         if self.config.executes_on_submission() {
             if let Err(error) = self.execute_mempool_transaction(transaction_hash) {
                 self.mempool.remove_entry(&transaction_hash);
@@ -235,6 +257,10 @@ impl Starknet {
         &mut self,
         prepared: mempool::PreparedTransaction,
     ) -> DevnetResult<TransactionHash> {
+        let known_hash = *prepared.transaction.get_transaction_hash();
+        if self.transactions.get(&known_hash).is_some() {
+            return Err(Error::DuplicateTransaction { transaction_hash: known_hash });
+        }
         let transaction_hash = self.mempool.admit(prepared)?;
         if let Err(error) = self.execute_mempool_transaction(transaction_hash) {
             self.mempool.remove_entry(&transaction_hash);
@@ -317,85 +343,55 @@ impl Starknet {
             .collect()
     }
 
+    fn evict_stale_received_transactions(
+        &mut self,
+        outcome: &mut mempool::BuildOutcome,
+    ) -> DevnetResult<()> {
+        let received = self
+            .mempool
+            .entries()
+            .filter_map(|(hash, entry)| {
+                (entry.phase == mempool::MempoolPhase::Received).then_some(*hash)
+            })
+            .collect::<Vec<_>>();
+        let stale = received
+            .into_iter()
+            .filter_map(|hash| match self.eligibility(hash) {
+                Ok(TransactionEligibility::Stale(reason)) => Some(Ok((hash, reason))),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<DevnetResult<Vec<_>>>()?;
+
+        for (transaction_hash, reason) in stale {
+            self.mempool.remove_entry(&transaction_hash);
+            outcome.rejected.push(mempool::BuildFailure { transaction_hash, reason });
+        }
+        Ok(())
+    }
+
     pub fn preconfirm_transactions(
         &mut self,
         selection: mempool::MempoolSelection,
     ) -> DevnetResult<mempool::BuildOutcome> {
-        let mut outcome = mempool::BuildOutcome::default();
-        if self.mempool.remaining_capacity() == 0 {
-            outcome.block_full = true;
-            return Ok(outcome);
-        }
+        self.block_builder().build_chunk(selection)
+    }
 
-        let requested_limit = match &selection {
-            mempool::MempoolSelection::Policy { max_transactions } => {
-                max_transactions.unwrap_or(usize::MAX)
-            }
-            mempool::MempoolSelection::Hashes(hashes) => hashes.len(),
-        };
-        let forced_hashes = match selection {
-            mempool::MempoolSelection::Hashes(hashes) => {
-                let mut unique = std::collections::HashSet::new();
-                for hash in &hashes {
-                    if !unique.insert(*hash) {
-                        return Err(Error::UnsupportedAction {
-                            msg: format!("Transaction hash {hash:#x} is duplicated"),
-                        });
-                    }
-                    let entry = self.mempool.get(hash).ok_or(Error::NoTransaction)?;
-                    if entry.phase != mempool::MempoolPhase::Received {
-                        return Err(Error::UnsupportedAction {
-                            msg: format!("Transaction {hash:#x} is not RECEIVED"),
-                        });
-                    }
-                }
-                Some(hashes)
-            }
-            mempool::MempoolSelection::Policy { .. } => None,
-        };
-        let limit = requested_limit.min(self.mempool.remaining_capacity());
-
-        for index in 0..limit {
-            let selected = if let Some(hashes) = &forced_hashes {
-                hashes.get(index).copied()
-            } else {
-                let eligible = self.eligible_hashes()?;
-                self.mempool.select_policy(
-                    &eligible,
-                    self.blocks.pre_confirmed_block.block_number().0,
-                    self.next_block_gas.l2_gas_price_fri.get(),
-                )
-            };
-            let Some(hash) = selected else { break };
-            outcome.selected.push(hash);
-
-            match self.eligibility(hash)? {
-                TransactionEligibility::Eligible => match self.execute_mempool_transaction(hash) {
-                    Ok(()) => outcome.pre_confirmed.push(hash),
-                    Err(error) => {
-                        self.mempool.remove_entry(&hash);
-                        outcome.rejected.push(mempool::BuildFailure {
-                            transaction_hash: hash,
-                            reason: error.to_string(),
-                        });
-                    }
-                },
-                TransactionEligibility::Blocked(reason) => {
-                    outcome.blocked.push(mempool::BuildFailure { transaction_hash: hash, reason });
-                }
-                TransactionEligibility::Stale(reason) => {
-                    self.mempool.remove_entry(&hash);
-                    outcome.rejected.push(mempool::BuildFailure { transaction_hash: hash, reason });
-                }
-            }
-        }
-        outcome.block_full = self.mempool.remaining_capacity() == 0;
-        Ok(outcome)
+    /// Processes eligible transactions using a caller-provided ordering policy.
+    ///
+    /// This is the programmatic extension point for custom rules. The builder still owns
+    /// eligibility, validation, execution, capacity, and lifecycle transitions.
+    pub fn preconfirm_transactions_with_policy(
+        &mut self,
+        max_transactions: Option<usize>,
+        policy: &dyn mempool::TransactionOrderingPolicy,
+    ) -> DevnetResult<mempool::BuildOutcome> {
+        self.block_builder().build_policy_chunk(max_transactions, policy)
     }
 
     /// Seal exactly the currently pre-confirmed proposal without draining received transactions.
     pub fn seal_block(&mut self) -> Felt {
-        self.generate_new_block_and_state()
+        self.block_builder().seal()
     }
 
     pub fn abort_preconfirmed_block(&mut self) -> DevnetResult<Vec<TransactionHash>> {
@@ -1903,14 +1899,19 @@ impl Starknet {
         }
     }
 
-    /// create new block from pre_confirmed one
-    pub fn create_block(&mut self) {
-        if self.config.uses_manual_mempool()
-            && let Err(error) = self.preconfirm_transactions(mempool::MempoolSelection::default())
-        {
-            error!("Failed to fill block from mempool before sealing: {error}");
+    /// Creates and seals a block, filling it from the manual mempool when applicable.
+    pub fn create_block_strict(&mut self) -> DevnetResult<Felt> {
+        if self.config.uses_manual_mempool() {
+            self.preconfirm_transactions(mempool::MempoolSelection::default())?;
         }
-        self.generate_new_block_and_state();
+        Ok(self.generate_new_block_and_state())
+    }
+
+    /// Convenience wrapper for internal callers that cannot report a block-building error.
+    pub fn create_block(&mut self) {
+        if let Err(error) = self.create_block_strict() {
+            error!("Failed to create block: {error}");
+        }
     }
 
     // Set time and optionally create a new block

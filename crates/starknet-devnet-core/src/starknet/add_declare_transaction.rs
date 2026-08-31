@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn declare_tx_should_fail_if_nonce_repeated() {
+    fn declare_tx_should_fail_if_hash_repeated() {
         let (mut starknet, sender) = setup_starknet_with_no_signature_check_account(1e18 as u128);
 
         let tx_nonce = Felt::ZERO;
@@ -340,16 +340,9 @@ mod tests {
         assert!(starknet.pre_confirmed_state.is_contract_declared(class_hash));
 
         match starknet.add_declare_transaction(declare_tx.into()) {
-            Err(Error::TransactionValidationError(
-                TransactionValidationError::InvalidTransactionNonce {
-                    address,
-                    account_nonce,
-                    incoming_tx_nonce,
-                },
-            )) => assert_eq!(
-                (address, account_nonce.0, incoming_tx_nonce.0),
-                (sender.account_address, Felt::ONE, tx_nonce)
-            ),
+            Err(Error::DuplicateTransaction { transaction_hash }) => {
+                assert_eq!(transaction_hash, tx_hash)
+            }
             other => panic!("Unexpected result: {other:?}"),
         };
 

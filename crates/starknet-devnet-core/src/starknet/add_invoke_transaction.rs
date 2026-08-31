@@ -413,14 +413,6 @@ mod tests {
                 (address, account_nonce, incoming_tx_nonce),
                 (account_address, Nonce(Felt::ONE), Nonce(Felt::from(tx_nonce)))
             ),
-            // In Demand mode, the prior tx is still in the mempool (pre-confirmed but not
-            // sealed), so the new tx is rejected at mempool admission with a typed
-            // `NonceConflict` (mapped to RPC code 59) instead of reaching blockifier's nonce
-            // check.
-            Err(Error::NonceConflict { address, nonce }) => {
-                assert_eq!(address, account_address);
-                assert_eq!(nonce, Nonce(Felt::from(tx_nonce)));
-            }
             other => panic!("Unexpected result: {other:?}"),
         }
     }

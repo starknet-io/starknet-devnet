@@ -6,14 +6,15 @@
 //! * `devnet_getMempool` / `devnet_removeFromMempool` / `devnet_clearMempool` reflect
 //!   RECEIVED/CANDIDATE/PRE_CONFIRMED state and only act on RECEIVED entries.
 //! * `devnet_preconfirmTransactions` selects per ordering policy, with optional forced hashes or
-//!   max-transactions cap. `selected`/RECEIVED transitions are observable.
-//! * `devnet_sealBlock` performs strict sealing: pre-confirms RECEIVED only on demand, but never
-//!   pulls them in automatically.
+//!   max-transactions cap. RECEIVED/PRE_CONFIRMED transitions are observable.
+//! * `devnet_sealBlock` performs strict sealing and never pulls RECEIVED transactions in
+//!   automatically.
 //! * `devnet_abortPreconfirmedBlock` returns every PRE_CONFIRMED entry back to RECEIVED.
 //! * `devnet_abortBlocks` clears all mempool state (RECEIVED + open proposal).
 //! * `devnet_mint` uses the system lane, so balance changes are immediately visible even when block
 //!   generation is on `mempool`.
-//! * Duplicate nonces (when strict nonce checking applies) are rejected with RPC code 59.
+//! * Duplicate hashes are rejected with RPC code 59; duplicate account nonces are rejected as
+//!   invalid requests without displacing the already received transaction.
 //!
 //! The legacy `Interval(<seconds>)` mode is preserved as a compatibility path; its deprecation
 //! warning is not asserted here because stderr is not captured in the BackgroundDevnet harness,
@@ -25,7 +26,7 @@ use starknet_rs_core::types::{BlockId, BlockTag, Call, Felt};
 use starknet_rs_core::utils::get_selector_from_name;
 use starknet_rs_providers::Provider;
 use starknet_rs_providers::jsonrpc::{HttpTransport, JsonRpcClient};
-use starknet_rs_signers::LocalWallet;
+use starknet_rs_signers::{LocalWallet, SigningKey};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
@@ -70,18 +71,50 @@ async fn first_predeployed_account<'a>(
     SingleOwnerAccount::new(client, signer, address, chain_id, ExecutionEncoding::New)
 }
 
-/// Sends a tiny transfer from the predeployed account to `recipient` in mempool mode, returning
-/// the transaction hash. Uses the STRK ERC20 because the predeployed account is funded with it.
+/// Returns the n-th predeployed account (0-based) as a `SingleOwnerAccount`.
+async fn nth_predeployed_account<'a>(
+    devnet: &'a BackgroundDevnet,
+    client: &'a JsonRpcClient<HttpTransport>,
+    index: usize,
+) -> SingleOwnerAccount<&'a JsonRpcClient<HttpTransport>, LocalWallet> {
+    let accounts =
+        devnet.send_custom_rpc("devnet_getPredeployedAccounts", json!({})).await.unwrap();
+    let arr = accounts.as_array().expect("predeployed accounts should be an array");
+    let entry = arr
+        .get(index)
+        .unwrap_or_else(|| panic!("predeployed account at index {index} not found: {accounts}"));
+    let address = Felt::from_hex_unchecked(entry["address"].as_str().unwrap());
+    let pk = Felt::from_hex_unchecked(entry["private_key"].as_str().unwrap());
+    let signer = LocalWallet::from(SigningKey::from_secret_scalar(pk));
+    let chain_id = client.chain_id().await.unwrap();
+    SingleOwnerAccount::new(client, signer, address, chain_id, ExecutionEncoding::New)
+}
+
+/// Sends a tiny transfer from the predeployed account to `recipient` in mempool mode,
+/// returning the transaction hash. Uses the STRK ERC20 because the predeployed account is
+/// funded with it. The optional `tip` enables exercises that depend on Starknet ordering's
+/// priority comparator (descending tip, descending transaction-hash tie-break).
+///
+/// `nonce` MUST be supplied by the caller. In mempool mode the chain nonce advances only after
+/// a transaction is pre-confirmed, not when it is admitted as `RECEIVED`, so callers track the
+/// next expected nonce themselves.
 async fn submit_transfer_in_mempool(
     account: &SingleOwnerAccount<&JsonRpcClient<HttpTransport>, LocalWallet>,
     recipient: Felt,
     amount: u128,
+    tip: u64,
+    nonce: Felt,
 ) -> Felt {
+    // Use the Devnet default L2 gas price explicitly to avoid fee estimation while still making
+    // the transaction sufficiently paying for the Starknet ordering policy.
     let result = account
         .execute_v3(vec![strk_transfer_call(recipient, amount)])
         .l1_gas(0)
         .l1_data_gas(1000)
         .l2_gas(1e8 as u64)
+        .l2_gas_price(1_000_000_000)
+        .tip(tip)
+        .nonce(nonce)
         .send()
         .await
         .expect("transfer should submit");
@@ -113,7 +146,6 @@ async fn assert_phase(devnet: &BackgroundDevnet, tx_hash: Felt, expected: &str) 
 /// ---------------------------------------------------------------------------
 /// Plan-mandated behaviors
 /// ---------------------------------------------------------------------------
-
 /// Plan: "devnet_mint ... uses the system lane and force-processes its generated transaction"
 /// so the balance change is observable immediately even in `mempool` mode.
 #[tokio::test]
@@ -122,7 +154,7 @@ async fn mint_is_force_processed_in_mempool_mode() {
     let recipient = Felt::from_hex_unchecked(PREDEPLOYED_ACCOUNT_ADDRESS);
     let balance_before =
         devnet.get_balance_by_tag(&recipient, FeeUnit::Fri, BlockTag::Latest).await.unwrap();
-    devnet.mint(recipient, 1_000).await;
+    let transaction_hash = devnet.mint(recipient, 1_000).await;
 
     // In mempool mode, the mint should be force-processed and visible at pre_confirmed
     // without any explicit preconfirm/seal call.
@@ -134,10 +166,9 @@ async fn mint_is_force_processed_in_mempool_mode() {
         "mint must be observable immediately in mempool mode"
     );
 
-    // And the mint tx must NOT linger in the mempool as a user RECEIVED entry (system lane).
-    let resp = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
-    let txs = resp["transactions"].as_array().unwrap();
-    assert_eq!(txs.len(), 0, "mint tx must not appear in user mempool: {resp}");
+    // System transactions are retained as PRE_CONFIRMED until sealing so proposal abort can
+    // restore their effects too.
+    assert_phase(&devnet, transaction_hash, "PRE_CONFIRMED").await;
 }
 
 /// Plan: "Restart and block abortion clear RECEIVED/CANDIDATE transactions in v1".
@@ -146,13 +177,22 @@ async fn mint_is_force_processed_in_mempool_mode() {
 /// mempool state is cleared.
 #[tokio::test]
 async fn abort_blocks_clears_mempool() {
-    let devnet = spawn_mempool_devnet().await;
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--state-archive-capacity",
+        "full",
+    ])
+    .await
+    .expect("Could not start Devnet in mempool mode with a full state archive");
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    // Submit two transfers: they remain RECEIVED in mempool mode.
-    let h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
-    let _h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
+    // Submit two transfers: they remain RECEIVED in mempool mode. Nonces must be supplied
+    // explicitly because the chain nonce does not advance until a transaction is sealed,
+    // so back-to-back RECEIVED submissions would otherwise collide on nonce 0.
+    let h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let _h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
     assert_received_count(&devnet, 2).await;
 
     // Pre-confirm one of them; it becomes PRE_CONFIRMED while the other stays RECEIVED.
@@ -195,7 +235,7 @@ async fn mempool_phases_received_candidate_preconfirmed() {
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
     assert_phase(&devnet, hash, "RECEIVED").await;
 
     // The selection happens in `preconfirm_transactions` (when it returns). The intermediate
@@ -247,7 +287,7 @@ async fn get_mempool_reports_config_and_state() {
     assert!(resp["config"]["random_seed"].is_number());
     assert!(resp["remaining_block_capacity"].is_number());
 
-    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     // Snapshot after one submission: tx present as RECEIVED.
     let resp = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
@@ -271,7 +311,7 @@ async fn remove_from_mempool_only_received() {
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
     assert_phase(&devnet, hash, "RECEIVED").await;
 
     // RECEIVED -> removable.
@@ -285,8 +325,9 @@ async fn remove_from_mempool_only_received() {
     assert_eq!(resp["transaction_hash"], format!("{:#x}", hash));
     assert_received_count(&devnet, 0).await;
 
-    // Now re-submit and pre-confirm; the tx is PRE_CONFIRMED and not removable.
-    let hash2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
+    // Now re-submit and pre-confirm; the tx is PRE_CONFIRMED and not removable. Nonce is
+    // 0 again because the previous RECEIVED entry was removed without being sealed.
+    let hash2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ZERO).await;
     let _ = devnet
         .send_custom_rpc(
             "devnet_preconfirmTransactions",
@@ -317,20 +358,20 @@ async fn clear_mempool_only_received() {
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    let h_received_1 = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
-    let h_received_2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
-    let h_will_pre_confirm = submit_transfer_in_mempool(&account, Felt::from(3u64), 1).await;
+    let h_will_pre_confirm =
+        submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let h_received_2 =
+        submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
+    let h_received_3 =
+        submit_transfer_in_mempool(&account, Felt::from(3u64), 1, 0, Felt::TWO).await;
 
     let _ = devnet
-        .send_custom_rpc(
-            "devnet_preconfirmTransactions",
-            json!({ "transaction_hashes": [format!("{:#x}", h_will_pre_confirm)] }),
-        )
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({ "max_transactions": 1 }))
         .await
         .unwrap();
     assert_phase(&devnet, h_will_pre_confirm, "PRE_CONFIRMED").await;
-    assert_phase(&devnet, h_received_1, "RECEIVED").await;
     assert_phase(&devnet, h_received_2, "RECEIVED").await;
+    assert_phase(&devnet, h_received_3, "RECEIVED").await;
 
     let resp = devnet.send_custom_rpc("devnet_clearMempool", json!({})).await.unwrap();
     let removed: Vec<String> = resp["removed"]
@@ -341,7 +382,7 @@ async fn clear_mempool_only_received() {
         .collect();
     let mut removed_sorted = removed.clone();
     removed_sorted.sort();
-    let mut expected = vec![format!("{:#x}", h_received_1), format!("{:#x}", h_received_2)];
+    let mut expected = vec![format!("{h_received_2:#x}"), format!("{h_received_3:#x}")];
     expected.sort();
     assert_eq!(removed_sorted, expected, "clear must only drop RECEIVED entries");
 
@@ -358,8 +399,8 @@ async fn abort_preconfirmed_block_returns_to_received() {
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    let h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
-    let h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
+    let h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
     let _ = devnet
         .send_custom_rpc(
             "devnet_preconfirmTransactions",
@@ -399,7 +440,7 @@ async fn seal_block_does_not_pick_received() {
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
     assert_phase(&devnet, hash, "RECEIVED").await;
 
     let resp = devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
@@ -418,10 +459,10 @@ async fn max_transactions_per_block_caps_selection() {
     let account = first_predeployed_account(&devnet, &client).await;
 
     // Submit 4 transfers (FIFO order; same sender nonce sequence).
-    let _h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
-    let _h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
-    let _h3 = submit_transfer_in_mempool(&account, Felt::from(3u64), 1).await;
-    let _h4 = submit_transfer_in_mempool(&account, Felt::from(4u64), 1).await;
+    let _h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let _h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
+    let _h3 = submit_transfer_in_mempool(&account, Felt::from(3u64), 1, 0, Felt::TWO).await;
+    let _h4 = submit_transfer_in_mempool(&account, Felt::from(4u64), 1, 0, Felt::THREE).await;
     assert_received_count(&devnet, 4).await;
 
     // Set max to 2 and pre-confirm without forcing hashes.
@@ -447,11 +488,9 @@ async fn max_transactions_per_block_caps_selection() {
     assert_eq!(received, 2, "two txs must remain RECEIVED: {snapshot}");
 }
 
-/// Plan: forced selection via `transaction_hashes` is honored even when the target nonce is
-/// not the next expected one. We use nonces higher than expected so the call would otherwise
-/// be blocked by eligibility checks.
+/// Forced selection preserves the caller's order but still enforces nonce eligibility.
 #[tokio::test]
-async fn forced_hashes_bypass_eligibility() {
+async fn forced_hashes_respect_eligibility() {
     // Use a fresh devnet in transaction mode (executes on submission) so the first tx with
     // nonce 0 is accepted and bumps the sender nonce. Then switch to mempool for the test.
     let devnet = spawn_mempool_devnet().await;
@@ -461,7 +500,7 @@ async fn forced_hashes_bypass_eligibility() {
     // Submit a tx and seal it. In mempool mode without sealing, it stays RECEIVED. We need
     // to surface the pre-confirmed block to the accepted collection; one way is to call
     // preconfirm + sealBlock.
-    let h_valid = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let h_valid = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
     let _ = devnet
         .send_custom_rpc(
             "devnet_preconfirmTransactions",
@@ -471,15 +510,15 @@ async fn forced_hashes_bypass_eligibility() {
         .unwrap();
     let _ = devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
 
-    // Now submit two more txs: the first is the next valid nonce, the second has a future
-    // nonce which by default would be blocked.
-    let h_next = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
+    // Now submit two more txs: the first is the next valid nonce (chain nonce advanced to
+    // 1 after sealing), the second has a future nonce which by default would be blocked.
+    let h_next = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
     assert_phase(&devnet, h_next, "RECEIVED").await;
 
-    // Submit a tx with a future nonce; mempool will keep it RECEIVED (eligibility is a
-    // separate gate, see `preconfirm_transactions` which checks the next-expected nonce).
-    // Force-include it via transaction_hashes.
-    let h_future = submit_transfer_in_mempool(&account, Felt::from(3u64), 1).await;
+    // Submit a future nonce and force it. The request must report it blocked and leave it
+    // RECEIVED because the nonce-1 transaction is still pending.
+    let h_future =
+        submit_transfer_in_mempool(&account, Felt::from(3u64), 1, 0, Felt::from(2u64)).await;
     let resp = devnet
         .send_custom_rpc(
             "devnet_preconfirmTransactions",
@@ -487,33 +526,28 @@ async fn forced_hashes_bypass_eligibility() {
         )
         .await
         .unwrap();
-    let pre_confirmed: Vec<String> = resp["pre_confirmed"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
-    assert!(pre_confirmed.contains(&format!("{:#x}", h_future)));
+    assert!(resp["pre_confirmed"].as_array().unwrap().is_empty(), "{resp}");
+    assert_eq!(resp["blocked"][0]["transaction_hash"], format!("{h_future:#x}"));
+    assert_phase(&devnet, h_future, "RECEIVED").await;
 }
 
-/// Plan: in `mempool` mode, strict nonce checking is enabled. Re-submitting the same nonce
-/// is rejected with the duplicate-transaction error (RPC code 59 in the plan).
+/// A second transaction for the same account and nonce is rejected as an invalid request.
 #[tokio::test]
-async fn duplicate_nonce_rejected_with_code_59() {
+async fn duplicate_nonce_is_rejected() {
     let devnet = spawn_mempool_devnet().await;
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
     // Submit the first tx; the mempool admits it as RECEIVED.
-    let _h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
-    // Submitting a second tx with the same sender address and same nonce (the next valid
-    // nonce is shared) must be rejected with code 59.
+    // Submitting a second tx with the same sender address and nonce must be rejected.
     let second_send = account
         .execute_v3(vec![strk_transfer_call(Felt::from(2u64), 1)])
         .l1_gas(0)
         .l1_data_gas(1000)
         .l2_gas(1e8 as u64)
+        .nonce(Felt::ZERO)
         .send()
         .await;
     let err = match second_send {
@@ -522,10 +556,7 @@ async fn duplicate_nonce_rejected_with_code_59() {
     };
     // Provider-level error wraps the JSON-RPC error; assert on its string content.
     let msg = err.to_string();
-    assert!(
-        msg.contains("code 59") || msg.contains("Duplicate transaction"),
-        "expected Duplicate transaction (code 59); got: {msg}"
-    );
+    assert!(msg.contains("already in the mempool"), "expected nonce-conflict error; got: {msg}");
 }
 
 /// Plan: nonce ordering policy (Starknet) prioritizes txs with higher tip first. We can't
@@ -574,7 +605,7 @@ async fn legacy_interval_mode_continues_to_work() {
         .expect("Could not start Devnet with Interval(1)");
 
     let config = devnet.get_config().await;
-    assert_eq!(config["block_generation_on"], "1");
+    assert_eq!(config["block_generation_on"], json!({ "interval": 1 }));
 
     let latest_block_num_before =
         devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
@@ -582,7 +613,7 @@ async fn legacy_interval_mode_continues_to_work() {
     // Send a tx; the interval timer should seal a block within a few seconds.
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
-    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     // Wait for the interval to trigger a block seal.
     let mut latest_block_num_after = latest_block_num_before;
@@ -621,7 +652,6 @@ async fn preconfirm_with_empty_pool_is_noop() {
     let devnet = spawn_mempool_devnet().await;
     let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
     assert_eq!(resp["pre_confirmed"].as_array().unwrap().len(), 0);
-    assert_eq!(resp["selected"].as_array().unwrap().len(), 0);
     assert_eq!(resp["rejected"].as_array().unwrap().len(), 0);
     assert_eq!(resp["blocked"].as_array().unwrap().len(), 0);
     assert_eq!(resp["block_full"], false);
@@ -637,12 +667,13 @@ async fn next_nonce_becomes_eligible_after_preconfirm() {
     let account = first_predeployed_account(&devnet, &client).await;
 
     // Submit two txs; the first has the next-valid nonce, the second a future nonce.
-    let h_first = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
-    let h_second = submit_transfer_in_mempool(&account, Felt::from(2u64), 1).await;
+    let h_first = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let h_second = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
     assert_phase(&devnet, h_first, "RECEIVED").await;
     assert_phase(&devnet, h_second, "RECEIVED").await;
 
-    // Policy pre-confirm: only the first should be selected.
+    // Policy pre-confirm recomputes eligibility after the first execution, so both consecutive
+    // nonces are selected in the same call.
     let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
     let pre_confirmed: Vec<String> = resp["pre_confirmed"]
         .as_array()
@@ -652,22 +683,8 @@ async fn next_nonce_becomes_eligible_after_preconfirm() {
         .collect();
     assert!(pre_confirmed.contains(&format!("{:#x}", h_first)));
     assert!(
-        !pre_confirmed.contains(&format!("{:#x}", h_second)),
-        "future-nonce tx must not be auto-selected: {resp}"
-    );
-
-    // h_second is still RECEIVED — its nonce is now eligible, so a second pre-confirm call
-    // should pick it up.
-    let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
-    let pre_confirmed: Vec<String> = resp["pre_confirmed"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
-    assert!(
         pre_confirmed.contains(&format!("{:#x}", h_second)),
-        "after the first pre-confirm, h_second becomes eligible: {resp}"
+        "the next nonce must become eligible during the same processing call: {resp}"
     );
 }
 
@@ -677,7 +694,7 @@ async fn get_mempool_include_transactions_flag() {
     let devnet = spawn_mempool_devnet().await;
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
-    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     // Default — `transaction` is null/absent.
     let resp = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
@@ -706,7 +723,7 @@ async fn preconfirm_rejects_mutually_exclusive_params() {
     let devnet = spawn_mempool_devnet().await;
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
-    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     let err = devnet
         .send_custom_rpc(
@@ -746,7 +763,7 @@ async fn default_mode_seals_on_each_submission() {
 
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
-    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     let block_num_after = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
     assert!(block_num_after > block_num_before, "default mode must seal on submission");
@@ -763,7 +780,7 @@ async fn demand_mode_does_not_auto_seal() {
 
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
-    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1).await;
+    let _ = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
 
     // Demand mode should NOT auto-seal.
     let block_num_after_noop = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
@@ -774,4 +791,179 @@ async fn demand_mode_does_not_auto_seal() {
     let block_num_after_create =
         devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
     assert!(block_num_after_create > block_num_before);
+}
+
+/// Plan: end-to-end FIFO pipeline. Submit `n` transfers, one from each of `n` distinct
+/// predeployed accounts (so strict per-account nonce checking admits all of them at once
+/// — every sender has its own next-nonce slot). The inter-account FIFO ordering is what
+/// this test exercises: pre-confirm should select them in arrival order, the latest sealed
+/// block should contain them in that same order, and the mempool should drain.
+#[tokio::test]
+async fn fifo_pipeline_received_preconfirmed_sealed() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let accounts = [
+        first_predeployed_account(&devnet, &client).await,
+        nth_predeployed_account(&devnet, &client, 1).await,
+        nth_predeployed_account(&devnet, &client, 2).await,
+    ];
+
+    // Phase 1 — RECEIVED. Each sender submits a nonce-0 transfer (recipient is unique so
+    // each tx has a distinguishable intent; tx hashes themselves are ordered at the
+    // mempool layer, not by their recipients). Submissions are serialized so arrival order
+    // matches the order in which accounts are enumerated — `join_all` would race the three
+    // `execute_v3` round trips and break FIFO determinism.
+    let mut hashes: Vec<Felt> = Vec::with_capacity(accounts.len());
+    for (i, account) in accounts.iter().enumerate() {
+        let hash =
+            submit_transfer_in_mempool(account, Felt::from((i + 1) as u64), 1, 0, Felt::ZERO).await;
+        hashes.push(hash);
+    }
+    assert_received_count(&devnet, 3).await;
+
+    // Phase 2 — PRE_CONFIRMED. All three accounts are eligible, so a single unforced
+    // preconfirmTransactions must select all three.
+    let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let pre_confirmed: Vec<String> = resp["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let mut pc_sorted = pre_confirmed.clone();
+    pc_sorted.sort();
+    let mut expected_sorted: Vec<String> = hashes.iter().map(|h| format!("{h:#x}")).collect();
+    expected_sorted.sort();
+    assert_eq!(
+        pc_sorted, expected_sorted,
+        "all eligible txs must be PRE_CONFIRMED in one call: {resp}"
+    );
+    for h in &hashes {
+        assert_phase(&devnet, *h, "PRE_CONFIRMED").await;
+    }
+    assert_received_count(&devnet, 0).await;
+
+    // Phase 3 — SEALED. The latest sealed block contains all three hashes in FIFO order.
+    let block_num_before = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
+    let resp = devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
+    assert!(resp["block_hash"].is_string(), "expected block_hash: {resp}");
+
+    let sealed = devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    assert_eq!(sealed.block_number, block_num_before + 1, "sealing must advance the latest block");
+    assert_eq!(
+        sealed.transactions, hashes,
+        "sealed block must contain txs in FIFO submission order: {sealed:?}"
+    );
+
+    let snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(
+        snapshot["transactions"].as_array().unwrap().len(),
+        0,
+        "mempool must be drained after seal: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["pre_confirmed_transaction_hashes"].as_array().unwrap().len(),
+        0,
+        "open proposal must be empty after seal: {snapshot}"
+    );
+}
+
+/// Plan: end-to-end Starknet ordering pipeline. Three distinct senders each submit a
+/// nonce-0 transfer (so strict per-account nonce checking admits all of them at once).
+/// Each sender attaches a different `tip` (`i` for the i-th sender), which makes the
+/// Starknet priority comparator — descending tip with transaction-hash tie-break —
+/// deterministic without depending on FIFO fallback. Switch the policy to `starknet`
+/// and run the same RECEIVED -> PRE_CONFIRMED -> SEALED pipeline. Expected sealed
+/// order: senders enumerated in reverse submission order (highest tip first), i.e.
+/// `hashes[2], hashes[1], hashes[0]`.
+#[tokio::test]
+async fn starknet_pipeline_received_preconfirmed_sealed() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let accounts = [
+        first_predeployed_account(&devnet, &client).await,
+        nth_predeployed_account(&devnet, &client, 1).await,
+        nth_predeployed_account(&devnet, &client, 2).await,
+    ];
+
+    // Switch to the starknet policy before submitting.
+    let resp = devnet
+        .send_custom_rpc("devnet_setMempoolConfig", json!({ "ordering": "starknet" }))
+        .await
+        .unwrap();
+    assert_eq!(resp["ordering"], "starknet");
+
+    // Phase 1 — RECEIVED. Each sender submits a nonce-0 transfer with a distinct tip
+    // (0, 1, 2). Submissions are serialized so arrival order matches the order in
+    // which accounts are enumerated; the tip values make the Starknet priority
+    // comparator produce a deterministic, non-FIFO pre-confirm order.
+    let mut hashes: Vec<Felt> = Vec::with_capacity(accounts.len());
+    for (i, account) in accounts.iter().enumerate() {
+        let hash = submit_transfer_in_mempool(
+            account,
+            Felt::from((i + 1) as u64),
+            1,
+            i as u64,
+            Felt::ZERO,
+        )
+        .await;
+        hashes.push(hash);
+    }
+    assert_received_count(&devnet, 3).await;
+
+    // Phase 2 — PRE_CONFIRMED. All three accounts are eligible, so a single unforced
+    // preconfirmTransactions must select all three. Their declared tips are distinct,
+    // so the Starknet comparator picks them in strictly descending-tip order: the
+    // sender with tip=2 first, then tip=1, then tip=0.
+    let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let pre_confirmed: Vec<String> = resp["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let mut pc_sorted = pre_confirmed.clone();
+    pc_sorted.sort();
+    let mut expected_sorted: Vec<String> = hashes.iter().map(|h| format!("{h:#x}")).collect();
+    expected_sorted.sort();
+    assert_eq!(
+        pc_sorted, expected_sorted,
+        "all eligible txs must be PRE_CONFIRMED in one call: {resp}"
+    );
+    // The actual pre-confirm order must follow descending tip (not arrival order):
+    // sender index 2 (tip=2), 1 (tip=1), 0 (tip=0).
+    assert_eq!(
+        pre_confirmed,
+        vec![format!("{:#x}", hashes[2]), format!("{:#x}", hashes[1]), format!("{:#x}", hashes[0])],
+        "pre-confirm must list txs in starknet descending-tip order: {resp}"
+    );
+    for h in &hashes {
+        assert_phase(&devnet, *h, "PRE_CONFIRMED").await;
+    }
+    assert_received_count(&devnet, 0).await;
+    let block_num_before = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number;
+    let resp = devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
+    assert!(resp["block_hash"].is_string(), "expected block_hash: {resp}");
+
+    let sealed = devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    assert_eq!(sealed.block_number, block_num_before + 1, "sealing must advance the latest block");
+    assert_eq!(
+        sealed.transactions,
+        vec![hashes[2], hashes[1], hashes[0]],
+        "sealed block must contain txs in starknet descending-tip order: {sealed:?}"
+    );
+
+    let snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(
+        snapshot["transactions"].as_array().unwrap().len(),
+        0,
+        "mempool must be drained after seal: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["pre_confirmed_transaction_hashes"].as_array().unwrap().len(),
+        0,
+        "open proposal must be empty after seal: {snapshot}"
+    );
+    // Policy persists across seals.
+    assert_eq!(snapshot["config"]["ordering"], "starknet");
 }
