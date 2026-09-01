@@ -1,7 +1,6 @@
-//! Integration tests for the v1 mempool plan (mempool mode + devnet mempool RPCs).
+//! Integration tests for mempool mode and Devnet mempool RPCs.
 //!
-//! The plan governs the following surfaces; tests below assert the behavior end-to-end via
-//! running devnet instances:
+//! Tests below assert the supported behavior end-to-end via running Devnet instances:
 //! * `BlockGenerationOn::Mempool` keeps user txs RECEIVED until they are pre-confirmed or sealed.
 //! * `devnet_getMempool` / `devnet_removeFromMempool` / `devnet_clearMempool` reflect
 //!   RECEIVED/CANDIDATE/PRE_CONFIRMED state and only act on RECEIVED entries.
@@ -144,10 +143,10 @@ async fn assert_phase(devnet: &BackgroundDevnet, tx_hash: Felt, expected: &str) 
 }
 
 /// ---------------------------------------------------------------------------
-/// Plan-mandated behaviors
+/// Mempool behaviors
 /// ---------------------------------------------------------------------------
-/// Plan: "devnet_mint ... uses the system lane and force-processes its generated transaction"
-/// so the balance change is observable immediately even in `mempool` mode.
+/// `devnet_mint` uses the system lane and force-processes its generated transaction, so the
+/// balance change is observable immediately even in `mempool` mode.
 #[tokio::test]
 async fn mint_is_force_processed_in_mempool_mode() {
     let devnet = spawn_mempool_devnet().await;
@@ -171,7 +170,7 @@ async fn mint_is_force_processed_in_mempool_mode() {
     assert_phase(&devnet, transaction_hash, "PRE_CONFIRMED").await;
 }
 
-/// Plan: "Restart and block abortion clear RECEIVED/CANDIDATE transactions in v1".
+/// Restart and block abortion clear RECEIVED/CANDIDATE transactions.
 /// A pending pre-confirmed block (containing accepted txs) is in the way of the test — we
 /// abort it via `devnet_abortBlocks` on the pre-confirmed block, and verify the open
 /// mempool state is cleared.
@@ -211,8 +210,8 @@ async fn abort_blocks_clears_mempool() {
         .collect();
     assert!(pre_confirmed.contains(&format!("{:#x}", h1)));
 
-    // Now abort the pre-confirmed block. The plan says: block abortion clears the entire
-    // mempool (both the still-RECEIVED h2 and the PRE_CONFIRMED h1 should disappear).
+    // Block abortion clears the entire mempool, so both the still-RECEIVED h2 and the
+    // PRE_CONFIRMED h1 should disappear.
     let aborted = devnet
         .abort_blocks(&BlockId::Tag(BlockTag::PreConfirmed))
         .await
@@ -226,7 +225,7 @@ async fn abort_blocks_clears_mempool() {
     assert_eq!(pre_confirmed_hashes.len(), 0, "open proposal must be empty after abort: {resp}");
 }
 
-/// Plan: a transaction submitted in mempool mode goes RECEIVED, then CANDIDATE on selection,
+/// A transaction submitted in mempool mode goes RECEIVED, then CANDIDATE on selection,
 /// then PRE_CONFIRMED on successful execution. The transition is observable through
 /// `devnet_getMempool` and the open proposal hash list.
 #[tokio::test]
@@ -270,7 +269,7 @@ async fn mempool_phases_received_candidate_preconfirmed() {
     assert!(pre_confirmed_hashes.contains(&format!("{:#x}", hash)));
 }
 
-/// Plan: `devnet_getMempool` reports config, RECEIVED transactions, PRE_CONFIRMED hashes,
+/// `devnet_getMempool` reports config, RECEIVED transactions, PRE_CONFIRMED hashes,
 /// and remaining block capacity.
 #[tokio::test]
 async fn get_mempool_reports_config_and_state() {
@@ -302,7 +301,7 @@ async fn get_mempool_reports_config_and_state() {
     assert!(entry["tip"].is_string());
 }
 
-/// Plan: `devnet_removeFromMempool` only acts on RECEIVED entries. PRE_CONFIRMED entries
+/// `devnet_removeFromMempool` only acts on RECEIVED entries. PRE_CONFIRMED entries
 /// cannot be removed individually; they must first be returned to RECEIVED via
 /// `devnet_abortPreconfirmedBlock`.
 #[tokio::test]
@@ -344,13 +343,13 @@ async fn remove_from_mempool_only_received() {
         )
         .await
         .unwrap_err();
-    // The plan requires the API to refuse removing a non-RECEIVED entry. We do not assert
-    // on a specific code/message; we only assert the call fails and the entry remains.
+    // The API refuses to remove a non-RECEIVED entry. We do not assert on a specific code/message;
+    // we only assert the call fails and the entry remains.
     assert_phase(&devnet, hash2, "PRE_CONFIRMED").await;
     let _ = err; // presence of error is sufficient signal
 }
 
-/// Plan: `devnet_clearMempool` only acts on RECEIVED entries. PRE_CONFIRMED entries are
+/// `devnet_clearMempool` only acts on RECEIVED entries. PRE_CONFIRMED entries are
 /// preserved (and must be cleared via abort).
 #[tokio::test]
 async fn clear_mempool_only_received() {
@@ -391,7 +390,7 @@ async fn clear_mempool_only_received() {
     assert_received_count(&devnet, 0).await;
 }
 
-/// Plan: `devnet_abortPreconfirmedBlock` returns every PRE_CONFIRMED entry to RECEIVED.
+/// `devnet_abortPreconfirmedBlock` returns every PRE_CONFIRMED entry to RECEIVED.
 /// We verify by submitting two, pre-confirming both, then aborting.
 #[tokio::test]
 async fn abort_preconfirmed_block_returns_to_received() {
@@ -431,7 +430,7 @@ async fn abort_preconfirmed_block_returns_to_received() {
     assert_phase(&devnet, h2, "RECEIVED").await;
 }
 
-/// Plan: `devnet_sealBlock` performs strict sealing — it seals the pre-confirmed block (which
+/// `devnet_sealBlock` performs strict sealing — it seals the pre-confirmed block (which
 /// is empty) without selecting anything from RECEIVED. After sealing, RECEIVED entries
 /// remain RECEIVED.
 #[tokio::test]
@@ -450,7 +449,7 @@ async fn seal_block_does_not_pick_received() {
     assert_phase(&devnet, hash, "RECEIVED").await;
 }
 
-/// Plan: max_transactions_per_block caps the number of transactions selected in a single
+/// `max_transactions_per_block` caps the number of transactions selected in a single
 /// `preconfirm_transactions` invocation.
 #[tokio::test]
 async fn max_transactions_per_block_caps_selection() {
@@ -559,7 +558,7 @@ async fn duplicate_nonce_is_rejected() {
     assert!(msg.contains("already in the mempool"), "expected nonce-conflict error; got: {msg}");
 }
 
-/// Plan: nonce ordering policy (Starknet) prioritizes txs with higher tip first. We can't
+/// Starknet ordering prioritizes transactions with higher tips. We can't
 /// inject tips from the public RPC without raw tx construction, so we set the policy and
 /// submit txs to verify the config is accepted. Selection-ordering correctness is verified
 /// via the receive-side ordering config.
@@ -573,7 +572,7 @@ async fn starknet_ordering_is_accepted() {
     assert_eq!(resp["ordering"], "starknet");
 }
 
-/// Plan: random ordering with a fixed seed produces deterministic selection. We verify that
+/// Random ordering with a fixed seed produces deterministic selection. We verify that
 /// the same seed yields a stable `arrival_id`-based selection: submitting three txs and
 /// inspecting the snapshot is enough; the deterministic part is the random_seed itself.
 #[tokio::test]
@@ -595,7 +594,7 @@ async fn random_ordering_seed_is_recorded() {
     assert_eq!(snapshot["config"]["ordering"], "random");
 }
 
-/// Plan: compatibility — legacy `Interval(<seconds>)` continues to work. We verify that the
+/// Legacy `Interval(<seconds>)` remains compatible. We verify that the
 /// config endpoint reports the interval and that an `Interval(1)` mode seals a new block on
 /// each txs without manual `createBlock`.
 #[tokio::test]
@@ -631,7 +630,7 @@ async fn legacy_interval_mode_continues_to_work() {
     );
 }
 
-/// Plan: devnet_mint returns a successful response with the new balance and tx hash, and the
+/// `devnet_mint` returns a successful response with the new balance and transaction hash, and the
 /// hash is non-zero.
 #[tokio::test]
 async fn mint_response_shape() {
@@ -645,7 +644,7 @@ async fn mint_response_shape() {
     assert!(balance > Felt::ZERO, "balance must reflect the mint, got {balance}");
 }
 
-/// Plan: when `devnet_preconfirmTransactions` is called with no RECEIVED entries, the
+/// When `devnet_preconfirmTransactions` is called with no RECEIVED entries, the
 /// response indicates an empty selection without error.
 #[tokio::test]
 async fn preconfirm_with_empty_pool_is_noop() {
@@ -657,7 +656,7 @@ async fn preconfirm_with_empty_pool_is_noop() {
     assert_eq!(resp["block_full"], false);
 }
 
-/// Plan: in mempool mode, after `preconfirm_transactions` selects a tx with strict nonce
+/// After `preconfirm_transactions` selects a transaction with strict nonce
 /// checking, the next tx in the same account's sequence becomes eligible (its nonce is now
 /// the expected one).
 #[tokio::test]
@@ -688,7 +687,7 @@ async fn next_nonce_becomes_eligible_after_preconfirm() {
     );
 }
 
-/// Plan: an entry's `transaction` field is only populated when `include_transactions: true`.
+/// An entry's `transaction` field is only populated when `include_transactions: true`.
 #[tokio::test]
 async fn get_mempool_include_transactions_flag() {
     let devnet = spawn_mempool_devnet().await;
@@ -716,7 +715,7 @@ async fn get_mempool_include_transactions_flag() {
     );
 }
 
-/// Plan: `devnet_preconfirmTransactions` with `transaction_hashes` and `max_transactions`
+/// `devnet_preconfirmTransactions` with `transaction_hashes` and `max_transactions`
 /// together is rejected.
 #[tokio::test]
 async fn preconfirm_rejects_mutually_exclusive_params() {
@@ -742,7 +741,7 @@ async fn preconfirm_rejects_mutually_exclusive_params() {
     );
 }
 
-/// Plan: `devnet_preconfirmTransactions` with `max_transactions: 0` is rejected.
+/// `devnet_preconfirmTransactions` with `max_transactions: 0` is rejected.
 #[tokio::test]
 async fn preconfirm_rejects_zero_max_transactions() {
     let devnet = spawn_mempool_devnet().await;
@@ -753,7 +752,7 @@ async fn preconfirm_rejects_zero_max_transactions() {
     assert!(err.message.contains("positive"), "expected positive-max error, got: {}", err.message);
 }
 
-/// Plan: the `transaction` mode is the default; txs are sealed into a new block on each
+/// The `transaction` mode is the default; transactions are sealed into a new block on each
 /// submission. (Regression test to ensure mempool changes do not break the default flow.)
 #[tokio::test]
 async fn default_mode_seals_on_each_submission() {
@@ -769,7 +768,7 @@ async fn default_mode_seals_on_each_submission() {
     assert!(block_num_after > block_num_before, "default mode must seal on submission");
 }
 
-/// Plan: the `demand` mode does not auto-seal; an explicit `createBlock` is required.
+/// The `demand` mode does not auto-seal; an explicit `createBlock` is required.
 #[tokio::test]
 async fn demand_mode_does_not_auto_seal() {
     let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "demand"])
@@ -793,7 +792,7 @@ async fn demand_mode_does_not_auto_seal() {
     assert!(block_num_after_create > block_num_before);
 }
 
-/// Plan: end-to-end FIFO pipeline. Submit `n` transfers, one from each of `n` distinct
+/// End-to-end FIFO pipeline. Submit `n` transfers, one from each of `n` distinct
 /// predeployed accounts (so strict per-account nonce checking admits all of them at once
 /// — every sender has its own next-nonce slot). The inter-account FIFO ordering is what
 /// this test exercises: pre-confirm should select them in arrival order, the latest sealed
@@ -868,7 +867,7 @@ async fn fifo_pipeline_received_preconfirmed_sealed() {
     );
 }
 
-/// Plan: end-to-end Starknet ordering pipeline. Three distinct senders each submit a
+/// End-to-end Starknet ordering pipeline. Three distinct senders each submit a
 /// nonce-0 transfer (so strict per-account nonce checking admits all of them at once).
 /// Each sender attaches a different `tip` (`i` for the i-th sender), which makes the
 /// Starknet priority comparator — descending tip with transaction-hash tie-break —

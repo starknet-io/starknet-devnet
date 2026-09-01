@@ -21,7 +21,7 @@ pub fn add_invoke_transaction(
 
 /// Like [`add_invoke_transaction`] but submits on the system lane, so execution happens
 /// regardless of the configured block-generation mode. Used by `devnet_mint` so its balance
-/// change is observable immediately even in `mempool` mode (per the v1 plan).
+/// change is observable immediately even in `mempool` mode.
 pub fn add_invoke_transaction_system(
     starknet: &mut Starknet,
     broadcasted_invoke_transaction: BroadcastedInvokeTransaction,

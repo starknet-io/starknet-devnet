@@ -1319,8 +1319,8 @@ impl Starknet {
         let mut invoke_tx = unsigned_tx;
         invoke_tx.common.signature = vec![signature.r, signature.s];
 
-        // apply the invoke tx via the system lane so mint is force-processed even in
-        // mempool mode (per the v1 plan).
+        // Apply the invoke transaction through the system lane so mint is force-processed even in
+        // mempool mode.
         add_invoke_transaction::add_invoke_transaction_system(
             self,
             BroadcastedInvokeTransaction::V3(invoke_tx),
