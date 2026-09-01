@@ -405,8 +405,10 @@ struct RequestResponseLogging {
 impl RequestResponseLogging {
     fn from_rust_log_environment_variable() -> Self {
         let log_env_var = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default().to_lowercase();
-        let log_request = log_env_var.contains(REQUEST_LOG_ENV_VAR);
-        let log_response = log_env_var.contains(RESPONSE_LOG_ENV_VAR);
+        let has_directive =
+            |directive: &str| log_env_var.split(',').map(str::trim).any(|item| item == directive);
+        let log_request = has_directive(REQUEST_LOG_ENV_VAR);
+        let log_response = has_directive(RESPONSE_LOG_ENV_VAR);
 
         Self { log_request, log_response }
     }
@@ -633,6 +635,9 @@ mod tests {
             ("REQUEST,RESPONSE", true, true),
             ("REQUEST", true, false),
             ("RESPONSE", false, true),
+            (" request , response ", true, true),
+            ("request_handler=trace,response_cache=debug", false, false),
+            ("starknet_devnet::request=trace", false, false),
         ] {
             unsafe {
                 std::env::set_var(EnvFilter::DEFAULT_ENV, environment_variable);
