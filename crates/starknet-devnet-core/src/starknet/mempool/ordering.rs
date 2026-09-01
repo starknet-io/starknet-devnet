@@ -6,35 +6,18 @@ use starknet_types::felt::TransactionHash;
 
 use super::{Mempool, MempoolEntry, MempoolOrdering};
 
-/// Starknet mempool ordering comparator. It separates priority and fallback branches:
-///
-/// * **Priority** (`max_l2_gas_price >= current_l2_gas_price`): descending `tip`, with descending
-///   `transaction_hash` as the tie-breaker — mirroring the production queue in
-///   `apollo_mempool::fee_transaction_queue::PriorityTransaction`, which orders ascending
-///   internally and then serves the head via `pop_last`, producing descending `tip` and descending
-///   `tx_hash` in selection.
-/// * **Non-priority fallback**: FIFO on `arrival_id`.
+/// Starknet mempool ordering comparator for entries that have already qualified against the L2
+/// gas-price threshold. Orders by descending `tip`, with descending `transaction_hash` as the
+/// tie-breaker.
 ///
 /// Returned `Ordering` matches what `Iterator::max_by` expects: `Greater` means the left
-/// argument should be picked (the "maximum"). The fallback deliberately swaps operand
-/// order (`right.arrival_id.cmp(&left.arrival_id)`) to produce FIFO under `max_by`.
-pub fn starknet_comparator(
-    left: &MempoolEntry,
-    right: &MempoolEntry,
-    current_l2_gas_price: u128,
-) -> std::cmp::Ordering {
-    let left_priority = left.max_l2_gas_price >= current_l2_gas_price;
-    let right_priority = right.max_l2_gas_price >= current_l2_gas_price;
-    left_priority.cmp(&right_priority).then_with(|| {
-        if left_priority {
-            left.tip.cmp(&right.tip).then_with(|| {
-                left.transaction
-                    .get_transaction_hash()
-                    .cmp(right.transaction.get_transaction_hash())
-            })
-        } else {
-            right.arrival_id.cmp(&left.arrival_id)
-        }
+/// argument should be picked (the "maximum").
+///
+/// Below-threshold entries are filtered out by `StarknetOrderingPolicy::select` before this
+/// comparator is invoked.
+pub fn starknet_comparator(left: &MempoolEntry, right: &MempoolEntry) -> std::cmp::Ordering {
+    left.tip.cmp(&right.tip).then_with(|| {
+        left.transaction.get_transaction_hash().cmp(right.transaction.get_transaction_hash())
     })
 }
 
@@ -120,9 +103,13 @@ impl TransactionOrderingPolicy for StarknetOrderingPolicy {
         eligible: &EligibleTransactions<'_>,
         context: &SelectionContext,
     ) -> Option<TransactionHash> {
+        // Skip entries whose `max_l2_gas_price` falls below the L2 gas-price threshold: they
+        // are not eligible for selection while the threshold holds. Only qualifying entries
+        // participate in tip-priority ordering.
         eligible
             .iter()
-            .max_by(|left, right| starknet_comparator(left, right, context.current_l2_gas_price))
+            .filter(|entry| entry.max_l2_gas_price >= context.current_l2_gas_price)
+            .max_by(|left, right| starknet_comparator(left, right))
             .map(|entry| *entry.transaction.get_transaction_hash())
     }
 }
@@ -266,87 +253,99 @@ mod tests {
     }
 
     #[test]
-    fn starknet_comparator_priority_orders_by_descending_tip() {
+    fn starknet_comparator_orders_by_descending_tip() {
         let low = entry_with(Felt::from(0x10), 1, 1, 1_000);
         let high = entry_with(Felt::from(0x20), 2, 5, 1_000);
         let mid = entry_with(Felt::from(0x30), 3, 3, 1_000);
-        let threshold = 500_u128;
 
-        assert_eq!(starknet_comparator(&high, &mid, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&high, &low, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&mid, &low, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&low, &high, threshold), std::cmp::Ordering::Less);
+        assert_eq!(starknet_comparator(&high, &mid), std::cmp::Ordering::Greater);
+        assert_eq!(starknet_comparator(&high, &low), std::cmp::Ordering::Greater);
+        assert_eq!(starknet_comparator(&mid, &low), std::cmp::Ordering::Greater);
+        assert_eq!(starknet_comparator(&low, &high), std::cmp::Ordering::Less);
     }
 
     #[test]
-    fn starknet_comparator_priority_tie_break_prefers_larger_hash() {
+    fn starknet_comparator_tie_break_prefers_larger_hash() {
         let smaller_hash = entry_with(Felt::from(0x10), 1, 7, 1_000);
         let larger_hash = entry_with(Felt::from(0x20), 2, 7, 1_000);
-        let threshold = 500_u128;
 
-        assert_eq!(
-            starknet_comparator(&larger_hash, &smaller_hash, threshold),
-            std::cmp::Ordering::Greater
-        );
-        assert_eq!(
-            starknet_comparator(&smaller_hash, &larger_hash, threshold),
-            std::cmp::Ordering::Less
-        );
+        assert_eq!(starknet_comparator(&larger_hash, &smaller_hash), std::cmp::Ordering::Greater);
+        assert_eq!(starknet_comparator(&smaller_hash, &larger_hash), std::cmp::Ordering::Less);
     }
 
     #[test]
-    fn starknet_comparator_fallback_is_fifo_on_arrival_id() {
-        let first = entry_with(Felt::from(0x10), 1, 99, 0);
-        let second = entry_with(Felt::from(0x20), 2, 0, 0);
-        let third = entry_with(Felt::from(0x30), 3, 5_000, 0);
-        let threshold = 1_000_u128;
-
-        assert_eq!(starknet_comparator(&first, &second, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&first, &third, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&second, &third, threshold), std::cmp::Ordering::Greater);
-        assert_eq!(starknet_comparator(&third, &first, threshold), std::cmp::Ordering::Less);
-    }
-
-    #[test]
-    fn starknet_comparator_priority_beats_fallback() {
-        let priority_old = entry_with(Felt::from(0x10), 100, 0, 1_000);
-        let fallback_new = entry_with(Felt::from(0xff), 1, 9_999, 0);
-        let threshold = 500_u128;
-
-        assert_eq!(
-            starknet_comparator(&priority_old, &fallback_new, threshold),
-            std::cmp::Ordering::Greater
-        );
-        assert_eq!(
-            starknet_comparator(&fallback_new, &priority_old, threshold),
-            std::cmp::Ordering::Less
-        );
-    }
-
-    #[test]
-    fn starknet_select_policy_drains_fallback_in_arrival_order() {
+    fn starknet_select_policy_returns_none_when_all_entries_below_threshold() {
         let mut pool = Mempool::new(MempoolConfig {
             ordering: MempoolOrdering::starknet(),
             random_seed: 0,
             max_transactions_per_block: 500,
         })
         .unwrap();
-        let hashes = [Felt::from(0xee), Felt::from(0xdd), Felt::from(0x11), Felt::from(0x22)];
+        // Every entry is below the threshold of 1_000.
+        let first = Felt::from(0x10);
+        let second = Felt::from(0x20);
+        install(&mut pool, first, entry_with(first, 0, 100, 100));
+        install(&mut pool, second, entry_with(second, 1, 50, 100));
 
-        for (arrival_id, hash) in hashes.into_iter().enumerate() {
-            install(&mut pool, hash, entry_with(hash, arrival_id as u64, 0, 0));
-        }
+        assert_eq!(pool.select_policy(&[first, second], 0, 1_000), None);
+    }
 
-        let mut remaining = vec![hashes[2], hashes[0], hashes[3], hashes[1]];
-        let mut drained = Vec::new();
-        while let Some(picked) = pool.select_policy(&remaining, 0, 1_000) {
-            drained.push(picked);
-            remaining.retain(|hash| *hash != picked);
-            if remaining.is_empty() {
-                break;
-            }
-        }
-        assert_eq!(drained, hashes);
+    #[test]
+    fn starknet_select_policy_skips_below_threshold_entries_among_priority() {
+        let mut pool = Mempool::new(MempoolConfig {
+            ordering: MempoolOrdering::starknet(),
+            random_seed: 0,
+            max_transactions_per_block: 500,
+        })
+        .unwrap();
+        let priority_low_tip = Felt::from(0x10);
+        let priority_high_tip = Felt::from(0x20);
+        let pending_high_tip = Felt::from(0x30);
+        let pending_low_tip = Felt::from(0x40);
+        // Threshold: 500. Priority entries are >= 500, pending are < 500.
+        install(&mut pool, priority_low_tip, entry_with(priority_low_tip, 0, 1, 500));
+        install(&mut pool, priority_high_tip, entry_with(priority_high_tip, 1, 10, 500));
+        install(&mut pool, pending_high_tip, entry_with(pending_high_tip, 2, 9_999, 1));
+        install(&mut pool, pending_low_tip, entry_with(pending_low_tip, 3, 0, 0));
+
+        // First pick: priority_high_tip (highest tip among qualifying entries).
+        assert_eq!(
+            pool.select_policy(
+                &[priority_low_tip, priority_high_tip, pending_high_tip, pending_low_tip],
+                0,
+                500,
+            ),
+            Some(priority_high_tip)
+        );
+
+        // Then priority_low_tip; pending entries remain invisible.
+        assert_eq!(
+            pool.select_policy(&[priority_low_tip, pending_high_tip, pending_low_tip], 0, 500,),
+            Some(priority_low_tip)
+        );
+
+        // Only pending remain — selection returns None.
+        assert_eq!(pool.select_policy(&[pending_high_tip, pending_low_tip], 0, 500), None);
+    }
+
+    #[test]
+    fn starknet_select_policy_picks_below_threshold_after_threshold_drops() {
+        // Lowering the threshold below a previously-pending entry's `max_l2_gas_price` makes
+        // it eligible for selection.
+        let mut pool = Mempool::new(MempoolConfig {
+            ordering: MempoolOrdering::starknet(),
+            random_seed: 0,
+            max_transactions_per_block: 500,
+        })
+        .unwrap();
+        let pending = Felt::from(0x10);
+        install(&mut pool, pending, entry_with(pending, 0, 5, 700));
+
+        // Threshold above the tx's price: hidden.
+        assert_eq!(pool.select_policy(&[pending], 0, 1_000), None);
+
+        // Threshold dropped below the tx's price: visible, returns the tx.
+        assert_eq!(pool.select_policy(&[pending], 0, 100), Some(pending));
     }
 
     #[test]
