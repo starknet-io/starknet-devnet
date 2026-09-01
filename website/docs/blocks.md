@@ -44,9 +44,9 @@ The mempool can be inspected and manipulated through [Devnet's mempool methods](
 
 ## Automatic periodic block creation
 
-The bare numeric `--block-generation-on <INTERVAL>` form is a deprecated compatibility mode. Transactions are still executed and pre-confirmed immediately, exactly as in [`demand` mode](#creating-blocks-on-demand); the timer only seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer.
+The bare numeric `--block-generation-on <INTERVAL>` form enables periodic sealing. Transactions are executed and pre-confirmed immediately, exactly as in [`demand` mode](#creating-blocks-on-demand); the timer seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer.
 
-Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. A bare numeric `--block-generation-on <INTERVAL>` is a deprecated compatibility mode that retains the legacy periodic-sealing cadence.
+Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. Use interval mode when transactions should execute immediately while blocks are sealed on a fixed cadence.
 
 Consider this example of spawning Devnet at moment `t`:
 
@@ -93,7 +93,7 @@ Result:
 {"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
 ```
 
-In `transaction`, `demand`, and legacy interval modes, the newly created block contains all pre-confirmed transactions, if any, since the last block creation. In mempool mode, this method first selects and pre-confirms transactions until the block is full or no eligible transaction remains, and then seals it. It creates an empty block if there are no transactions to include.
+In `transaction`, `demand`, and interval modes, the newly created block contains all pre-confirmed transactions, if any, since the last block creation. In mempool mode, this method first selects and pre-confirms transactions until the block is full or no eligible transaction remains, and then seals it. It creates an empty block if there are no transactions to include.
 
 ## Strictly seal the pre-confirmed block
 

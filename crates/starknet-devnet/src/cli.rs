@@ -211,8 +211,8 @@ pub(crate) struct Args {
 - \"transaction\" - new block generated on each transaction
 - \"demand\" - new block creatable solely by calling the devnet_createBlock JSON-RPC method
 - \"mempool\" - transactions remain received until processed by a Devnet mempool/block method
-- <INTERVAL> - deprecated legacy mode that pre-confirms transactions immediately and seals the \
-                  current block periodically
+- <INTERVAL> - transactions are pre-confirmed immediately and the current block is sealed every \
+                  <INTERVAL> seconds
 
 Calling devnet_createBlock JSON-RPC method is also an option in modes other than \"demand\".")]
     block_generation_on: BlockGenerationOn,
@@ -453,7 +453,7 @@ impl RequestResponseLogging {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
     use starknet_core::constants::CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH;
     use starknet_core::starknet::mempool::MempoolOrdering;
     use starknet_core::starknet::starknet_config::{
@@ -809,6 +809,13 @@ mod tests {
             Ok(args) => assert_eq!(args.block_generation_on, BlockGenerationOn::Mempool),
             Err(e) => panic!("Should have passed; got: {e}"),
         }
+    }
+
+    #[test]
+    fn interval_mode_is_documented_as_supported() {
+        let help = Args::command().render_long_help().to_string();
+        assert!(help.contains("<INTERVAL> - transactions are pre-confirmed immediately"));
+        assert!(!help.contains("<INTERVAL> - deprecated"));
     }
 
     #[test]

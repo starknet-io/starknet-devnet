@@ -15,9 +15,8 @@
 //! * Duplicate hashes are rejected with RPC code 59; duplicate account nonces are rejected as
 //!   invalid requests without displacing the already received transaction.
 //!
-//! The legacy `Interval(<seconds>)` mode is preserved as a compatibility path; its deprecation
-//! warning is not asserted here because stderr is not captured in the BackgroundDevnet harness,
-//! but its functional behavior is verified.
+//! `Interval(<seconds>)` remains a supported periodic-sealing mode and its functional behavior is
+//! verified here.
 
 use serde_json::json;
 use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
@@ -607,11 +606,10 @@ async fn random_ordering_seed_is_recorded() {
     assert_eq!(snapshot["config"]["ordering"], "random");
 }
 
-/// Legacy `Interval(<seconds>)` remains compatible. We verify that the
-/// config endpoint reports the interval and that an `Interval(1)` mode seals a new block on
-/// each txs without manual `createBlock`.
+/// Verify that the config endpoint reports the interval and that `Interval(1)` seals a new block
+/// without a manual `createBlock` request.
 #[tokio::test]
-async fn legacy_interval_mode_continues_to_work() {
+async fn interval_mode_seals_periodically() {
     let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "1"])
         .await
         .expect("Could not start Devnet with Interval(1)");

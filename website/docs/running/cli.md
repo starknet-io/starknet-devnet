@@ -32,7 +32,7 @@ To see the exact variable names, use [`--help`](#help).
 
 ## Block building and mempool configuration
 
-`--block-generation-on transaction` executes and seals every submitted transaction immediately and remains the default. `demand` executes transactions into a live pre-confirmed block and seals only on request. `mempool` admits transactions as `RECEIVED` and waits for explicit [mempool and block-building requests](../mempool). A bare positive integer retains the deprecated periodic-sealing behavior for backward compatibility.
+`--block-generation-on transaction` executes and seals every submitted transaction immediately and remains the default. `demand` executes transactions into a live pre-confirmed block and seals only on request. `mempool` admits transactions as `RECEIVED` and waits for explicit [mempool and block-building requests](../mempool). A bare positive integer enables periodic sealing while transactions continue to execute and become pre-confirmed immediately.
 
 Configure manual mempool ordering and block capacity with:
 
@@ -42,7 +42,7 @@ $ starknet-devnet --block-generation-on mempool --mempool-ordering starknet --me
 
 The available policies are `fifo`, `starknet`, and `random`. Use `--mempool-random-seed <SEED>` for reproducible random selection; it defaults to the Devnet account seed. Equivalent environment variables are `MEMPOOL_ORDERING`, `MEMPOOL_RANDOM_SEED`, and `MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK`.
 
-A bare positive integer `N` retains the deprecated periodic-sealing behavior for backward compatibility: transactions are pre-confirmed immediately and only block sealing occurs every N seconds. Prefer `--block-generation-on mempool` for Starknet-like policy-driven construction.
+A bare positive integer `N` enables interval mode: transactions are pre-confirmed immediately and the current block is sealed every N seconds. Use `--block-generation-on mempool` instead when transaction selection and ordering should happen explicitly through mempool methods.
 
 ### Precedence
 

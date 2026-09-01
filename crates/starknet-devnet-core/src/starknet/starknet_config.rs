@@ -182,7 +182,7 @@ impl StarknetConfig {
         !matches!(self.block_generation_on, BlockGenerationOn::Transaction)
     }
 
-    pub fn legacy_sealing_interval_seconds(&self) -> Option<u64> {
+    pub fn block_sealing_interval_seconds(&self) -> Option<u64> {
         match self.block_generation_on {
             BlockGenerationOn::Interval(seconds) => Some(seconds),
             _ => None,

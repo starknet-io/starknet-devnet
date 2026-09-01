@@ -393,11 +393,10 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     if let BlockGenerationOn::Interval(seconds) = starknet_config.block_generation_on {
-        // Legacy interval mode only seals the current pre-confirmed block. Transaction selection
-        // and execution happen synchronously when the transaction is submitted.
+        // Interval mode only seals the current pre-confirmed block. Transaction selection and
+        // execution happen synchronously when the transaction is submitted.
         let full_address = format!("http://{address}");
-        let block_interval_handle =
-            task::spawn(seal_block_on_legacy_interval(seconds, full_address));
+        let block_interval_handle = task::spawn(seal_block_on_interval(seconds, full_address));
 
         tasks.push(block_interval_handle);
     }
@@ -421,7 +420,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 #[allow(clippy::expect_used)]
-async fn seal_block_on_legacy_interval(
+async fn seal_block_on_interval(
     block_interval_seconds: u64,
     devnet_address: String,
 ) -> Result<(), std::io::Error> {
@@ -446,8 +445,8 @@ async fn seal_block_on_legacy_interval(
             _ = interval.tick() => {
                 // By sending a request, we take care of: 1) dumping 2) notifying subscribers
                 match devnet_client.post(&devnet_address).json(&seal_block_req_body).send().await {
-                    Ok(_) => info!("Sealing block on legacy time interval"),
-                    Err(e) => error!("Failed block sealing on legacy time interval: {e:?}")
+                    Ok(_) => info!("Sealing block on time interval"),
+                    Err(e) => error!("Failed block sealing on time interval: {e:?}")
                 }
             }
             _ = sigint.recv() => {
