@@ -416,6 +416,13 @@ impl Starknet {
     }
 
     pub fn new(config: &StarknetConfig) -> DevnetResult<Self> {
+        Self::new_with_ordering_policy_registry(config, mempool::OrderingPolicyRegistry::default())
+    }
+
+    pub fn new_with_ordering_policy_registry(
+        config: &StarknetConfig,
+        ordering_policies: mempool::OrderingPolicyRegistry,
+    ) -> DevnetResult<Self> {
         let defaulter = StarknetDefaulter::new(config.fork_config.clone());
         let rpc_contract_classes = Arc::new(RwLock::new(CommittedClassStorage::default()));
         let mut state = StarknetState::new(defaulter, rpc_contract_classes.clone());
@@ -532,7 +539,10 @@ impl Starknet {
             ),
             blocks: StarknetBlocks::new(starting_block_number, last_block_hash),
             transactions: StarknetTransactions::default(),
-            mempool: mempool::Mempool::new(config.mempool_config.clone()),
+            mempool: mempool::Mempool::with_policy_registry(
+                config.mempool_config.clone(),
+                ordering_policies,
+            )?,
             config: config.clone(),
             pre_confirmed_block_timestamp_shift: 0,
             next_block_timestamp: None,
@@ -567,8 +577,9 @@ impl Starknet {
     pub fn restart(&mut self, restart_l1_to_l2_messaging: bool) -> DevnetResult<()> {
         let new_messaging_ethereum =
             if restart_l1_to_l2_messaging { None } else { self.messaging.ethereum.clone() };
+        let ordering_policies = self.mempool.ordering_policies().clone();
 
-        *self = Starknet::new(&self.config)?;
+        *self = Starknet::new_with_ordering_policy_registry(&self.config, ordering_policies)?;
         self.messaging.ethereum = new_messaging_ethereum;
 
         info!("Starknet Devnet restarted");
@@ -2101,6 +2112,10 @@ mod tests {
         STRK_ERC20_CONTRACT_ADDRESS,
     };
     use crate::error::{DevnetResult, Error};
+    use crate::starknet::mempool::{
+        EligibleTransactions, MempoolOrdering, OrderingPolicyRegistry, SelectionContext,
+        TransactionOrderingPolicy,
+    };
     use crate::starknet::starknet_config::{StarknetConfig, StateArchiveCapacity};
     use crate::traits::{Accounted, Deployed, HashIdentified};
     use crate::utils::test_utils::{
@@ -2108,6 +2123,18 @@ mod tests {
         dummy_contract_address, dummy_declare_tx_v3_with_hash, dummy_felt, dummy_key_pair,
         resource_bounds_with_price_1,
     };
+
+    struct FirstEligiblePolicy;
+
+    impl TransactionOrderingPolicy for FirstEligiblePolicy {
+        fn select(
+            &self,
+            eligible: &EligibleTransactions<'_>,
+            _context: &SelectionContext,
+        ) -> Option<Felt> {
+            eligible.hashes().first().copied()
+        }
+    }
 
     /// Initializes starknet with 1 account that doesn't perform actual tx signature validation.
     /// Allows specifying the state archive capacity.
@@ -2173,6 +2200,21 @@ mod tests {
                 account.get_balance(&mut starknet.pre_confirmed_state, FeeToken::STRK).unwrap();
             assert_eq!(expected_balance, account_balance);
         }
+    }
+
+    #[test]
+    fn restart_preserves_registered_ordering_policies() {
+        let policy_name: MempoolOrdering = "test-policy".parse().unwrap();
+        let mut registry = OrderingPolicyRegistry::default();
+        registry.register(policy_name.clone(), FirstEligiblePolicy);
+        let mut config = StarknetConfig::default();
+        config.mempool_config.ordering = policy_name.clone();
+        let mut starknet = Starknet::new_with_ordering_policy_registry(&config, registry).unwrap();
+
+        starknet.restart(false).unwrap();
+
+        assert_eq!(starknet.mempool.config().ordering, policy_name);
+        assert!(starknet.mempool.ordering_policies().contains(&policy_name));
     }
 
     #[test]

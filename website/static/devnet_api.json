@@ -563,7 +563,8 @@
           "required": false,
           "schema": {
             "type": "string",
-            "enum": ["fifo", "starknet", "random"]
+            "description": "Registered mempool ordering policy name",
+            "examples": ["fifo", "starknet", "random"]
           }
         },
         {
@@ -1417,7 +1418,8 @@
         "properties": {
           "ordering": {
             "type": "string",
-            "enum": ["fifo", "starknet", "random"]
+            "description": "Registered mempool ordering policy name",
+            "examples": ["fifo", "starknet", "random"]
           },
           "random_seed": {
             "type": "integer",

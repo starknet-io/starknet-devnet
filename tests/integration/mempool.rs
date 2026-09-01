@@ -572,6 +572,19 @@ async fn starknet_ordering_is_accepted() {
     assert_eq!(resp["ordering"], "starknet");
 }
 
+#[tokio::test]
+async fn unregistered_ordering_policy_is_rejected() {
+    let devnet = spawn_mempool_devnet().await;
+    let error = devnet
+        .send_custom_rpc("devnet_setMempoolConfig", json!({ "ordering": "custom-policy" }))
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("Unknown mempool ordering policy"), "{error:?}");
+
+    let snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(snapshot["config"]["ordering"], "fifo");
+}
+
 /// Random ordering with a fixed seed produces deterministic selection. We verify that
 /// the same seed yields a stable `arrival_id`-based selection: submitting three txs and
 /// inspecting the snapshot is enough; the deterministic part is the random_seed itself.

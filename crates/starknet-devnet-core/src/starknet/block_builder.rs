@@ -4,8 +4,8 @@ use starknet_rs_core::types::Felt;
 use starknet_types::felt::TransactionHash;
 
 use super::mempool::{
-    BuildFailure, BuildOutcome, ConfiguredOrderingPolicy, MempoolPhase, MempoolSelection,
-    SelectionContext, TransactionOrderingPolicy,
+    BuildFailure, BuildOutcome, MempoolPhase, MempoolSelection, SelectionContext,
+    TransactionOrderingPolicy,
 };
 use super::{Starknet, TransactionEligibility};
 use crate::error::{DevnetResult, Error};
@@ -32,11 +32,17 @@ impl<'a> BlockBuilder<'a> {
     pub fn build_chunk(&mut self, selection: MempoolSelection) -> DevnetResult<BuildOutcome> {
         match selection {
             MempoolSelection::Policy { max_transactions } => {
-                let policy = ConfiguredOrderingPolicy::from_config(self.starknet.mempool.config());
-                self.build_policy_chunk(max_transactions, &policy)
+                self.build_configured_policy_chunk(max_transactions)
             }
             MempoolSelection::Hashes(hashes) => self.build_forced_chunk(hashes),
         }
+    }
+
+    fn build_configured_policy_chunk(
+        &mut self,
+        max_transactions: Option<usize>,
+    ) -> DevnetResult<BuildOutcome> {
+        self.build_policy_chunk_inner(max_transactions, None)
     }
 
     pub fn progress(&self) -> BlockBuilderProgress {
@@ -64,6 +70,14 @@ impl<'a> BlockBuilder<'a> {
         max_transactions: Option<usize>,
         policy: &dyn TransactionOrderingPolicy,
     ) -> DevnetResult<BuildOutcome> {
+        self.build_policy_chunk_inner(max_transactions, Some(policy))
+    }
+
+    fn build_policy_chunk_inner(
+        &mut self,
+        max_transactions: Option<usize>,
+        policy: Option<&dyn TransactionOrderingPolicy>,
+    ) -> DevnetResult<BuildOutcome> {
         let mut outcome = BuildOutcome::default();
         self.starknet.evict_stale_received_transactions(&mut outcome)?;
         if self.starknet.mempool.remaining_capacity() == 0 {
@@ -86,8 +100,12 @@ impl<'a> BlockBuilder<'a> {
                         .mempool
                         .open_proposal()
                         .selection_counter(),
+                    random_seed: self.starknet.mempool.config().random_seed,
                 };
-                policy.select(&eligible, &context)
+                match policy {
+                    Some(policy) => policy.select(&eligible, &context),
+                    None => self.starknet.mempool.select_configured_policy(&eligible, &context)?,
+                }
             };
             let Some(hash) = selected else { break };
             if !eligible_hashes.contains(&hash) {

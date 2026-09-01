@@ -1,6 +1,5 @@
 use starknet_core::starknet::mempool::{
-    BuildFailure, MempoolConfig, MempoolConfigUpdate, MempoolOrdering, MempoolPhase,
-    MempoolSelection,
+    BuildFailure, MempoolConfig, MempoolConfigUpdate, MempoolPhase, MempoolSelection,
 };
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
@@ -27,11 +26,11 @@ use crate::api::models::{
     AbortedBlocks, AbortedPreconfirmedBlockResponse, AbortingBlocks, AcceptOnL1Request,
     AcceptedOnL1Blocks, ClearedMempoolResponse, CreatedBlock, DumpRequest, FlushParameters,
     FlushedMessages, GetMempoolRequest, IncreaseTime, IncreaseTimeResponse, LoadRequest,
-    MempoolConfigResponse, MempoolOrderingValue, MempoolProcessingFailure, MempoolResponse,
-    MempoolTransactionPhase, MempoolTransactionResponse, MessageHash, MessagingLoadAddress,
-    MintTokensRequest, MintTokensResponse, PostmanLoadL1MessagingContract,
-    PreconfirmTransactionsRequest, PreconfirmTransactionsResponse, RemovedFromMempoolResponse,
-    RestartParameters, SetMempoolConfigRequest, SetTime, SetTimeResponse,
+    MempoolConfigResponse, MempoolProcessingFailure, MempoolResponse, MempoolTransactionPhase,
+    MempoolTransactionResponse, MessageHash, MessagingLoadAddress, MintTokensRequest,
+    MintTokensResponse, PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest,
+    PreconfirmTransactionsResponse, RemovedFromMempoolResponse, RestartParameters,
+    SetMempoolConfigRequest, SetTime, SetTimeResponse,
 };
 use crate::dump_util::{clear_dump_file, dump_events, load_events};
 use crate::rpc_core::error::RpcError;
@@ -330,7 +329,7 @@ impl JsonRpcHandler {
     /// devnet_setMempoolConfig
     pub async fn set_mempool_config(&self, request: SetMempoolConfigRequest) -> StrictRpcResult {
         let config = self.api.starknet.lock().await.set_mempool_config(MempoolConfigUpdate {
-            ordering: request.ordering.map(Into::into),
+            ordering: request.ordering,
             random_seed: request.random_seed,
             max_transactions_per_block: request.max_transactions_per_block,
         })?;
@@ -481,30 +480,10 @@ impl JsonRpcHandler {
     }
 }
 
-impl From<MempoolOrderingValue> for MempoolOrdering {
-    fn from(value: MempoolOrderingValue) -> Self {
-        match value {
-            MempoolOrderingValue::Fifo => Self::Fifo,
-            MempoolOrderingValue::Starknet => Self::Starknet,
-            MempoolOrderingValue::Random => Self::Random,
-        }
-    }
-}
-
-impl From<MempoolOrdering> for MempoolOrderingValue {
-    fn from(value: MempoolOrdering) -> Self {
-        match value {
-            MempoolOrdering::Fifo => Self::Fifo,
-            MempoolOrdering::Starknet => Self::Starknet,
-            MempoolOrdering::Random => Self::Random,
-        }
-    }
-}
-
 impl From<&MempoolConfig> for MempoolConfigResponse {
     fn from(config: &MempoolConfig) -> Self {
         Self {
-            ordering: config.ordering.into(),
+            ordering: config.ordering.clone(),
             random_seed: config.random_seed,
             max_transactions_per_block: config.max_transactions_per_block,
         }

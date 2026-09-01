@@ -628,8 +628,11 @@ mod requests_tests {
             "unknown field `unknown`",
         );
         assert_deserialization_fails(
-            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"fee"}}"#,
-            "unknown variant `fee`",
+            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"Invalid Policy"}}"#,
+            "policy names must contain",
+        );
+        assert_deserialization_succeeds(
+            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"custom-policy"}}"#,
         );
         assert_deserialization_fails(
             r#"{"method":"devnet_removeFromMempool","params":{}}"#,

@@ -10,6 +10,7 @@ pub use json_rpc_response::{
     DevnetResponse, JsonRpcResponse, StarknetExtResponse, StarknetResponse,
 };
 use serde::{Deserialize, Serialize};
+use starknet_core::starknet::mempool::MempoolOrdering;
 use starknet_rs_core::types::{Felt, Hash256, TransactionExecutionStatus};
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::{BlockHash, ClassHash, ProofFacts, TransactionHash};
@@ -81,7 +82,7 @@ mod mempool_model_tests {
     fn serializes_mempool_response_shape() {
         let response = MempoolResponse {
             config: MempoolConfigResponse {
-                ordering: MempoolOrderingValue::Fifo,
+                ordering: MempoolOrderingValue::fifo(),
                 random_seed: 42,
                 max_transactions_per_block: 500,
             },
@@ -511,13 +512,7 @@ impl PreconfirmTransactionsRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum MempoolOrderingValue {
-    Fifo,
-    Starknet,
-    Random,
-}
+pub type MempoolOrderingValue = MempoolOrdering;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

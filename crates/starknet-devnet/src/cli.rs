@@ -223,7 +223,7 @@ Calling devnet_createBlock JSON-RPC method is also an option in modes other than
     #[arg(default_value = "fifo")]
     #[arg(help = "Specify transaction ordering for mempool block building. Possible values are: \
                   fifo, starknet, random;")]
-    mempool_ordering: MempoolOrderingArg,
+    mempool_ordering: MempoolOrdering,
 
     #[arg(long = "mempool-random-seed")]
     #[arg(env = "MEMPOOL_RANDOM_SEED")]
@@ -349,7 +349,7 @@ impl Args {
             dump_path: self.dump_path.clone(),
             block_generation_on: self.block_generation_on,
             mempool_config: MempoolConfig {
-                ordering: self.mempool_ordering.into(),
+                ordering: self.mempool_ordering.clone(),
                 random_seed: self.mempool_random_seed.unwrap_or(u64::from(seed)),
                 max_transactions_per_block: self.mempool_max_transactions_per_block.get(),
             },
@@ -434,25 +434,6 @@ fn parse_block_generation_on(value: &str) -> Result<BlockGenerationOn, String> {
     value.parse().map_err(|_| {
         "expected transaction, demand, mempool, or a positive integer interval".to_string()
     })
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
-#[clap(rename_all = "snake_case")]
-enum MempoolOrderingArg {
-    #[default]
-    Fifo,
-    Starknet,
-    Random,
-}
-
-impl From<MempoolOrderingArg> for MempoolOrdering {
-    fn from(value: MempoolOrderingArg) -> Self {
-        match value {
-            MempoolOrderingArg::Fifo => Self::Fifo,
-            MempoolOrderingArg::Starknet => Self::Starknet,
-            MempoolOrderingArg::Random => Self::Random,
-        }
-    }
 }
 
 struct RequestResponseLogging {
@@ -846,7 +827,7 @@ mod tests {
     fn mempool_configuration_defaults_to_fifo_and_devnet_seed() {
         let (config, _) = Args::parse_from(["--", "--seed", "123"]).to_config().unwrap();
 
-        assert_eq!(config.mempool_config.ordering, MempoolOrdering::Fifo);
+        assert_eq!(config.mempool_config.ordering, MempoolOrdering::fifo());
         assert_eq!(config.mempool_config.random_seed, 123);
         assert_eq!(config.mempool_config.max_transactions_per_block, 500);
     }
@@ -868,9 +849,29 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.block_generation_on, BlockGenerationOn::Mempool);
-        assert_eq!(config.mempool_config.ordering, MempoolOrdering::Starknet);
+        assert_eq!(config.mempool_config.ordering, MempoolOrdering::starknet());
         assert_eq!(config.mempool_config.random_seed, 987);
         assert_eq!(config.mempool_config.max_transactions_per_block, 25);
+    }
+
+    #[test]
+    fn parses_extensible_mempool_policy_name() {
+        let (config, _) = Args::parse_from([
+            "--",
+            "--block-generation-on",
+            "mempool",
+            "--mempool-ordering",
+            "my-policy",
+        ])
+        .to_config()
+        .unwrap();
+
+        assert_eq!(config.mempool_config.ordering.as_str(), "my-policy");
+    }
+
+    #[test]
+    fn rejects_invalid_mempool_policy_name() {
+        assert!(Args::try_parse_from(["--", "--mempool-ordering", "Invalid Policy"]).is_err());
     }
 
     #[test]
