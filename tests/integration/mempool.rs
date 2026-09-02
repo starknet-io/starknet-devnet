@@ -603,41 +603,27 @@ async fn submit_transfer_with_l2_gas_price(
 }
 
 /// Under the Starknet ordering policy, transactions whose `max_l2_gas_price` falls below the
-/// current L2 gas-price threshold are not eligible for selection while the threshold holds.
-/// Once the threshold is lowered, the previously-pending transaction becomes eligible and is
-/// selected by the next `devnet_preconfirmTransactions` call.
+/// active proposal's L2 gas-price threshold are not selected. Changing the next-block gas price
+/// does not alter the open proposal; once that proposal is sealed, the pending transaction becomes
+/// eligible under the new proposal's lower threshold.
 #[tokio::test]
 async fn starknet_policy_hides_below_threshold_txs() {
-    let devnet =
-        BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "mempool"])
-            .await
-            .expect("Could not start Devnet in mempool mode");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "starknet",
+        "--l2-gas-price-fri",
+        "1000000001",
+    ])
+    .await
+    .expect("Could not start Devnet in mempool mode");
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
 
-    // Switch to Starknet ordering policy. Default L2 gas-price threshold is
-    // `DEVNET_DEFAULT_L2_GAS_PRICE = 1_000_000_000`.
-    let resp = devnet
-        .send_custom_rpc("devnet_setMempoolConfig", json!({ "ordering": "starknet" }))
-        .await
-        .unwrap();
-    assert_eq!(resp["ordering"], "starknet");
-
-    // Raise the threshold above `1_000_000_000` so the submitted tx's `max_l2_gas_price`
-    // (= 1_000_000_000, the Devnet default) is now strictly below threshold. Devnet
-    // calls this endpoint `devnet_setGasPrice` and reads the relevant field as
-    // `l2_gas_price_fri`.
-    let _ = devnet
-        .send_custom_rpc(
-            "devnet_setGasPrice",
-            json!({ "l2_gas_price_fri": 1_000_000_001, "generate_block": false }),
-        )
-        .await
-        .expect("raising the threshold should succeed");
-
     // Submit a transfer whose `max_l2_gas_price` (= 1_000_000_000) is strictly below the
-    // new threshold. L1 prices and `l2_gas` are sized so the transaction can still pay
-    // its fees if/when it is selected.
+    // active proposal threshold (= 1_000_000_001). L1 prices and `l2_gas` are sized so the
+    // transaction can still pay its fees after the next proposal lowers the threshold.
     let hash_pending =
         submit_transfer_with_l2_gas_price(&account, Felt::ONE, 1, Felt::ZERO, 1_000_000_000).await;
     assert_phase(&devnet, hash_pending, "RECEIVED").await;
@@ -649,9 +635,8 @@ async fn starknet_policy_hides_below_threshold_txs() {
     );
     assert_phase(&devnet, hash_pending, "RECEIVED").await;
 
-    // Lower the threshold back to the tx's `max_l2_gas_price` so the pending entry
-    // becomes eligible. `1_000_000_000` matches `max_l2_gas_price`, satisfying
-    // `max_l2_gas_price >= current_l2_gas_price`.
+    // Configure the lower price for the next block. The active proposal retains its original
+    // threshold, so this must not make the transaction selectable yet.
     let _ = devnet
         .send_custom_rpc(
             "devnet_setGasPrice",
@@ -659,6 +644,17 @@ async fn starknet_policy_hides_below_threshold_txs() {
         )
         .await
         .expect("lowering the threshold should succeed");
+
+    let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    assert!(
+        resp["pre_confirmed"].as_array().unwrap().is_empty(),
+        "next-block gas changes must not alter the active proposal: {resp}"
+    );
+    assert_phase(&devnet, hash_pending, "RECEIVED").await;
+
+    // Strictly seal the empty proposal. The next proposal now uses the lower configured gas price,
+    // making the transaction's equal max price sufficient.
+    let _ = devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
 
     let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
     let pre_confirmed: Vec<String> = resp["pre_confirmed"]
@@ -669,7 +665,7 @@ async fn starknet_policy_hides_below_threshold_txs() {
         .collect();
     assert!(
         pre_confirmed.contains(&format!("{:#x}", hash_pending)),
-        "after lowering the threshold the pending tx must become eligible: {resp}"
+        "the pending tx must qualify in the next proposal: {resp}"
     );
     assert_phase(&devnet, hash_pending, "PRE_CONFIRMED").await;
 }

@@ -21,10 +21,11 @@ pub fn starknet_comparator(left: &MempoolEntry, right: &MempoolEntry) -> std::cm
     })
 }
 
-/// Immutable transaction set exposed to an ordering policy.
+/// Immutable user-transaction set exposed to an ordering policy.
 ///
-/// The builder constructs this view only from transactions that already passed its eligibility
-/// rules. A policy chooses ordering; it does not decide whether a transaction is valid.
+/// The builder selects eligible system-lane transactions separately in FIFO order, then constructs
+/// this view only from user transactions that already passed its eligibility rules. A policy
+/// chooses user ordering; it does not decide whether a transaction is valid.
 pub struct EligibleTransactions<'a> {
     mempool: &'a Mempool,
     hashes: &'a [TransactionHash],

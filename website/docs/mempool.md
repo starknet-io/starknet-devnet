@@ -62,6 +62,8 @@ For deterministic tests, supply an ordered list of hashes instead. Forced select
 
 The response separates `pre_confirmed`, `rejected`, and `blocked` hashes. Blocked transactions remain received; rejected transactions are removed; reverted executions are accepted and pre-confirmed with reverted receipts.
 
+Eligible system-lane transactions are processed FIFO before user ordering policies. Under `starknet` ordering, a user transaction remains received while its maximum L2 gas price is below the active proposal's L2 gas price. `devnet_setGasPrice` with `generate_block: false` configures the next proposal and does not change ordering or execution prices midway through the open proposal; seal the current proposal to activate the new price.
+
 ## Remove received transactions
 
 Remove one received transaction with `devnet_removeFromMempool`:

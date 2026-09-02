@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
+use starknet_api::block::FeeType;
 use starknet_rs_core::types::Felt;
 use starknet_types::felt::TransactionHash;
 
 use super::mempool::{
-    BuildFailure, BuildOutcome, MempoolPhase, MempoolSelection, SelectionContext,
+    BuildFailure, BuildOutcome, MempoolLane, MempoolPhase, MempoolSelection, SelectionContext,
     TransactionOrderingPolicy,
 };
 use super::{Starknet, TransactionEligibility};
@@ -18,8 +19,9 @@ pub struct BlockBuilderProgress {
 
 /// Synchronous coordinator for selecting and executing transactions into the open proposal.
 ///
-/// Ordering policies only choose among the immutable eligible view. This type retains ownership of
-/// capacity enforcement, nonce eligibility, execution, and lifecycle transitions.
+/// System-lane transactions are selected FIFO before user ordering policies are consulted. User
+/// ordering policies only choose among the immutable eligible user view. This type retains
+/// ownership of capacity enforcement, nonce eligibility, execution, and lifecycle transitions.
 pub struct BlockBuilder<'a> {
     starknet: &'a mut Starknet,
 }
@@ -64,7 +66,9 @@ impl<'a> BlockBuilder<'a> {
 
     /// Builds a chunk with a caller-defined ordering rule.
     ///
-    /// Returning a hash that is not in the supplied eligible view is rejected before any mutation.
+    /// Returning a hash that is not in the supplied eligible user view is rejected before any
+    /// mutation. Eligible system-lane transactions are always selected FIFO before this policy is
+    /// consulted.
     pub fn build_policy_chunk(
         &mut self,
         max_transactions: Option<usize>,
@@ -90,11 +94,31 @@ impl<'a> BlockBuilder<'a> {
         for _ in 0..limit {
             self.starknet.evict_stale_received_transactions(&mut outcome)?;
             let eligible_hashes = self.starknet.eligible_hashes()?;
-            let selected = {
-                let eligible = self.starknet.mempool.eligible_transactions(&eligible_hashes);
+            let selected_system_hash = self.oldest_eligible_system_hash(&eligible_hashes);
+            let eligible_user_hashes = eligible_hashes
+                .iter()
+                .copied()
+                .filter(|hash| {
+                    self.starknet
+                        .mempool
+                        .get(hash)
+                        .is_some_and(|entry| entry.lane == MempoolLane::User)
+                })
+                .collect::<Vec<_>>();
+            let selected = if selected_system_hash.is_some() {
+                selected_system_hash
+            } else {
+                let eligible = self.starknet.mempool.eligible_transactions(&eligible_user_hashes);
                 let context = SelectionContext {
                     block_number: self.starknet.blocks.pre_confirmed_block.block_number().0,
-                    current_l2_gas_price: self.starknet.next_block_gas.l2_gas_price_fri.get(),
+                    current_l2_gas_price: self
+                        .starknet
+                        .block_context
+                        .block_info()
+                        .gas_prices
+                        .l2_gas_price(&FeeType::Strk)
+                        .get()
+                        .0,
                     proposal_selection_counter: self
                         .starknet
                         .mempool
@@ -120,6 +144,20 @@ impl<'a> BlockBuilder<'a> {
 
         outcome.block_full = self.starknet.mempool.remaining_capacity() == 0;
         Ok(outcome)
+    }
+
+    fn oldest_eligible_system_hash(
+        &self,
+        eligible_hashes: &[TransactionHash],
+    ) -> Option<TransactionHash> {
+        eligible_hashes
+            .iter()
+            .filter_map(|hash| {
+                let entry = self.starknet.mempool.get(hash)?;
+                (entry.lane == MempoolLane::System).then_some((entry.arrival_id, *hash))
+            })
+            .min_by_key(|(arrival_id, _)| *arrival_id)
+            .map(|(_, hash)| hash)
     }
 
     fn build_forced_chunk(&mut self, hashes: Vec<TransactionHash>) -> DevnetResult<BuildOutcome> {
@@ -212,20 +250,33 @@ mod tests {
     #[test]
     fn custom_policy_cannot_select_outside_the_eligible_view() {
         let mut starknet = Starknet::default();
-        let hash = Felt::from(0x10);
-        let transaction =
-            TransactionWithHash::new(hash, Transaction::L1Handler(L1HandlerTransaction::default()));
-        starknet
-            .mempool
-            .admit(PreparedTransaction::system(transaction, Default::default()))
-            .unwrap();
-
         let error =
             starknet.block_builder().build_policy_chunk(Some(1), &IneligiblePolicy).unwrap_err();
         assert!(
             matches!(error, Error::UnsupportedAction { msg } if msg.contains("ineligible transaction"))
         );
-        assert_eq!(starknet.mempool.get(&hash).unwrap().phase, MempoolPhase::Received);
+        assert_eq!(starknet.mempool.entries().count(), 0);
+    }
+
+    #[test]
+    fn system_lane_is_selected_fifo_before_user_policy() {
+        let mut starknet = Starknet::default();
+        let first = Felt::from(0x10);
+        let second = Felt::from(0x20);
+        for hash in [first, second] {
+            let transaction = TransactionWithHash::new(
+                hash,
+                Transaction::L1Handler(L1HandlerTransaction::default()),
+            );
+            starknet
+                .mempool
+                .admit(PreparedTransaction::system(transaction, Default::default()))
+                .unwrap();
+        }
+
+        let outcome =
+            starknet.block_builder().build_policy_chunk(Some(2), &IneligiblePolicy).unwrap();
+        assert_eq!(outcome.selected, vec![first, second]);
     }
 
     #[test]
