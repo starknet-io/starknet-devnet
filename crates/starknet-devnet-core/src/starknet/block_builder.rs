@@ -11,6 +11,39 @@ use super::mempool::{
 use super::{Starknet, TransactionEligibility};
 use crate::error::{DevnetResult, Error};
 
+const POLICY_SELECTION_ROUND_SIZE: usize = 100;
+
+#[derive(Debug, Default)]
+struct PolicySelectionRound {
+    user_hashes: Vec<TransactionHash>,
+    selections: usize,
+}
+
+impl PolicySelectionRound {
+    fn should_refresh(&self) -> bool {
+        self.user_hashes.is_empty() || self.selections >= POLICY_SELECTION_ROUND_SIZE
+    }
+
+    fn refresh(&mut self, user_hashes: Vec<TransactionHash>) {
+        self.user_hashes = user_hashes;
+        self.selections = 0;
+    }
+
+    fn retain_eligible(&mut self, eligible_hashes: &[TransactionHash]) {
+        self.user_hashes.retain(|hash| eligible_hashes.contains(hash));
+    }
+
+    fn record_selection(&mut self, hash: TransactionHash) -> bool {
+        let Some(position) = self.user_hashes.iter().position(|candidate| *candidate == hash)
+        else {
+            return false;
+        };
+        self.user_hashes.remove(position);
+        self.selections += 1;
+        true
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockBuilderProgress {
     pub pre_confirmed_transaction_hashes: Vec<TransactionHash>,
@@ -20,8 +53,9 @@ pub struct BlockBuilderProgress {
 /// Synchronous coordinator for selecting and executing transactions into the open proposal.
 ///
 /// System-lane transactions are selected FIFO before user ordering policies are consulted. User
-/// ordering policies only choose among the immutable eligible user view. This type retains
-/// ownership of capacity enforcement, nonce eligibility, execution, and lifecycle transitions.
+/// ordering policies choose from a fixed eligible-head snapshot for up to 100 selections; account
+/// successors exposed by execution enter the next selection round. This type retains ownership of
+/// capacity enforcement, nonce eligibility, execution, and lifecycle transitions.
 pub struct BlockBuilder<'a> {
     starknet: &'a mut Starknet,
 }
@@ -91,24 +125,23 @@ impl<'a> BlockBuilder<'a> {
 
         let requested_limit = max_transactions.unwrap_or(usize::MAX);
         let limit = requested_limit.min(self.starknet.mempool.remaining_capacity());
+        let mut selection_round = PolicySelectionRound::default();
         for _ in 0..limit {
             self.starknet.evict_stale_received_transactions(&mut outcome)?;
             let eligible_hashes = self.starknet.eligible_hashes()?;
-            let selected_system_hash = self.oldest_eligible_system_hash(&eligible_hashes);
-            let eligible_user_hashes = eligible_hashes
-                .iter()
-                .copied()
-                .filter(|hash| {
-                    self.starknet
-                        .mempool
-                        .get(hash)
-                        .is_some_and(|entry| entry.lane == MempoolLane::User)
-                })
-                .collect::<Vec<_>>();
-            let selected = if selected_system_hash.is_some() {
-                selected_system_hash
-            } else {
-                let eligible = self.starknet.mempool.eligible_transactions(&eligible_user_hashes);
+            if let Some(system_hash) = self.oldest_eligible_system_hash(&eligible_hashes) {
+                self.process_selected(system_hash, &mut outcome)?;
+                continue;
+            }
+
+            selection_round.retain_eligible(&eligible_hashes);
+            if selection_round.should_refresh() {
+                selection_round.refresh(self.eligible_user_hashes(&eligible_hashes));
+            }
+
+            let selected = {
+                let eligible =
+                    self.starknet.mempool.eligible_transactions(&selection_round.user_hashes);
                 let context = SelectionContext {
                     block_number: self.starknet.blocks.pre_confirmed_block.block_number().0,
                     current_l2_gas_price: self
@@ -132,10 +165,11 @@ impl<'a> BlockBuilder<'a> {
                 }
             };
             let Some(hash) = selected else { break };
-            if !eligible_hashes.contains(&hash) {
+            if !selection_round.record_selection(hash) {
                 return Err(Error::UnsupportedAction {
                     msg: format!(
-                        "Transaction ordering policy selected ineligible transaction {hash:#x}"
+                        "Transaction ordering policy selected ineligible transaction {hash:#x} \
+                         outside the current selection round"
                     ),
                 });
             }
@@ -144,6 +178,16 @@ impl<'a> BlockBuilder<'a> {
 
         outcome.block_full = self.starknet.mempool.remaining_capacity() == 0;
         Ok(outcome)
+    }
+
+    fn eligible_user_hashes(&self, eligible_hashes: &[TransactionHash]) -> Vec<TransactionHash> {
+        eligible_hashes
+            .iter()
+            .copied()
+            .filter(|hash| {
+                self.starknet.mempool.get(hash).is_some_and(|entry| entry.lane == MempoolLane::User)
+            })
+            .collect()
     }
 
     fn oldest_eligible_system_hash(
@@ -277,6 +321,40 @@ mod tests {
         let outcome =
             starknet.block_builder().build_policy_chunk(Some(2), &IneligiblePolicy).unwrap();
         assert_eq!(outcome.selected, vec![first, second]);
+    }
+
+    #[test]
+    fn selection_round_defers_new_hashes_until_refresh() {
+        let first = Felt::from(0x10);
+        let second = Felt::from(0x20);
+        let successor = Felt::from(0x30);
+        let mut round = PolicySelectionRound::default();
+        round.refresh(vec![first, second]);
+
+        assert!(round.record_selection(first));
+        round.retain_eligible(&[second, successor]);
+        assert_eq!(round.user_hashes, vec![second]);
+
+        assert!(round.record_selection(second));
+        assert!(round.should_refresh());
+        round.refresh(vec![successor]);
+        assert_eq!(round.user_hashes, vec![successor]);
+    }
+
+    #[test]
+    fn selection_round_refreshes_after_fixed_selection_limit() {
+        let hashes = (0..=POLICY_SELECTION_ROUND_SIZE)
+            .map(|value| Felt::from(value as u64))
+            .collect::<Vec<_>>();
+        let mut round = PolicySelectionRound::default();
+        round.refresh(hashes.clone());
+
+        for hash in hashes.into_iter().take(POLICY_SELECTION_ROUND_SIZE) {
+            assert!(round.record_selection(hash));
+        }
+
+        assert_eq!(round.user_hashes.len(), 1);
+        assert!(round.should_refresh());
     }
 
     #[test]

@@ -9,7 +9,7 @@ Manual mempool mode separates transaction admission, preconfirmation, and block 
 - `PRE_CONFIRMED`: executed and appended to the live proposal. Later transactions execute against its speculative state.
 - `ACCEPTED_ON_L2`: permanently included when the proposal is sealed.
 
-Selection is incremental. Only the expected nonce for each account is eligible, so selecting nonce `n` may make nonce `n + 1` eligible during the same processing request. A transaction arriving after part of the proposal is already pre-confirmed can outrank transactions that have not yet been selected, but cannot reorder the published pre-confirmed prefix.
+Selection is incremental and proceeds in transient rounds of up to 100 user transactions. Each round snapshots the currently nonce-eligible account heads; a nonce `n + 1` exposed by executing nonce `n` waits for the next round and cannot overtake another account head already in the current snapshot. Multiple rounds may run in one processing request. A transaction arriving after part of the proposal is already pre-confirmed can outrank transactions in a later round, but cannot reorder the published pre-confirmed prefix.
 
 Queued `RECEIVED` and `CANDIDATE` transactions can be returned by `starknet_getTransactionByHash` and their phase can be returned by `starknet_getTransactionStatus`. They have no receipt or trace until they execute, and they are excluded from block and state-update queries.
 

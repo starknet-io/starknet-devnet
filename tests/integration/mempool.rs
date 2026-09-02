@@ -670,6 +670,43 @@ async fn starknet_policy_hides_below_threshold_txs() {
     assert_phase(&devnet, hash_pending, "PRE_CONFIRMED").await;
 }
 
+/// Policy-driven building snapshots nonce-eligible account heads for a selection round. A
+/// successor exposed by executing one account head cannot overtake another account head that was
+/// already present in that snapshot, even when the successor has a higher tip.
+#[tokio::test]
+async fn starknet_policy_replenishes_account_heads_between_selection_rounds() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "starknet",
+    ])
+    .await
+    .expect("Could not start Devnet in mempool mode");
+    let client = json_rpc_client(&devnet);
+    let account_a = first_predeployed_account(&devnet, &client).await;
+    let account_b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    let a0 = submit_transfer_in_mempool(&account_a, Felt::ONE, 1, 20, Felt::ZERO).await;
+    let a1 = submit_transfer_in_mempool(&account_a, Felt::TWO, 1, 20, Felt::ONE).await;
+    let b0 = submit_transfer_in_mempool(&account_b, Felt::from(3_u64), 1, 10, Felt::ZERO).await;
+
+    let response =
+        devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let pre_confirmed = response["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hash| hash.as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        pre_confirmed,
+        vec![format!("{a0:#x}"), format!("{b0:#x}"), format!("{a1:#x}")],
+        "A1 must wait until the initial A0/B0 selection round is exhausted: {response}"
+    );
+}
+
 #[tokio::test]
 async fn unregistered_ordering_policy_is_rejected() {
     let devnet = spawn_mempool_devnet().await;
