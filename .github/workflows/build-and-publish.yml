@@ -497,6 +497,7 @@ jobs:
           DOCKER_REGISTRY: ${{ steps.config.outputs.docker_registry }}
           DOCKER_NAMESPACE: ${{ steps.config.outputs.docker_namespace }}
           IMAGE_NAME: ${{ steps.config.outputs.image_name }}
+          OUTPUT_PATH: artifacts/release-body.md
         run: |
           mkdir -p artifacts
           ./scripts/render_release_body.sh
