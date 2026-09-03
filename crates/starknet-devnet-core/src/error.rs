@@ -48,6 +48,10 @@ pub enum Error {
     FormatError,
     #[error("No transaction found")]
     NoTransaction,
+    #[error("Transaction {transaction_hash:#x} is already known")]
+    DuplicateTransaction { transaction_hash: Felt },
+    #[error("A transaction for account {address:#x} with nonce {nonce} is already in the mempool")]
+    NonceConflict { address: ContractAddress, nonce: Nonce },
     #[error("Invalid transaction index in a block")]
     InvalidTransactionIndexInBlock,
     #[error("Unsupported transaction type")]

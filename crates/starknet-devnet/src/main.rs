@@ -393,9 +393,10 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     if let BlockGenerationOn::Interval(seconds) = starknet_config.block_generation_on {
-        // use JoinHandle to run block interval creation as a task
+        // Interval mode only seals the current pre-confirmed block. Transaction selection and
+        // execution happen synchronously when the transaction is submitted.
         let full_address = format!("http://{address}");
-        let block_interval_handle = task::spawn(create_block_interval(seconds, full_address));
+        let block_interval_handle = task::spawn(seal_block_on_interval(seconds, full_address));
 
         tasks.push(block_interval_handle);
     }
@@ -419,7 +420,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 #[allow(clippy::expect_used)]
-async fn create_block_interval(
+async fn seal_block_on_interval(
     block_interval_seconds: u64,
     devnet_address: String,
 ) -> Result<(), std::io::Error> {
@@ -433,7 +434,7 @@ async fn create_block_interval(
     };
 
     let devnet_client = reqwest::Client::new();
-    let block_req_body = json!({ "jsonrpc": "2.0", "id": 0, "method": "devnet_createBlock" });
+    let seal_block_req_body = json!({ "jsonrpc": "2.0", "id": 0, "method": "devnet_sealBlock" });
 
     // avoid creating block instantly after startup
     sleep(Duration::from_secs(block_interval_seconds)).await;
@@ -443,9 +444,9 @@ async fn create_block_interval(
         tokio::select! {
             _ = interval.tick() => {
                 // By sending a request, we take care of: 1) dumping 2) notifying subscribers
-                match devnet_client.post(&devnet_address).json(&block_req_body).send().await {
-                    Ok(_) => info!("Generating block on time interval"),
-                    Err(e) => error!("Failed block creation on time interval: {e:?}")
+                match devnet_client.post(&devnet_address).json(&seal_block_req_body).send().await {
+                    Ok(_) => info!("Sealing block on time interval"),
+                    Err(e) => error!("Failed block sealing on time interval: {e:?}")
                 }
             }
             _ = sigint.recv() => {

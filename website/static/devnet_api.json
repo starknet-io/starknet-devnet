@@ -354,6 +354,297 @@
       ]
     },
     {
+      "name": "devnet_getMempool",
+      "summary": "Inspect the transaction mempool and open proposal",
+      "params": [
+        {
+          "name": "include_transactions",
+          "description": "Include full transaction objects in the response",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "$ref": "#/components/schemas/MEMPOOL_CONFIG"
+            },
+            "transactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "transaction_hash": {
+                    "$ref": "#/components/schemas/FELT"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["RECEIVED", "CANDIDATE", "PRE_CONFIRMED"]
+                  },
+                  "arrival_id": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sender_address": {
+                    "$ref": "#/components/schemas/ADDRESS"
+                  },
+                  "nonce": {
+                    "$ref": "#/components/schemas/FELT"
+                  },
+                  "tip": {
+                    "$ref": "#/components/schemas/FELT"
+                  },
+                  "transaction": {
+                    "type": ["object", "null"]
+                  }
+                },
+                "required": [
+                  "transaction_hash",
+                  "status",
+                  "arrival_id",
+                  "sender_address",
+                  "nonce",
+                  "tip",
+                  "transaction"
+                ]
+              }
+            },
+            "pre_confirmed_transaction_hashes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FELT"
+              }
+            },
+            "remaining_block_capacity": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "config",
+            "transactions",
+            "pre_confirmed_transaction_hashes",
+            "remaining_block_capacity"
+          ]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_removeFromMempool",
+      "summary": "Remove one received transaction from the mempool",
+      "params": [
+        {
+          "name": "transaction_hash",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/FELT"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transaction_hash": {
+              "$ref": "#/components/schemas/FELT"
+            }
+          },
+          "required": ["transaction_hash"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_clearMempool",
+      "summary": "Remove all received transactions from the mempool",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FELT"
+              }
+            }
+          },
+          "required": ["removed"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_preconfirmTransactions",
+      "summary": "Select and execute received transactions into the open pre-confirmed proposal",
+      "params": [
+        {
+          "name": "max_transactions",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "transaction_hashes",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FELT"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "pre_confirmed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FELT"
+              }
+            },
+            "rejected": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/MEMPOOL_PROCESSING_FAILURE"
+              }
+            },
+            "blocked": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/MEMPOOL_PROCESSING_FAILURE"
+              }
+            },
+            "block_full": {
+              "type": "boolean"
+            }
+          },
+          "required": ["pre_confirmed", "rejected", "blocked", "block_full"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_setMempoolConfig",
+      "summary": "Update mempool ordering and block capacity",
+      "params": [
+        {
+          "name": "ordering",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Registered mempool ordering policy name",
+            "examples": ["fifo", "starknet", "random"]
+          }
+        },
+        {
+          "name": "random_seed",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "max_transactions_per_block",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/MEMPOOL_CONFIG"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_sealBlock",
+      "summary": "Seal exactly the current pre-confirmed proposal without selecting received transactions",
+      "params": [],
+      "result": {
+        "name": "result",
+        "description": "New block hash",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "block_hash": {
+              "$ref": "#/components/schemas/FELT"
+            }
+          },
+          "required": ["block_hash"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_abortPreconfirmedBlock",
+      "summary": "Abort the open proposal and requeue its transactions",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "requeued": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FELT"
+              }
+            }
+          },
+          "required": ["requeued"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
+    },
+    {
       "name": "devnet_abortBlocks",
       "summary": "Abort blocks from starting_block_id to the currently latest block",
       "params": [
@@ -1120,6 +1411,39 @@
         "title": "price unit",
         "type": "string",
         "enum": ["WEI", "FRI"]
+      },
+      "MEMPOOL_CONFIG": {
+        "title": "Mempool configuration",
+        "type": "object",
+        "properties": {
+          "ordering": {
+            "type": "string",
+            "description": "Registered mempool ordering policy name",
+            "examples": ["fifo", "starknet", "random"]
+          },
+          "random_seed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_transactions_per_block": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["ordering", "random_seed", "max_transactions_per_block"]
+      },
+      "MEMPOOL_PROCESSING_FAILURE": {
+        "title": "Mempool processing failure",
+        "type": "object",
+        "properties": {
+          "transaction_hash": {
+            "$ref": "#/components/schemas/FELT"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["transaction_hash", "reason"]
       }
     },
     "errors": {

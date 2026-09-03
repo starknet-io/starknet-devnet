@@ -28,9 +28,27 @@ The creation of the genesis block is not affected by this feature.
 
 The specifications of a block-creating request can be found [below](#request-new-block-creation).
 
+## Building blocks from the mempool
+
+Start Devnet with `--block-generation-on mempool` to keep submitted transactions in `RECEIVED` status until they are explicitly selected and executed. The live pre-confirmed block grows as selected transactions execute successfully; transactions that have not been selected do not affect state, block contents, receipts, or traces.
+
+```bash
+$ starknet-devnet --block-generation-on mempool
+```
+
+Use `--mempool-ordering fifo|starknet|random` to choose the ordering policy. Random ordering is deterministic and can be configured with `--mempool-random-seed`; otherwise it uses the Devnet seed. `--mempool-max-transactions-per-block` sets the positive block capacity and defaults to 500. These options and their equivalent `MEMPOOL_*` environment variables are accepted in every block-generation mode, but affect selection only in mempool mode.
+
+Eligible system-lane transactions are always selected FIFO before a user ordering policy is consulted. User selection proceeds in transient rounds of up to 100 transactions: each round snapshots the currently nonce-eligible account heads, so a successor exposed by execution enters the next round instead of overtaking heads already in the snapshot. The `fifo` policy selects the oldest head in the round. The `starknet` policy considers only heads whose maximum L2 gas price meets the active proposal's L2 gas price, ordering them by descending tip and then descending transaction hash; underpriced transactions remain received. The `random` policy chooses deterministically from the round. A transaction with a nonce gap stays received until an earlier transaction for its account executes.
+
+The mempool can be inspected and manipulated through [Devnet's mempool methods](./mempool). `devnet_preconfirmTransactions` selects and executes without sealing. In mempool mode, `devnet_createBlock` fills the current proposal according to policy and then seals it, while `devnet_sealBlock` strictly seals only transactions that are already pre-confirmed.
+
 ## Automatic periodic block creation
 
-If started with the `--block-generation-on <INTERVAL>` CLI option, Devnet will behave as in [`demand` mode](#creating-blocks-on-demand), but new blocks will be mined automatically every `<INTERVAL>` seconds. Consider this example of spawning Devnet at moment `t`:
+The bare numeric `--block-generation-on <INTERVAL>` form enables periodic sealing. Transactions are executed and pre-confirmed immediately, exactly as in [`demand` mode](#creating-blocks-on-demand); the timer seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer.
+
+Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. Use interval mode when transactions should execute immediately while blocks are sealed on a fixed cadence.
+
+Consider this example of spawning Devnet at moment `t`:
 
 ```bash
 # t
@@ -75,7 +93,26 @@ Result:
 {"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
 ```
 
-The newly created block will contain all pre-confirmed transactions, if any, since the last block creation.
+In `transaction`, `demand`, and interval modes, the newly created block contains all pre-confirmed transactions, if any, since the last block creation. In mempool mode, this method first selects and pre-confirms transactions until the block is full or no eligible transaction remains, and then seals it. It creates an empty block if there are no transactions to include.
+
+## Strictly seal the pre-confirmed block
+
+`devnet_sealBlock` converts exactly the current pre-confirmed block to `ACCEPTED_ON_L2` without selecting any received mempool transactions. It can create an empty block.
+
+```
+JSON-RPC
+{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "devnet_sealBlock"
+}
+```
+
+The result has the same shape as `devnet_createBlock`:
+
+```
+{"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
+```
 
 ## Timestamp manipulation
 

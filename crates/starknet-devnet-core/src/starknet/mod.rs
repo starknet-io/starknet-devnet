@@ -92,11 +92,13 @@ mod add_declare_transaction;
 mod add_deploy_account_transaction;
 mod add_invoke_transaction;
 mod add_l1_handler_transaction;
+pub mod block_builder;
 mod cheats;
 pub(crate) mod defaulter;
 mod estimations;
 pub mod events;
 mod get_class_impls;
+pub mod mempool;
 mod predeployed;
 pub mod proofs;
 pub mod starknet_config;
@@ -114,6 +116,7 @@ pub struct Starknet {
     // having `blocks` public allows to re-use functions like `get_blocks()`.
     pub(crate) blocks: StarknetBlocks,
     pub transactions: StarknetTransactions,
+    mempool: mempool::Mempool,
     pub config: StarknetConfig,
     pub pre_confirmed_block_timestamp_shift: i64,
     pub next_block_timestamp: Option<u64>,
@@ -121,6 +124,12 @@ pub struct Starknet {
     pub(crate) messaging: MessagingBroker,
     rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
     cheats: Cheats,
+}
+
+enum TransactionEligibility {
+    Eligible,
+    Blocked(String),
+    Stale(String),
 }
 
 impl Default for Starknet {
@@ -144,6 +153,7 @@ impl Default for Starknet {
             predeployed_accounts: Default::default(),
             blocks: Default::default(),
             transactions: Default::default(),
+            mempool: Default::default(),
             config: Default::default(),
             pre_confirmed_block_timestamp_shift: 0,
             next_block_timestamp: None,
@@ -163,7 +173,256 @@ impl Default for Starknet {
 }
 
 impl Starknet {
+    pub fn mempool(&self) -> &mempool::Mempool {
+        &self.mempool
+    }
+
+    pub fn block_builder(&mut self) -> block_builder::BlockBuilder<'_> {
+        block_builder::BlockBuilder::new(self)
+    }
+
+    pub fn remove_from_mempool(
+        &mut self,
+        transaction_hash: TransactionHash,
+    ) -> DevnetResult<TransactionWithHash> {
+        Ok(self.mempool.remove_received(&transaction_hash)?.transaction)
+    }
+
+    pub fn clear_mempool(&mut self) -> Vec<TransactionHash> {
+        self.mempool
+            .clear_received()
+            .into_iter()
+            .map(|entry| *entry.transaction.get_transaction_hash())
+            .collect()
+    }
+
+    pub fn set_mempool_config(
+        &mut self,
+        update: mempool::MempoolConfigUpdate,
+    ) -> DevnetResult<mempool::MempoolConfig> {
+        let config = self.mempool.set_config(update)?;
+        self.config.mempool_config = config.clone();
+        Ok(config)
+    }
+
+    pub fn get_queued_transaction(
+        &self,
+        transaction_hash: &TransactionHash,
+    ) -> Option<&TransactionWithHash> {
+        self.mempool.get(transaction_hash).map(|entry| &entry.transaction)
+    }
+
+    pub fn get_queued_transaction_phase(
+        &self,
+        transaction_hash: &TransactionHash,
+    ) -> Option<mempool::MempoolPhase> {
+        self.mempool.get(transaction_hash).map(|entry| entry.phase)
+    }
+
+    pub(crate) fn submit_prepared_transaction(
+        &mut self,
+        prepared: mempool::PreparedTransaction,
+    ) -> DevnetResult<TransactionHash> {
+        let transaction_hash = *prepared.transaction.get_transaction_hash();
+        if self.transactions.get(&transaction_hash).is_some() {
+            return Err(Error::DuplicateTransaction { transaction_hash });
+        }
+        let transaction_hash = match self.mempool.admit(prepared) {
+            Err(Error::NonceConflict { address, nonce })
+                if self.config.executes_on_submission() =>
+            {
+                let account_nonce = self.pre_confirmed_state.state.get_nonce_at(address.into())?;
+                return Err(TransactionValidationError::InvalidTransactionNonce {
+                    address,
+                    account_nonce,
+                    incoming_tx_nonce: nonce,
+                }
+                .into());
+            }
+            result => result?,
+        };
+        if self.config.executes_on_submission() {
+            if let Err(error) = self.execute_mempool_transaction(transaction_hash) {
+                self.mempool.remove_entry(&transaction_hash);
+                return Err(error);
+            }
+            if self.config.seals_on_submission() {
+                self.seal_block();
+            }
+        }
+        Ok(transaction_hash)
+    }
+
+    pub(crate) fn submit_system_prepared_transaction(
+        &mut self,
+        prepared: mempool::PreparedTransaction,
+    ) -> DevnetResult<TransactionHash> {
+        let known_hash = *prepared.transaction.get_transaction_hash();
+        if self.transactions.get(&known_hash).is_some() {
+            return Err(Error::DuplicateTransaction { transaction_hash: known_hash });
+        }
+        let transaction_hash = self.mempool.admit(prepared)?;
+        if let Err(error) = self.execute_mempool_transaction(transaction_hash) {
+            self.mempool.remove_entry(&transaction_hash);
+            return Err(error);
+        }
+        if self.config.seals_on_submission() {
+            self.seal_block();
+        }
+        Ok(transaction_hash)
+    }
+
+    fn execute_mempool_transaction(
+        &mut self,
+        transaction_hash: TransactionHash,
+    ) -> DevnetResult<()> {
+        let prepared = self.mempool.mark_candidate(&transaction_hash)?;
+        let execution_info = prepared
+            .executable
+            .execute(&mut self.pre_confirmed_state.state, &self.block_context)?;
+
+        if !execution_info.is_reverted()
+            && let Some(declaration) = prepared.declaration
+        {
+            self.pre_confirmed_state.declare_contract_class(
+                declaration.class_hash,
+                declaration.casm_hash,
+                declaration.contract_class,
+            )?;
+        }
+
+        self.append_accepted_transaction(prepared.transaction, execution_info)?;
+        self.mempool.mark_pre_confirmed(&transaction_hash)
+    }
+
+    fn eligibility(
+        &mut self,
+        transaction_hash: TransactionHash,
+    ) -> DevnetResult<TransactionEligibility> {
+        let Some(entry) = self.mempool.get(&transaction_hash) else {
+            return Err(Error::NoTransaction);
+        };
+        if entry.phase != mempool::MempoolPhase::Received {
+            return Ok(TransactionEligibility::Blocked(format!(
+                "transaction is {:?}",
+                entry.phase
+            )));
+        }
+        let (Some(address), Some(incoming_nonce)) = (entry.account_address, entry.nonce) else {
+            return Ok(TransactionEligibility::Eligible);
+        };
+        let account_nonce = self.pre_confirmed_state.state.get_nonce_at(address.into())?;
+        Ok(match incoming_nonce.cmp(&account_nonce) {
+            std::cmp::Ordering::Equal => TransactionEligibility::Eligible,
+            std::cmp::Ordering::Greater => TransactionEligibility::Blocked(format!(
+                "nonce gap: expected {:#x}, got {:#x}",
+                account_nonce.0, incoming_nonce.0
+            )),
+            std::cmp::Ordering::Less => TransactionEligibility::Stale(format!(
+                "stale nonce: expected {:#x}, got {:#x}",
+                account_nonce.0, incoming_nonce.0
+            )),
+        })
+    }
+
+    fn eligible_hashes(&mut self) -> DevnetResult<Vec<TransactionHash>> {
+        let received = self
+            .mempool
+            .entries()
+            .filter_map(|(hash, entry)| {
+                (entry.phase == mempool::MempoolPhase::Received).then_some(*hash)
+            })
+            .collect::<Vec<_>>();
+        received
+            .into_iter()
+            .filter_map(|hash| match self.eligibility(hash) {
+                Ok(TransactionEligibility::Eligible) => Some(Ok(hash)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+
+    fn evict_stale_received_transactions(
+        &mut self,
+        outcome: &mut mempool::BuildOutcome,
+    ) -> DevnetResult<()> {
+        let received = self
+            .mempool
+            .entries()
+            .filter_map(|(hash, entry)| {
+                (entry.phase == mempool::MempoolPhase::Received).then_some(*hash)
+            })
+            .collect::<Vec<_>>();
+        let stale = received
+            .into_iter()
+            .filter_map(|hash| match self.eligibility(hash) {
+                Ok(TransactionEligibility::Stale(reason)) => Some(Ok((hash, reason))),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<DevnetResult<Vec<_>>>()?;
+
+        for (transaction_hash, reason) in stale {
+            self.mempool.remove_entry(&transaction_hash);
+            outcome.rejected.push(mempool::BuildFailure { transaction_hash, reason });
+        }
+        Ok(())
+    }
+
+    pub fn preconfirm_transactions(
+        &mut self,
+        selection: mempool::MempoolSelection,
+    ) -> DevnetResult<mempool::BuildOutcome> {
+        self.block_builder().build_chunk(selection)
+    }
+
+    /// Processes eligible transactions using a caller-provided ordering policy.
+    ///
+    /// This is the programmatic extension point for custom rules. The builder still owns
+    /// eligibility, validation, execution, capacity, and lifecycle transitions.
+    pub fn preconfirm_transactions_with_policy(
+        &mut self,
+        max_transactions: Option<usize>,
+        policy: &dyn mempool::TransactionOrderingPolicy,
+    ) -> DevnetResult<mempool::BuildOutcome> {
+        self.block_builder().build_policy_chunk(max_transactions, policy)
+    }
+
+    /// Seal exactly the currently pre-confirmed proposal without draining received transactions.
+    pub fn seal_block(&mut self) -> Felt {
+        self.block_builder().seal()
+    }
+
+    pub fn abort_preconfirmed_block(&mut self) -> DevnetResult<Vec<TransactionHash>> {
+        if !self.config.uses_manual_mempool() {
+            return Err(Error::UnsupportedAction {
+                msg: "Pre-confirmed proposal abortion is only available in mempool mode".into(),
+            });
+        }
+        let hashes = self.mempool.abort_proposal();
+        for hash in &hashes {
+            self.transactions.remove(hash);
+        }
+        let block_number = self.blocks.pre_confirmed_block.block_number().0;
+        let mut classes = self.rpc_contract_classes.write();
+        classes.remove_classes_at(block_number);
+        classes.empty_staging();
+        drop(classes);
+        self.pre_confirmed_state = self.latest_state.clone_historic();
+        self.pre_confirmed_state_diff = StateDiff::default();
+        self.restart_pre_confirmed_block();
+        Ok(hashes)
+    }
+
     pub fn new(config: &StarknetConfig) -> DevnetResult<Self> {
+        Self::new_with_ordering_policy_registry(config, mempool::OrderingPolicyRegistry::default())
+    }
+
+    pub fn new_with_ordering_policy_registry(
+        config: &StarknetConfig,
+        ordering_policies: mempool::OrderingPolicyRegistry,
+    ) -> DevnetResult<Self> {
         let defaulter = StarknetDefaulter::new(config.fork_config.clone());
         let rpc_contract_classes = Arc::new(RwLock::new(CommittedClassStorage::default()));
         let mut state = StarknetState::new(defaulter, rpc_contract_classes.clone());
@@ -280,6 +539,10 @@ impl Starknet {
             ),
             blocks: StarknetBlocks::new(starting_block_number, last_block_hash),
             transactions: StarknetTransactions::default(),
+            mempool: mempool::Mempool::with_policy_registry(
+                config.mempool_config.clone(),
+                ordering_policies,
+            )?,
             config: config.clone(),
             pre_confirmed_block_timestamp_shift: 0,
             next_block_timestamp: None,
@@ -314,8 +577,9 @@ impl Starknet {
     pub fn restart(&mut self, restart_l1_to_l2_messaging: bool) -> DevnetResult<()> {
         let new_messaging_ethereum =
             if restart_l1_to_l2_messaging { None } else { self.messaging.ethereum.clone() };
+        let ordering_policies = self.mempool.ordering_policies().clone();
 
-        *self = Starknet::new(&self.config)?;
+        *self = Starknet::new_with_ordering_policy_registry(&self.config, ordering_policies)?;
         self.messaging.ethereum = new_messaging_ethereum;
 
         info!("Starknet Devnet restarted");
@@ -528,6 +792,10 @@ impl Starknet {
         crate::metrics::BLOCK_CREATION_DURATION.observe(duration);
         crate::metrics::BLOCK_COUNT.inc();
 
+        // Selection is a soft removal; sealing is the point at which included entries leave the
+        // canonical pool permanently.
+        self.mempool.commit_proposal();
+
         new_block_hash
     }
 
@@ -542,9 +810,8 @@ impl Starknet {
         Ok(state_diff)
     }
 
-    /// Handles succeeded and reverted transactions. The tx is stored and potentially dumped. A new
-    /// block is generated in block-generation-on-transaction mode.
-    pub(crate) fn handle_accepted_transaction(
+    /// Commits a transaction's state changes into the open proposal and stores its execution data.
+    fn append_accepted_transaction(
         &mut self,
         transaction: TransactionWithHash,
         tx_info: TransactionExecutionInfo,
@@ -576,11 +843,6 @@ impl Starknet {
 
         // Update transaction count metric
         crate::metrics::TRANSACTION_COUNT.inc();
-
-        // create new block from pre_confirmed one, only in block-generation-on-transaction mode
-        if !self.config.uses_pre_confirmed_block() {
-            self.generate_new_block_and_state();
-        }
 
         Ok(())
     }
@@ -1068,8 +1330,9 @@ impl Starknet {
         let mut invoke_tx = unsigned_tx;
         invoke_tx.common.signature = vec![signature.r, signature.s];
 
-        // apply the invoke tx
-        add_invoke_transaction::add_invoke_transaction(
+        // Apply the invoke transaction through the system lane so mint is force-processed even in
+        // mempool mode.
+        add_invoke_transaction::add_invoke_transaction_system(
             self,
             BroadcastedInvokeTransaction::V3(invoke_tx),
         )
@@ -1210,6 +1473,8 @@ impl Starknet {
         let new_pre_confirmed_block_number = old_pre_confirmed_block_number - aborted.len() as u64;
 
         self.set_block_number(new_pre_confirmed_block_number);
+
+        self.mempool.clear_all();
 
         // Reset metrics
         let old_tx_count = crate::metrics::TRANSACTION_COUNT.get();
@@ -1392,10 +1657,14 @@ impl Starknet {
         &self,
         transaction_hash: Felt,
     ) -> DevnetResult<&TransactionWithHash> {
-        self.transactions
+        if let Some(transaction) = self
+            .transactions
             .get_by_hash(transaction_hash)
             .map(|starknet_transaction| &starknet_transaction.inner)
-            .ok_or(Error::NoTransaction)
+        {
+            return Ok(transaction);
+        }
+        self.get_queued_transaction(&transaction_hash).ok_or(Error::NoTransaction)
     }
 
     pub fn get_unlimited_events(
@@ -1496,8 +1765,17 @@ impl Starknet {
         &self,
         transaction_hash: TransactionHash,
     ) -> DevnetResult<TransactionStatus> {
-        let transaction = self.transactions.get(&transaction_hash).ok_or(Error::NoTransaction)?;
-        Ok(transaction.get_status())
+        if let Some(transaction) = self.transactions.get(&transaction_hash) {
+            return Ok(transaction.get_status());
+        }
+        let phase =
+            self.get_queued_transaction_phase(&transaction_hash).ok_or(Error::NoTransaction)?;
+        let finality = match phase {
+            mempool::MempoolPhase::Received => TransactionFinalityStatus::Received,
+            mempool::MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,
+            mempool::MempoolPhase::PreConfirmed => TransactionFinalityStatus::PreConfirmed,
+        };
+        Ok(TransactionStatus::pre_execution(finality))
     }
 
     pub fn simulate_transactions(
@@ -1632,9 +1910,19 @@ impl Starknet {
         }
     }
 
-    /// create new block from pre_confirmed one
+    /// Creates and seals a block, filling it from the manual mempool when applicable.
+    pub fn create_block_strict(&mut self) -> DevnetResult<Felt> {
+        if self.config.uses_manual_mempool() {
+            self.preconfirm_transactions(mempool::MempoolSelection::default())?;
+        }
+        Ok(self.generate_new_block_and_state())
+    }
+
+    /// Convenience wrapper for internal callers that cannot report a block-building error.
     pub fn create_block(&mut self) {
-        self.generate_new_block_and_state();
+        if let Err(error) = self.create_block_strict() {
+            error!("Failed to create block: {error}");
+        }
     }
 
     // Set time and optionally create a new block
@@ -1824,6 +2112,10 @@ mod tests {
         STRK_ERC20_CONTRACT_ADDRESS,
     };
     use crate::error::{DevnetResult, Error};
+    use crate::starknet::mempool::{
+        EligibleTransactions, MempoolOrdering, OrderingPolicyRegistry, SelectionContext,
+        TransactionOrderingPolicy,
+    };
     use crate::starknet::starknet_config::{StarknetConfig, StateArchiveCapacity};
     use crate::traits::{Accounted, Deployed, HashIdentified};
     use crate::utils::test_utils::{
@@ -1831,6 +2123,18 @@ mod tests {
         dummy_contract_address, dummy_declare_tx_v3_with_hash, dummy_felt, dummy_key_pair,
         resource_bounds_with_price_1,
     };
+
+    struct FirstEligiblePolicy;
+
+    impl TransactionOrderingPolicy for FirstEligiblePolicy {
+        fn select(
+            &self,
+            eligible: &EligibleTransactions<'_>,
+            _context: &SelectionContext,
+        ) -> Option<Felt> {
+            eligible.hashes().first().copied()
+        }
+    }
 
     /// Initializes starknet with 1 account that doesn't perform actual tx signature validation.
     /// Allows specifying the state archive capacity.
@@ -1896,6 +2200,21 @@ mod tests {
                 account.get_balance(&mut starknet.pre_confirmed_state, FeeToken::STRK).unwrap();
             assert_eq!(expected_balance, account_balance);
         }
+    }
+
+    #[test]
+    fn restart_preserves_registered_ordering_policies() {
+        let policy_name: MempoolOrdering = "test-policy".parse().unwrap();
+        let mut registry = OrderingPolicyRegistry::default();
+        registry.register(policy_name.clone(), FirstEligiblePolicy);
+        let mut config = StarknetConfig::default();
+        config.mempool_config.ordering = policy_name.clone();
+        let mut starknet = Starknet::new_with_ordering_policy_registry(&config, registry).unwrap();
+
+        starknet.restart(false).unwrap();
+
+        assert_eq!(starknet.mempool.config().ordering, policy_name);
+        assert!(starknet.mempool.ordering_policies().contains(&policy_name));
     }
 
     #[test]

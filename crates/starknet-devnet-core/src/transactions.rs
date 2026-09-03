@@ -191,11 +191,11 @@ impl StarknetTransaction {
     }
 
     pub fn get_status(&self) -> TransactionStatus {
-        TransactionStatus {
-            finality_status: self.finality_status,
-            failure_reason: self.execution_info.revert_error.as_ref().map(|err| err.to_string()),
-            execution_status: self.execution_result.status(),
-        }
+        TransactionStatus::executed(
+            self.finality_status,
+            self.execution_info.revert_error.as_ref().map(|err| err.to_string()),
+            self.execution_result.status(),
+        )
     }
 
     pub fn get_trace(&self) -> Option<TransactionTrace> {

@@ -1,4 +1,4 @@
-use std::num::NonZeroU128;
+use std::num::{NonZeroU128, NonZeroUsize};
 
 use clap::Parser;
 use server::ServerConfig;
@@ -12,6 +12,7 @@ use starknet_core::constants::{
 };
 use starknet_core::contract_class_choice::{AccountClassWrapper, AccountContractClassChoice};
 use starknet_core::random_number_generator::generate_u32_random_number;
+use starknet_core::starknet::mempool::{MempoolConfig, MempoolOrdering};
 use starknet_core::starknet::starknet_config::{
     BlockGenerationOn, ClassSizeConfig, DumpOn, ForkConfig, ProofMode, StarknetConfig,
     StateArchiveCapacity,
@@ -205,13 +206,38 @@ pub(crate) struct Args {
     #[arg(long = "block-generation-on")]
     #[arg(env = "BLOCK_GENERATION_ON")]
     #[arg(default_value = "transaction")]
+    #[arg(value_parser = parse_block_generation_on)]
     #[arg(help = "Specify when to generate a new block. Possible values are:
 - \"transaction\" - new block generated on each transaction
 - \"demand\" - new block creatable solely by calling the devnet_createBlock JSON-RPC method
-- <INTERVAL> - a positive integer indicating after how many seconds a new block is generated
+- \"mempool\" - transactions remain received until processed by a Devnet mempool/block method
+- <INTERVAL> - transactions are pre-confirmed immediately and the current block is sealed every \
+                  <INTERVAL> seconds
 
 Calling devnet_createBlock JSON-RPC method is also an option in modes other than \"demand\".")]
     block_generation_on: BlockGenerationOn,
+
+    #[arg(long = "mempool-ordering")]
+    #[arg(env = "MEMPOOL_ORDERING")]
+    #[arg(value_name = "POLICY")]
+    #[arg(default_value = "fifo")]
+    #[arg(help = "Specify transaction ordering for mempool block building. Possible values are: \
+                  fifo, starknet, random;")]
+    mempool_ordering: MempoolOrdering,
+
+    #[arg(long = "mempool-random-seed")]
+    #[arg(env = "MEMPOOL_RANDOM_SEED")]
+    #[arg(value_name = "SEED")]
+    #[arg(help = "Specify the deterministic seed for random mempool ordering; defaults to the \
+                  Devnet seed;")]
+    mempool_random_seed: Option<u64>,
+
+    #[arg(long = "mempool-max-transactions-per-block")]
+    #[arg(env = "MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK")]
+    #[arg(value_name = "NUMBER")]
+    #[arg(default_value = "500")]
+    #[arg(help = "Specify the maximum number of transactions in a block built from the mempool;")]
+    mempool_max_transactions_per_block: NonZeroUsize,
 
     #[arg(long = "state-archive-capacity")]
     #[arg(env = "STATE_ARCHIVE_CAPACITY")]
@@ -300,11 +326,13 @@ impl Args {
             None => self.account_class_choice.get_class_wrapper()?,
         };
 
+        let seed = match self.seed {
+            Some(seed) => seed,
+            None => generate_u32_random_number(),
+        };
+
         let starknet_config = StarknetConfig {
-            seed: match self.seed {
-                Some(seed) => seed,
-                None => generate_u32_random_number(),
-            },
+            seed,
             total_accounts: self.accounts_count,
             account_contract_class: account_class_wrapper.contract_class,
             account_contract_class_hash: account_class_wrapper.class_hash,
@@ -320,6 +348,11 @@ impl Args {
             dump_on: self.dump_on,
             dump_path: self.dump_path.clone(),
             block_generation_on: self.block_generation_on,
+            mempool_config: MempoolConfig {
+                ordering: self.mempool_ordering.clone(),
+                random_seed: self.mempool_random_seed.unwrap_or(u64::from(seed)),
+                max_transactions_per_block: self.mempool_max_transactions_per_block.get(),
+            },
             lite_mode: self.lite_mode,
             proof_mode: self.proof_mode,
             state_archive: self.state_archive,
@@ -397,6 +430,12 @@ impl Args {
     }
 }
 
+fn parse_block_generation_on(value: &str) -> Result<BlockGenerationOn, String> {
+    value.parse().map_err(|_| {
+        "expected transaction, demand, mempool, or a positive integer interval".to_string()
+    })
+}
+
 struct RequestResponseLogging {
     log_request: bool,
     log_response: bool,
@@ -416,8 +455,9 @@ impl RequestResponseLogging {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
     use starknet_core::constants::CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH;
+    use starknet_core::starknet::mempool::MempoolOrdering;
     use starknet_core::starknet::starknet_config::{
         BlockGenerationOn, DumpOn, StateArchiveCapacity,
     };
@@ -671,6 +711,9 @@ mod tests {
             ("--fork-network", "FORK_NETWORK", "http://dummy.com"),
             ("--fork-block", "FORK_BLOCK", "42"),
             ("--block-generation-on", "BLOCK_GENERATION_ON", "demand"),
+            ("--mempool-ordering", "MEMPOOL_ORDERING", "random"),
+            ("--mempool-random-seed", "MEMPOOL_RANDOM_SEED", "44"),
+            ("--mempool-max-transactions-per-block", "MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK", "321"),
         ];
 
         let mut cli_args = vec!["--"];
@@ -723,10 +766,12 @@ mod tests {
         let mut config_via_env =
             serde_json::to_value(Args::parse_from(["--"]).to_config().unwrap()).unwrap();
 
-        // Removing seed as it is generated randomly - it would make the compared objects different.
-        // to_config returns two config parts, so using index 0 to address starknet_config.
+        // Remove generated values that differ between the two independent configurations.
+        // to_config returns two config parts, so index 0 addresses starknet_config.
         config_via_cli[0]["seed"].take();
+        config_via_cli[0]["mempool_config"]["random_seed"].take();
         config_via_env[0]["seed"].take();
+        config_via_env[0]["mempool_config"]["random_seed"].take();
 
         assert_eq!(config_via_cli, config_via_env);
 
@@ -764,6 +809,88 @@ mod tests {
             Ok(args) => assert_eq!(args.block_generation_on, BlockGenerationOn::Transaction),
             Err(e) => panic!("Should have passed; got: {e}"),
         }
+
+        match Args::try_parse_from(["--", "--block-generation-on", "mempool"]) {
+            Ok(args) => assert_eq!(args.block_generation_on, BlockGenerationOn::Mempool),
+            Err(e) => panic!("Should have passed; got: {e}"),
+        }
+    }
+
+    #[test]
+    fn interval_mode_is_documented_as_supported() {
+        let help = Args::command().render_long_help().to_string();
+        assert!(help.contains("<INTERVAL> - transactions are pre-confirmed immediately"));
+        assert!(!help.contains("<INTERVAL> - deprecated"));
+    }
+
+    #[test]
+    fn rejects_malformed_block_generation_values() {
+        let err = Args::try_parse_from(["--", "--block-generation-on", "mempool:10"])
+            .expect_err("malformed block-generation-on values must be rejected");
+        let message = err.to_string();
+        assert!(
+            message
+                .contains("expected transaction, demand, mempool, or a positive integer interval"),
+            "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn mempool_configuration_defaults_to_fifo_and_devnet_seed() {
+        let (config, _) = Args::parse_from(["--", "--seed", "123"]).to_config().unwrap();
+
+        assert_eq!(config.mempool_config.ordering, MempoolOrdering::fifo());
+        assert_eq!(config.mempool_config.random_seed, 123);
+        assert_eq!(config.mempool_config.max_transactions_per_block, 500);
+    }
+
+    #[test]
+    fn parses_explicit_mempool_configuration() {
+        let (config, _) = Args::parse_from([
+            "--",
+            "--block-generation-on",
+            "mempool",
+            "--mempool-ordering",
+            "starknet",
+            "--mempool-random-seed",
+            "987",
+            "--mempool-max-transactions-per-block",
+            "25",
+        ])
+        .to_config()
+        .unwrap();
+
+        assert_eq!(config.block_generation_on, BlockGenerationOn::Mempool);
+        assert_eq!(config.mempool_config.ordering, MempoolOrdering::starknet());
+        assert_eq!(config.mempool_config.random_seed, 987);
+        assert_eq!(config.mempool_config.max_transactions_per_block, 25);
+    }
+
+    #[test]
+    fn parses_extensible_mempool_policy_name() {
+        let (config, _) = Args::parse_from([
+            "--",
+            "--block-generation-on",
+            "mempool",
+            "--mempool-ordering",
+            "my-policy",
+        ])
+        .to_config()
+        .unwrap();
+
+        assert_eq!(config.mempool_config.ordering.as_str(), "my-policy");
+    }
+
+    #[test]
+    fn rejects_invalid_mempool_policy_name() {
+        assert!(Args::try_parse_from(["--", "--mempool-ordering", "Invalid Policy"]).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_mempool_block_capacity() {
+        assert!(
+            Args::try_parse_from(["--", "--mempool-max-transactions-per-block", "0",]).is_err()
+        );
     }
 
     #[test]

@@ -42,6 +42,8 @@ pub enum ApiError {
     TooManyKeysInFilter,
     #[error("Class already declared")]
     ClassAlreadyDeclared,
+    #[error("Duplicate transaction")]
+    DuplicateTransaction,
     #[error("Invalid contract class")]
     InvalidContractClass,
     #[error("{msg}")]
@@ -161,6 +163,11 @@ impl ApiError {
                 message: error_message.into(),
                 data: None,
             },
+            ApiError::DuplicateTransaction => RpcError {
+                code: crate::rpc_core::error::ErrorCode::ServerError(59),
+                message: error_message.into(),
+                data: None,
+            },
             ApiError::InvalidContractClass => RpcError {
                 code: crate::rpc_core::error::ErrorCode::ServerError(50),
                 message: error_message.into(),
@@ -236,6 +243,19 @@ impl ApiError {
 
                 api_err.api_error_to_rpc_error()
             }
+            ApiError::StarknetDevnetError(starknet_core::error::Error::DuplicateTransaction {
+                ..
+            }) => ApiError::DuplicateTransaction.api_error_to_rpc_error(),
+            ApiError::StarknetDevnetError(starknet_core::error::Error::NonceConflict {
+                address,
+                nonce,
+            }) => ApiError::UnsupportedAction {
+                msg: format!(
+                    "A transaction for account {address:#x} with nonce {nonce} is already in the \
+                     mempool"
+                ),
+            }
+            .api_error_to_rpc_error(),
             ApiError::StarknetDevnetError(error) => RpcError {
                 code: crate::rpc_core::error::ErrorCode::ServerError(WILDCARD_RPC_ERROR_CODE),
                 message: anyhow::format_err!(error).root_cause().to_string().into(),
@@ -328,6 +348,7 @@ impl ApiError {
             | Self::InvalidContinuationToken
             | Self::TooManyKeysInFilter
             | Self::ClassAlreadyDeclared
+            | Self::DuplicateTransaction
             | Self::InvalidContractClass
             | Self::UnsupportedAction { .. }
             | Self::InvalidTransactionNonce { .. }
@@ -383,6 +404,27 @@ mod tests {
             29,
             "Transaction hash not found",
         );
+    }
+
+    #[test]
+    fn duplicate_transaction_error() {
+        error_expected_code_and_message(
+            ApiError::DuplicateTransaction,
+            59,
+            "Duplicate transaction",
+        );
+    }
+
+    #[test]
+    fn nonce_conflict_is_an_invalid_request_not_a_duplicate_hash() {
+        let error = ApiError::StarknetDevnetError(starknet_core::error::Error::NonceConflict {
+            address: ContractAddress::zero(),
+            nonce: Nonce(Felt::ONE),
+        })
+        .api_error_to_rpc_error();
+
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert!(error.message.contains("already in the mempool"));
     }
 
     #[test]
