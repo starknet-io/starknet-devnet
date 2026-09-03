@@ -14,7 +14,7 @@ for workspace_member in $(cargo get --delimiter " " workspace.members); do
 
     # if local version not present on crates.io, publish it
     crates_io_url="https://crates.io/api/v1/crates/$package_name"
-    if ! curl -sSLf "$crates_io_url" | jq -r '.versions[].num' | grep -q "^$package_version$"; then
+    if ! curl -sSLf "$crates_io_url" -H "user-agent: starknet-io/starknet-devnet" | jq -r '.versions[].num' | grep -q "^$package_version$"; then
         echo "The local version of $package_name is $package_version, which is not present on crates.io"
 
         cargo login "$CRATES_IO_API_KEY"
