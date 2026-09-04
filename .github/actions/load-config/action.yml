@@ -19,10 +19,10 @@ outputs:
     value: 'docker.io'
   docker_namespace:
     description: 'Docker namespace to use'
-    value: 'shardlabs'
+    value: 'starknetfoundation'
   docker_namespace_secondary:
     description: 'Secondary Docker namespace to push to'
-    value: 'starknetfoundation'
+    value: 'shardlabs'
   image_name:
     description: 'Docker image name to use'
     value: 'starknet-devnet-rs'
