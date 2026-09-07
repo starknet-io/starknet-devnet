@@ -66,16 +66,25 @@ mod mempool_model_tests {
             PreconfirmTransactionsRequest {
                 max_transactions: Some(1),
                 transaction_hashes: Some(vec![Felt::ONE]),
+                ..Default::default()
             }
             .validate()
             .is_err()
         );
         assert!(
-            PreconfirmTransactionsRequest { max_transactions: Some(0), transaction_hashes: None }
+            PreconfirmTransactionsRequest { max_transactions: Some(0), ..Default::default() }
                 .validate()
                 .is_err()
         );
         assert!(PreconfirmTransactionsRequest::default().validate().is_ok());
+        assert!(
+            PreconfirmTransactionsRequest {
+                swept_stale_hashes: Some(vec![Felt::ONE]),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
@@ -498,10 +507,16 @@ pub struct RemoveFromMempoolRequest {
 pub struct PreconfirmTransactionsRequest {
     pub max_transactions: Option<usize>,
     pub transaction_hashes: Option<Vec<TransactionHash>>,
+    /// Optional journal metadata; every hash must be received, stale, and absent from selections.
+    #[serde(default)]
+    pub swept_stale_hashes: Option<Vec<TransactionHash>>,
 }
 
 impl PreconfirmTransactionsRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.swept_stale_hashes.is_some() && self.transaction_hashes.is_none() {
+            return Err("swept_stale_hashes requires transaction_hashes");
+        }
         if self.max_transactions.is_some() && self.transaction_hashes.is_some() {
             return Err("max_transactions and transaction_hashes are mutually exclusive");
         }
@@ -580,6 +595,9 @@ pub struct PreconfirmTransactionsResponse {
     pub rejected: Vec<MempoolProcessingFailure>,
     pub blocked: Vec<MempoolProcessingFailure>,
     pub block_full: bool,
+    /// Internal journal data, omitted from RPC responses.
+    #[serde(skip)]
+    pub swept_stale_hashes: Vec<TransactionHash>,
 }
 
 #[derive(Clone, Debug, Serialize)]

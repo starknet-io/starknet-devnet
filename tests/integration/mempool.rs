@@ -30,7 +30,7 @@ use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
     PREDEPLOYED_ACCOUNT_ADDRESS, RPC_PATH, STRK_ERC20_CONTRACT_ADDRESS,
 };
-use crate::common::utils::FeeUnit;
+use crate::common::utils::{FeeUnit, UniqueAutoDeletableFile, send_ctrl_c_signal_and_wait};
 
 /// Returns the ERC20 transfer selector: `transfer(to: ContractAddress, amount: u256)`.
 fn transfer_selector() -> Felt {
@@ -708,6 +708,141 @@ async fn starknet_policy_replenishes_account_heads_between_selection_rounds() {
 }
 
 #[tokio::test]
+async fn review_below_threshold_head_does_not_strand_successor() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "starknet",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    let a0 = submit_transfer_in_mempool(&a, Felt::ONE, 1, 20, Felt::ZERO).await;
+    let a1 = submit_transfer_in_mempool(&a, Felt::TWO, 1, 20, Felt::ONE).await;
+    let b0 = submit_transfer_with_l2_gas_price(&b, Felt::THREE, 1, Felt::ZERO, 1).await;
+
+    let result = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let pre_confirmed: Vec<String> = result["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        pre_confirmed,
+        vec![format!("{a0:#x}"), format!("{a1:#x}")],
+        "A1 must be preconfirmed after A0; B0 stays received: {result}"
+    );
+    assert_eq!(result["block_full"], false);
+    assert_phase(&devnet, a0, "PRE_CONFIRMED").await;
+    assert_phase(&devnet, a1, "PRE_CONFIRMED").await;
+    assert_phase(&devnet, b0, "RECEIVED").await;
+}
+
+#[tokio::test]
+async fn review_create_block_includes_qualifying_successor_with_below_threshold_peer() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "starknet",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    let a0 = submit_transfer_in_mempool(&a, Felt::ONE, 1, 20, Felt::ZERO).await;
+    let a1 = submit_transfer_in_mempool(&a, Felt::TWO, 1, 20, Felt::ONE).await;
+    let b0 = submit_transfer_with_l2_gas_price(&b, Felt::THREE, 1, Felt::ZERO, 1).await;
+
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+    let block = devnet
+        .send_custom_rpc("starknet_getBlockWithTxHashes", json!({"block_id": "latest"}))
+        .await
+        .unwrap();
+    let txs: Vec<String> = block["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(txs, vec![format!("{a0:#x}"), format!("{a1:#x}")], "{block}");
+    assert_phase(&devnet, b0, "RECEIVED").await;
+}
+
+#[tokio::test]
+async fn review_rejection_does_not_consume_block_capacity() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-max-transactions-per-block",
+        "1",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    submit_transfer_with_l2_gas_price(&a, Felt::ONE, 1, Felt::ZERO, 1).await;
+    let good = submit_transfer_in_mempool(&b, Felt::TWO, 1, 0, Felt::ZERO).await;
+
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+    let block = devnet
+        .send_custom_rpc("starknet_getBlockWithTxHashes", json!({"block_id": "latest"}))
+        .await
+        .unwrap();
+    assert_eq!(block["transactions"], json!([format!("{good:#x}")]), "{block}");
+}
+
+#[tokio::test]
+async fn review_forced_rejection_does_not_consume_block_capacity() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-max-transactions-per-block",
+        "1",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    let a_failed = submit_transfer_with_l2_gas_price(&a, Felt::ONE, 1, Felt::ZERO, 1).await;
+    let good = submit_transfer_in_mempool(&b, Felt::TWO, 1, 0, Felt::ZERO).await;
+
+    let result = devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{a_failed:#x}"), format!("{good:#x}")] }),
+        )
+        .await
+        .unwrap();
+    let pre_confirmed: Vec<String> = result["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(pre_confirmed, vec![format!("{good:#x}")], "good must reach the block: {result}");
+    let rejected: Vec<String> = result["rejected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(rejected, vec![format!("{a_failed:#x}")], "{result}");
+    assert_eq!(result["block_full"], true);
+}
+
+#[tokio::test]
 async fn unregistered_ordering_policy_is_rejected() {
     let devnet = spawn_mempool_devnet().await;
     let error = devnet
@@ -1112,4 +1247,531 @@ async fn starknet_pipeline_received_preconfirmed_sealed() {
     );
     // Policy persists across seals.
     assert_eq!(snapshot["config"]["ordering"], "starknet");
+}
+
+#[tokio::test]
+async fn review_stale_eviction_survives_dump_load() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-replay");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+
+    submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+
+    let stale = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ZERO).await;
+    assert_phase(&devnet, stale, "RECEIVED").await;
+
+    let result = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    assert_eq!(
+        result["rejected"][0]["transaction_hash"],
+        json!(format!("{stale:#x}")),
+        "stale tx must be reported as rejected with the correct hash: {result}"
+    );
+    let reason = result["rejected"][0]["reason"].as_str().unwrap_or_default();
+    assert!(reason.contains("stale"), "rejection reason should mention 'stale': {result}");
+
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(
+        before["transactions"].as_array().unwrap().len(),
+        0,
+        "stale sweep must clear the pool: {before}"
+    );
+
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+
+    let after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(
+        before["transactions"], after["transactions"],
+        "replayed events must leave the mempool empty: {events}"
+    );
+    assert_eq!(after["pre_confirmed_transaction_hashes"], json!([]), "replayed events: {events}");
+}
+
+#[tokio::test]
+async fn review_stale_eviction_survives_dump_load_after_explicit_seal() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-replay-explicit-seal");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+
+    let a0 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+
+    devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{a0:#x}")] }),
+        )
+        .await
+        .unwrap();
+    devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
+
+    let stale = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ZERO).await;
+    assert_phase(&devnet, stale, "RECEIVED").await;
+
+    devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+
+    let after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["transactions"], after["transactions"], "replayed events: {events}");
+    assert_eq!(
+        after["transactions"].as_array().unwrap().len(),
+        0,
+        "stale tx must not resurrect after explicit-seal setup: {after}"
+    );
+}
+
+#[tokio::test]
+async fn review_stale_eviction_with_successful_sibling_replays_cleanly() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-mixed");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    submit_transfer_in_mempool(&a, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+
+    let stale = submit_transfer_in_mempool(&a, Felt::TWO, 1, 0, Felt::ZERO).await;
+    let good = submit_transfer_in_mempool(&b, Felt::THREE, 1, 0, Felt::ZERO).await;
+
+    let result = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let pre_confirmed: Vec<String> = result["pre_confirmed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let rejected: Vec<String> = result["rejected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(pre_confirmed, vec![format!("{good:#x}")], "{result}");
+    assert_eq!(rejected, vec![format!("{stale:#x}")], "{result}");
+
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+
+    let after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["transactions"], after["transactions"], "replayed events: {events}");
+    let stale_str = format!("{stale:#x}");
+    let txs: Vec<String> = after["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(!txs.contains(&stale_str), "stale must not resurrect: {after}");
+}
+
+#[tokio::test]
+async fn review_stale_eviction_with_full_proposal_replays_cleanly() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-full-proposal");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-max-transactions-per-block",
+        "1",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+
+    submit_transfer_in_mempool(&a, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+
+    submit_transfer_in_mempool(&b, Felt::THREE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let stale = submit_transfer_in_mempool(&a, Felt::TWO, 1, 0, Felt::ZERO).await;
+
+    let result = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    assert_eq!(result["block_full"], true, "first proposal must be full: {result}");
+    let stale_str = format!("{stale:#x}");
+    let rejected: Vec<String> = result["rejected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap().to_string())
+        .collect();
+    assert!(rejected.contains(&stale_str), "stale must be swept even on a full proposal: {result}");
+
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+
+    let after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["transactions"], after["transactions"], "replayed events: {events}");
+    let txs: Vec<String> = after["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(!txs.contains(&stale_str), "stale must not resurrect on full-proposal replay: {after}");
+}
+
+#[tokio::test]
+async fn review_forced_stale_hash_is_normal_rejection_and_replayable() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-forced");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+
+    submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+
+    let stale = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ZERO).await;
+
+    let result = devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{stale:#x}")] }),
+        )
+        .await
+        .unwrap();
+    assert!(
+        result["pre_confirmed"].as_array().unwrap().is_empty(),
+        "stale must not be pre_confirmed: {result}"
+    );
+    let rejected: Vec<String> = result["rejected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(rejected, vec![format!("{stale:#x}")], "{result}");
+
+    let resp = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(resp["transactions"].as_array().unwrap().len(), 0, "{resp}");
+
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+    let after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["transactions"], after["transactions"], "replayed events: {events}");
+}
+
+#[tokio::test]
+async fn review_forced_preflight_rejects_invalid_hashes_without_mutation() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+
+    let h = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    assert_phase(&devnet, h, "RECEIVED").await;
+
+    devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{h:#x}")] }),
+        )
+        .await
+        .unwrap();
+    assert_phase(&devnet, h, "PRE_CONFIRMED").await;
+
+    let err = devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{h:#x}")] }),
+        )
+        .await
+        .unwrap_err();
+    let err_msg = err.message.to_lowercase();
+    assert!(
+        err_msg.contains("pre_confirmed")
+            || err_msg.contains("not in received")
+            || err_msg.contains("not received")
+            || err_msg.contains("ineligible"),
+        "expected preflight rejection of non-received hash, got: {err:?}"
+    );
+    assert_phase(&devnet, h, "PRE_CONFIRMED").await;
+
+    let bogus = Felt::from(0xdeadbeef_u64);
+    let err = devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({ "transaction_hashes": [format!("{bogus:#x}")] }),
+        )
+        .await
+        .unwrap_err();
+    let err_msg = err.message.to_lowercase();
+    assert!(
+        err_msg.contains("not found")
+            || err_msg.contains("unknown")
+            || err_msg.contains("ineligible")
+            || err_msg.contains("no transaction"),
+        "expected preflight rejection of missing hash, got: {err:?}"
+    );
+    assert_phase(&devnet, h, "PRE_CONFIRMED").await;
+}
+
+#[tokio::test]
+async fn review_random_policy_counter_aligned_after_load() {
+    let dump_file = UniqueAutoDeletableFile::new("review-random-policy-counter");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "random",
+        "--mempool-max-transactions-per-block",
+        "100",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+    let c = nth_predeployed_account(&devnet, &client, 2).await;
+
+    let seed = 12345_u64;
+    devnet
+        .send_custom_rpc("devnet_setMempoolConfig", json!({ "random_seed": seed }))
+        .await
+        .unwrap();
+
+    let initial = submit_transfer_in_mempool(&a, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({"transaction_hashes": [format!("{initial:#x}")]}),
+        )
+        .await
+        .unwrap();
+    devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
+    let stale = submit_transfer_in_mempool(&a, Felt::TWO, 1, 0, Felt::ZERO).await;
+    let ha = submit_transfer_in_mempool(&a, Felt::ONE, 1, 0, Felt::ONE).await;
+    let hb = submit_transfer_in_mempool(&b, Felt::from(2u64), 1, 0, Felt::ZERO).await;
+    let hc = submit_transfer_in_mempool(&c, Felt::from(3u64), 1, 0, Felt::ZERO).await;
+
+    let _ = devnet
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({ "max_transactions": 1 }))
+        .await
+        .unwrap();
+    let snapshot_before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let pre_confirmed_before: Vec<String> = snapshot_before["pre_confirmed_transaction_hashes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(pre_confirmed_before.len(), 1, "{snapshot_before}");
+    let all_submitted: std::collections::HashSet<String> =
+        [format!("{ha:#x}"), format!("{hb:#x}"), format!("{hc:#x}")].into_iter().collect();
+    assert!(
+        all_submitted.contains(&pre_confirmed_before[0]),
+        "pre-confirmed hash must be one of the submitted txs: {snapshot_before}"
+    );
+
+    let events = devnet.send_custom_rpc("devnet_dump", json!({ "inline": true })).await.unwrap();
+    let next_before = devnet
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({"max_transactions": 1}))
+        .await
+        .unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "events": events })).await.unwrap();
+
+    let snapshot_after = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let pre_confirmed_after: Vec<String> = snapshot_after["pre_confirmed_transaction_hashes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        pre_confirmed_after, pre_confirmed_before,
+        "replayed proposal must match uninterrupted selection: {snapshot_after}"
+    );
+    let mut total_present: std::collections::HashSet<String> = snapshot_after["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap().to_string())
+        .collect();
+    total_present.extend(pre_confirmed_after.iter().cloned());
+    assert_eq!(
+        total_present, all_submitted,
+        "all submitted txs must be visible after replay: {snapshot_after}"
+    );
+
+    assert!(!total_present.contains(&format!("{stale:#x}")));
+    let next_after = devnet
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({"max_transactions": 1}))
+        .await
+        .unwrap();
+    assert_eq!(next_before["pre_confirmed"], next_after["pre_confirmed"]);
+
+    let _ = devnet
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({ "max_transactions": 100 }))
+        .await
+        .unwrap();
+    let final_snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let mut final_pc: Vec<String> = final_snapshot["pre_confirmed_transaction_hashes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    final_pc.sort();
+    let mut expected = vec![format!("{ha:#x}"), format!("{hb:#x}"), format!("{hc:#x}")];
+    expected.sort();
+    assert_eq!(final_pc, expected, "drain must cover all submitted txs");
+}
+
+#[tokio::test]
+async fn review_stale_eviction_survives_file_based_dump_load() {
+    let dump_file = UniqueAutoDeletableFile::new("review-stale-eviction-file-dump");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+
+    submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+    let stale = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+
+    send_ctrl_c_signal_and_wait(&devnet.process).await;
+
+    let loaded = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let after = loaded.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+
+    assert_eq!(
+        before["transactions"], after["transactions"],
+        "file-based replay must match inline replay"
+    );
+    let txs: Vec<String> = after["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["transaction_hash"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        !txs.contains(&format!("{stale:#x}")),
+        "stale must not resurrect via file-based replay: {after}"
+    );
+}
+
+#[tokio::test]
+async fn stale_sweep_validation_is_atomic_and_preserves_proposal_entries() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let a = first_predeployed_account(&devnet, &client).await;
+    let b = nth_predeployed_account(&devnet, &client, 1).await;
+    let c = nth_predeployed_account(&devnet, &client, 2).await;
+    submit_transfer_in_mempool(&a, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+    let preconfirmed = submit_transfer_in_mempool(&b, Felt::ONE, 1, 0, Felt::ZERO).await;
+    devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    let stale = submit_transfer_in_mempool(&a, Felt::TWO, 1, 0, Felt::ZERO).await;
+    let current = submit_transfer_in_mempool(&c, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+
+    for invalid in [preconfirmed, current, Felt::from(0xdeadbeef_u64), stale] {
+        devnet
+            .send_custom_rpc(
+                "devnet_preconfirmTransactions",
+                json!({
+                    "transaction_hashes": [],
+                    "swept_stale_hashes": [format!("{stale:#x}"), format!("{invalid:#x}")],
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(before, devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap());
+    }
+    devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({
+                "transaction_hashes": [format!("{stale:#x}")],
+                "swept_stale_hashes": [format!("{stale:#x}")],
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(before, devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap());
+
+    let result = devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({
+                "transaction_hashes": [], "swept_stale_hashes": [format!("{stale:#x}")],
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["rejected"][0]["transaction_hash"], json!(format!("{stale:#x}")));
+    assert_phase(&devnet, preconfirmed, "PRE_CONFIRMED").await;
+    devnet.send_custom_rpc("devnet_abortPreconfirmedBlock", json!({})).await.unwrap();
+    assert_phase(&devnet, preconfirmed, "RECEIVED").await;
+    assert_phase(&devnet, current, "RECEIVED").await;
 }

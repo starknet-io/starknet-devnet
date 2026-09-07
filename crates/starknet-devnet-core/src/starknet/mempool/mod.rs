@@ -16,8 +16,8 @@ pub use config::{MempoolConfig, MempoolConfigUpdate, MempoolOrdering};
 pub use entry::{MempoolEntry, MempoolLane, MempoolPhase};
 pub(crate) use entry::{PendingDeclaration, PreparedTransaction};
 pub use ordering::{
-    EligibleTransactions, OrderingPolicyRegistry, SelectionContext, TransactionOrderingPolicy,
-    starknet_comparator,
+    EligibleTransactions, OrderingPolicyRegistry, PolicySelection, SelectionContext,
+    TransactionOrderingPolicy, starknet_comparator,
 };
 
 /// Transactions already appended to the live pre-confirmed block and deterministic selection
@@ -60,10 +60,17 @@ impl OpenProposal {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ForcedHashSelection {
+    pub transaction_hashes: Vec<TransactionHash>,
+    /// Validated stale removals that do not count as selection attempts.
+    pub swept_stale_hashes: Vec<TransactionHash>,
+}
+
 #[derive(Clone, Debug)]
 pub enum MempoolSelection {
     Policy { max_transactions: Option<usize> },
-    Hashes(Vec<TransactionHash>),
+    Hashes(ForcedHashSelection),
 }
 
 impl Default for MempoolSelection {
@@ -85,6 +92,9 @@ pub struct BuildOutcome {
     pub rejected: Vec<BuildFailure>,
     pub blocked: Vec<BuildFailure>,
     pub block_full: bool,
+    /// Journaled separately from selections to preserve the proposal selection counter.
+    #[serde(skip)]
+    pub swept_stale_hashes: Vec<TransactionHash>,
 }
 
 impl BuildOutcome {
@@ -229,28 +239,33 @@ impl Mempool {
         block_number: u64,
         current_l2_gas_price: u128,
     ) -> Option<TransactionHash> {
-        self.select_configured_policy(
-            &self.eligible_transactions(eligible),
-            &SelectionContext {
-                block_number,
-                current_l2_gas_price,
-                proposal_selection_counter: self.proposal.selection_counter(),
-                random_seed: self.config.random_seed,
-            },
-        )
-        .unwrap()
+        match self
+            .select_configured_policy(
+                &self.eligible_transactions(eligible),
+                &SelectionContext {
+                    block_number,
+                    current_l2_gas_price,
+                    proposal_selection_counter: self.proposal.selection_counter(),
+                    random_seed: self.config.random_seed,
+                },
+            )
+            .unwrap()
+        {
+            PolicySelection::Transaction(hash) => Some(hash),
+            PolicySelection::Stop | PolicySelection::RoundExhausted => None,
+        }
     }
 
     pub(crate) fn select_configured_policy(
         &self,
         eligible: &EligibleTransactions<'_>,
         context: &SelectionContext,
-    ) -> DevnetResult<Option<TransactionHash>> {
+    ) -> DevnetResult<PolicySelection> {
         let policy = self
             .ordering_policies
             .resolve(&self.config.ordering)
             .ok_or_else(|| unknown_policy_error(&self.config.ordering, &self.ordering_policies))?;
-        Ok(policy.select(eligible, context))
+        Ok(policy.select_in_round(eligible, context))
     }
 
     pub(crate) fn eligible_transactions<'a>(

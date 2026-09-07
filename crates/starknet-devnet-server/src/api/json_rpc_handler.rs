@@ -185,11 +185,15 @@ fn canonical_dump_event(
     };
 
     let mut event = original_call.clone();
+    // Sweeps must replay without advancing the selection counter.
     event.params = RequestParams::Object(
-        serde_json::json!({ "transaction_hashes": &result.selected })
-            .as_object()
-            .cloned()
-            .unwrap_or_default(),
+        serde_json::json!({
+            "transaction_hashes": &result.selected,
+            "swept_stale_hashes": &result.swept_stale_hashes,
+        })
+        .as_object()
+        .cloned()
+        .unwrap_or_default(),
     );
     event
 }

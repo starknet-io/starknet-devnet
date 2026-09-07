@@ -62,6 +62,8 @@ For deterministic tests, supply an ordered list of hashes instead. Forced select
 
 The response separates `pre_confirmed`, `rejected`, and `blocked` hashes. Blocked transactions remain received; rejected transactions are removed; reverted executions are accepted and pre-confirmed with reverted receipts.
 
+`max_transactions` limits processing attempts, including rejected transactions. Block capacity counts only pre-confirmed transactions. A filtered-out selection round can refresh to include newly eligible successors without selecting below-threshold transactions.
+
 Eligible system-lane transactions are processed FIFO before user ordering policies. Under `starknet` ordering, a user transaction remains received while its maximum L2 gas price is below the active proposal's L2 gas price. `devnet_setGasPrice` with `generate_block: false` configures the next proposal and does not change ordering or execution prices midway through the open proposal; seal the current proposal to activate the new price.
 
 ## Remove received transactions
@@ -121,3 +123,5 @@ Remove every received transaction with `devnet_clearMempool`. Neither method rem
 ## Restarting, dumping, and loading
 
 Restarting clears the entire mempool and open proposal. Dumping records admission and each exact selected-hash sequence, configuration update, removal, clear, seal, and abort action so loading reproduces deterministic ordering without relying on timing or current policy defaults. Use the same startup account, class, block-generation, and mempool configuration when loading events into another Devnet instance.
+
+Preconfirmation events also record stale-nonce removals separately from selection attempts, including removals made when the proposal is already full. Replay validates these removals before changing the pool.

@@ -516,6 +516,18 @@
               "$ref": "#/components/schemas/FELT"
             }
           }
+        },
+        {
+          "name": "swept_stale_hashes",
+          "description": "Optional replay metadata requiring transaction_hashes. Each hash must identify a stale RECEIVED transaction, must be unique, and must not also appear in transaction_hashes. Removals do not count as selection attempts and apply even when the proposal is full.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/FELT"
+            }
+          }
         }
       ],
       "result": {

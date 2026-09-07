@@ -1,5 +1,6 @@
 use starknet_core::starknet::mempool::{
-    BuildFailure, MempoolConfig, MempoolConfigUpdate, MempoolPhase, MempoolSelection,
+    BuildFailure, ForcedHashSelection, MempoolConfig, MempoolConfigUpdate, MempoolPhase,
+    MempoolSelection,
 };
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
@@ -312,7 +313,10 @@ impl JsonRpcHandler {
         request.validate().map_err(|msg| ApiError::UnsupportedAction { msg: msg.into() })?;
 
         let selection = match request.transaction_hashes {
-            Some(hashes) => MempoolSelection::Hashes(hashes),
+            Some(hashes) => MempoolSelection::Hashes(ForcedHashSelection {
+                transaction_hashes: hashes,
+                swept_stale_hashes: request.swept_stale_hashes.unwrap_or_default(),
+            }),
             None => MempoolSelection::Policy { max_transactions: request.max_transactions },
         };
         let outcome = self.api.starknet.lock().await.preconfirm_transactions(selection)?;
@@ -322,6 +326,7 @@ impl JsonRpcHandler {
             rejected: outcome.rejected.into_iter().map(Into::into).collect(),
             blocked: outcome.blocked.into_iter().map(Into::into).collect(),
             block_full: outcome.block_full,
+            swept_stale_hashes: outcome.swept_stale_hashes,
         })
         .into())
     }

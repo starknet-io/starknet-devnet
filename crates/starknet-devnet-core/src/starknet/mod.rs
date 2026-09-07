@@ -366,6 +366,7 @@ impl Starknet {
         for (transaction_hash, reason) in stale {
             self.mempool.remove_entry(&transaction_hash);
             outcome.rejected.push(mempool::BuildFailure { transaction_hash, reason });
+            outcome.swept_stale_hashes.push(transaction_hash);
         }
         Ok(())
     }

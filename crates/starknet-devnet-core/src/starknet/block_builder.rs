@@ -5,8 +5,8 @@ use starknet_rs_core::types::Felt;
 use starknet_types::felt::TransactionHash;
 
 use super::mempool::{
-    BuildFailure, BuildOutcome, MempoolLane, MempoolPhase, MempoolSelection, SelectionContext,
-    TransactionOrderingPolicy,
+    BuildFailure, BuildOutcome, ForcedHashSelection, MempoolLane, MempoolPhase, MempoolSelection,
+    PolicySelection, SelectionContext, TransactionOrderingPolicy,
 };
 use super::{Starknet, TransactionEligibility};
 use crate::error::{DevnetResult, Error};
@@ -17,16 +17,20 @@ const POLICY_SELECTION_ROUND_SIZE: usize = 100;
 struct PolicySelectionRound {
     user_hashes: Vec<TransactionHash>,
     selections: usize,
+    exhausted: bool,
 }
 
 impl PolicySelectionRound {
     fn should_refresh(&self) -> bool {
-        self.user_hashes.is_empty() || self.selections >= POLICY_SELECTION_ROUND_SIZE
+        self.user_hashes.is_empty()
+            || self.selections >= POLICY_SELECTION_ROUND_SIZE
+            || self.exhausted
     }
 
     fn refresh(&mut self, user_hashes: Vec<TransactionHash>) {
         self.user_hashes = user_hashes;
         self.selections = 0;
+        self.exhausted = false;
     }
 
     fn retain_eligible(&mut self, eligible_hashes: &[TransactionHash]) {
@@ -40,7 +44,12 @@ impl PolicySelectionRound {
         };
         self.user_hashes.remove(position);
         self.selections += 1;
+        self.exhausted = false;
         true
+    }
+
+    fn mark_exhausted(&mut self) {
+        self.exhausted = true;
     }
 }
 
@@ -70,7 +79,7 @@ impl<'a> BlockBuilder<'a> {
             MempoolSelection::Policy { max_transactions } => {
                 self.build_configured_policy_chunk(max_transactions)
             }
-            MempoolSelection::Hashes(hashes) => self.build_forced_chunk(hashes),
+            MempoolSelection::Hashes(forced) => self.build_forced_chunk(forced),
         }
     }
 
@@ -124,19 +133,28 @@ impl<'a> BlockBuilder<'a> {
         }
 
         let requested_limit = max_transactions.unwrap_or(usize::MAX);
-        let limit = requested_limit.min(self.starknet.mempool.remaining_capacity());
         let mut selection_round = PolicySelectionRound::default();
-        for _ in 0..limit {
+        let mut attempts: usize = 0;
+        while attempts < requested_limit {
             self.starknet.evict_stale_received_transactions(&mut outcome)?;
+            if self.starknet.mempool.remaining_capacity() == 0 {
+                break;
+            }
+
             let eligible_hashes = self.starknet.eligible_hashes()?;
             if let Some(system_hash) = self.oldest_eligible_system_hash(&eligible_hashes) {
                 self.process_selected(system_hash, &mut outcome)?;
+                attempts = attempts.saturating_add(1);
                 continue;
             }
 
             selection_round.retain_eligible(&eligible_hashes);
             if selection_round.should_refresh() {
-                selection_round.refresh(self.eligible_user_hashes(&eligible_hashes));
+                let new_view = self.eligible_user_hashes(&eligible_hashes);
+                if selection_round.exhausted && selection_round.user_hashes == new_view {
+                    break;
+                }
+                selection_round.refresh(new_view);
             }
 
             let selected = {
@@ -160,11 +178,18 @@ impl<'a> BlockBuilder<'a> {
                     random_seed: self.starknet.mempool.config().random_seed,
                 };
                 match policy {
-                    Some(policy) => policy.select(&eligible, &context),
+                    Some(policy) => policy.select_in_round(&eligible, &context),
                     None => self.starknet.mempool.select_configured_policy(&eligible, &context)?,
                 }
             };
-            let Some(hash) = selected else { break };
+            let hash = match selected {
+                PolicySelection::Transaction(hash) => hash,
+                PolicySelection::Stop => break,
+                PolicySelection::RoundExhausted => {
+                    selection_round.mark_exhausted();
+                    continue;
+                }
+            };
             if !selection_round.record_selection(hash) {
                 return Err(Error::UnsupportedAction {
                     msg: format!(
@@ -174,6 +199,7 @@ impl<'a> BlockBuilder<'a> {
                 });
             }
             self.process_selected(hash, &mut outcome)?;
+            attempts = attempts.saturating_add(1);
         }
 
         outcome.block_full = self.starknet.mempool.remaining_capacity() == 0;
@@ -204,16 +230,40 @@ impl<'a> BlockBuilder<'a> {
             .map(|(_, hash)| hash)
     }
 
-    fn build_forced_chunk(&mut self, hashes: Vec<TransactionHash>) -> DevnetResult<BuildOutcome> {
-        self.preflight_forced_hashes(&hashes)?;
+    fn build_forced_chunk(&mut self, forced: ForcedHashSelection) -> DevnetResult<BuildOutcome> {
+        let ForcedHashSelection { transaction_hashes, swept_stale_hashes } = forced;
+        self.preflight_forced_hashes(&transaction_hashes)?;
+        self.preflight_forced_hashes(&swept_stale_hashes)?;
+        let mut swept_failures = Vec::with_capacity(swept_stale_hashes.len());
+        for hash in &swept_stale_hashes {
+            if transaction_hashes.contains(hash) {
+                return Err(Error::UnsupportedAction {
+                    msg: format!("Transaction {hash:#x} cannot be both selected and swept"),
+                });
+            }
+            match self.starknet.eligibility(*hash)? {
+                TransactionEligibility::Stale(reason) => {
+                    swept_failures.push(BuildFailure { transaction_hash: *hash, reason });
+                }
+                _ => {
+                    return Err(Error::UnsupportedAction {
+                        msg: format!("Transaction {hash:#x} is not stale"),
+                    });
+                }
+            }
+        }
         let mut outcome = BuildOutcome::default();
-        if self.starknet.mempool.remaining_capacity() == 0 {
-            outcome.block_full = true;
-            return Ok(outcome);
+
+        for failure in swept_failures {
+            self.starknet.mempool.remove_entry(&failure.transaction_hash);
+            outcome.swept_stale_hashes.push(failure.transaction_hash);
+            outcome.rejected.push(failure);
         }
 
-        let limit = hashes.len().min(self.starknet.mempool.remaining_capacity());
-        for hash in hashes.into_iter().take(limit) {
+        for hash in transaction_hashes {
+            if self.starknet.mempool.remaining_capacity() == 0 {
+                break;
+            }
             self.process_selected(hash, &mut outcome)?;
         }
         outcome.block_full = self.starknet.mempool.remaining_capacity() == 0;
@@ -355,6 +405,75 @@ mod tests {
 
         assert_eq!(round.user_hashes.len(), 1);
         assert!(round.should_refresh());
+    }
+
+    #[test]
+    fn custom_policy_none_stops_before_refreshing_successors() {
+        use starknet_rs_core::utils::get_selector_from_name;
+
+        use super::super::starknet_config::BlockGenerationOn;
+        use super::super::tests::setup_starknet_with_no_signature_check_account;
+        use crate::constants::ETH_ERC20_CONTRACT_ADDRESS;
+        use crate::traits::Deployed;
+        use crate::utils::test_utils::{resource_bounds_with_price_1, test_invoke_transaction_v3};
+
+        struct SelectWithPeer;
+        impl TransactionOrderingPolicy for SelectWithPeer {
+            fn select(
+                &self,
+                eligible: &EligibleTransactions<'_>,
+                _context: &SelectionContext,
+            ) -> Option<TransactionHash> {
+                if eligible.len() < 2 { None } else { eligible.hashes().first().copied() }
+            }
+        }
+
+        for configured in [false, true] {
+            let (mut starknet, account) =
+                setup_starknet_with_no_signature_check_account(1_000_000_000);
+            starknet.config.block_generation_on = BlockGenerationOn::Mempool;
+            if configured {
+                let mut config = starknet.mempool.config().clone();
+                config.ordering = "select-with-peer".parse().unwrap();
+                let mut registry = super::super::mempool::OrderingPolicyRegistry::default();
+                registry.register(config.ordering.clone(), SelectWithPeer);
+                starknet.mempool =
+                    super::super::mempool::Mempool::with_policy_registry(config, registry).unwrap();
+            }
+            let mut hashes = Vec::new();
+            for nonce in 0..2 {
+                let tx = test_invoke_transaction_v3(
+                    account.get_address(),
+                    starknet_types::contract_address::ContractAddress::new(
+                        ETH_ERC20_CONTRACT_ADDRESS,
+                    )
+                    .unwrap(),
+                    get_selector_from_name("balanceOf").unwrap(),
+                    &[account.get_address().into()],
+                    nonce,
+                    resource_bounds_with_price_1(1_000_000, 1_000_000, 100_000_000),
+                );
+                hashes.push(starknet.add_invoke_transaction(tx).unwrap());
+            }
+            let peer = Felt::from(0x999);
+            let mut prepared = PreparedTransaction::system(
+                TransactionWithHash::new(
+                    peer,
+                    Transaction::L1Handler(L1HandlerTransaction::default()),
+                ),
+                Default::default(),
+            );
+            prepared.lane = MempoolLane::User;
+            starknet.mempool.admit(prepared).unwrap();
+            let outcome = if configured {
+                starknet.preconfirm_transactions(MempoolSelection::default()).unwrap()
+            } else {
+                starknet.preconfirm_transactions_with_policy(None, &SelectWithPeer).unwrap()
+            };
+            assert_eq!(outcome.pre_confirmed, vec![hashes[0]]);
+            assert_eq!(starknet.mempool.get(&hashes[1]).unwrap().phase, MempoolPhase::Received);
+            assert_eq!(starknet.mempool.get(&peer).unwrap().phase, MempoolPhase::Received);
+        }
     }
 
     #[test]

@@ -66,17 +66,31 @@ pub struct SelectionContext {
     pub random_seed: u64,
 }
 
-/// Extension point for transaction ordering.
-///
-/// Implementations must be deterministic for the supplied transactions and context. The block
-/// builder rejects hashes outside `eligible`, preserving nonce, validation, and capacity rules for
-/// custom policies.
+/// A selection, a request for a fresh head snapshot, or an explicit end to processing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicySelection {
+    Transaction(TransactionHash),
+    RoundExhausted,
+    Stop,
+}
+
+/// Deterministic ordering over the supplied eligible view; pool mutation belongs to the builder.
 pub trait TransactionOrderingPolicy: Send + Sync {
+    /// Returning `None` stops the processing call.
     fn select(
         &self,
         eligible: &EligibleTransactions<'_>,
         context: &SelectionContext,
     ) -> Option<TransactionHash>;
+
+    /// Override to distinguish a filtered-out round from an explicit stop.
+    fn select_in_round(
+        &self,
+        eligible: &EligibleTransactions<'_>,
+        context: &SelectionContext,
+    ) -> PolicySelection {
+        self.select(eligible, context).map_or(PolicySelection::Stop, PolicySelection::Transaction)
+    }
 }
 
 #[derive(Debug)]
@@ -99,6 +113,15 @@ impl TransactionOrderingPolicy for FifoOrderingPolicy {
 struct StarknetOrderingPolicy;
 
 impl TransactionOrderingPolicy for StarknetOrderingPolicy {
+    fn select_in_round(
+        &self,
+        eligible: &EligibleTransactions<'_>,
+        context: &SelectionContext,
+    ) -> PolicySelection {
+        self.select(eligible, context)
+            .map_or(PolicySelection::RoundExhausted, PolicySelection::Transaction)
+    }
+
     fn select(
         &self,
         eligible: &EligibleTransactions<'_>,
