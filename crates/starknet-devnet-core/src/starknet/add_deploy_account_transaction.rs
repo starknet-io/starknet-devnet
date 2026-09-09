@@ -9,7 +9,6 @@ use starknet_types::rpc::transactions::{
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
 use crate::starknet::mempool::PreparedTransaction;
-use crate::state::CustomStateReader;
 
 pub fn add_deploy_account_transaction(
     starknet: &mut Starknet,
@@ -30,20 +29,12 @@ pub fn add_deploy_account_transaction(
 
     let address = executable_deploy_account_tx.contract_address.into();
 
-    let (class_hash, deploy_account_transaction) = match broadcasted_deploy_account_transaction {
-        BroadcastedDeployAccountTransaction::V3(ref v3) => {
-            let deploy_account_transaction =
-                Transaction::DeployAccount(DeployAccountTransaction::V3(Box::new(
-                    DeployAccountTransactionV3::new(v3, address),
-                )));
-
-            (v3.class_hash, deploy_account_transaction)
-        }
+    let deploy_account_transaction = match broadcasted_deploy_account_transaction {
+        BroadcastedDeployAccountTransaction::V3(ref v3) => Transaction::DeployAccount(
+            DeployAccountTransaction::V3(Box::new(DeployAccountTransactionV3::new(v3, address))),
+        ),
     };
 
-    if !starknet.pre_confirmed_state.is_contract_declared(class_hash) {
-        return Err(Error::StateError(crate::error::StateError::NoneClassHash(class_hash)));
-    }
     let transaction_hash = executable_deploy_account_tx.tx_hash.0;
     let transaction = TransactionWithHash::new(transaction_hash, deploy_account_transaction);
 

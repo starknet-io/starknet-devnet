@@ -309,14 +309,12 @@ async fn test_deploying_account_with_class_not_present_on_origin() {
     .unwrap();
 
     let salt = Felt::from_hex_unchecked("0x123");
-    let deployment = factory
-        .deploy_v3(salt)
-        .l1_gas(1e6 as u64)
-        .l1_data_gas(1e6 as u64)
-        .l2_gas(1e6 as u64)
-        .send()
-        .await;
-    match deployment {
+    let deployment = factory.deploy_v3(salt);
+    fork_devnet.mint(deployment.address(), u128::MAX).await;
+
+    let result =
+        deployment.l1_gas(1e6 as u64).l1_data_gas(1e6 as u64).l2_gas(1e6 as u64).send().await;
+    match result {
         Err(AccountFactoryError::Provider(ProviderError::StarknetError(
             StarknetError::ClassHashNotFound,
         ))) => (),

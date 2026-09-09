@@ -1,7 +1,11 @@
+use blockifier::execution::errors::{
+    ConstructorEntryPointExecutionError, EntryPointExecutionError,
+};
 use blockifier::execution::stack_trace::{
     ErrorStack, ErrorStackHeader, ErrorStackSegment, PreambleType, gen_tx_execution_error_trace,
 };
 use blockifier::fee::fee_checks::FeeCheckError;
+use blockifier::state::errors::StateError as BlockifierStateError;
 use blockifier::transaction::errors::{
     TransactionExecutionError, TransactionFeeError, TransactionPreValidationError,
 };
@@ -130,6 +134,10 @@ pub enum TransactionValidationError {
 
 impl From<TransactionExecutionError> for Error {
     fn from(value: TransactionExecutionError) -> Self {
+        if let Some(class_hash) = undeclared_deploy_account_class_hash(&value) {
+            return Self::StateError(StateError::NoneClassHash(class_hash));
+        }
+
         match value {
             TransactionExecutionError::TransactionPreValidationError(err) => match *err {
                 TransactionPreValidationError::InvalidNonce {
@@ -169,6 +177,26 @@ impl From<TransactionExecutionError> for Error {
             }
             other => Self::ContractExecutionError(other.into()),
         }
+    }
+}
+
+fn undeclared_deploy_account_class_hash(error: &TransactionExecutionError) -> Option<Felt> {
+    let TransactionExecutionError::ContractConstructorExecutionFailed(
+        ConstructorEntryPointExecutionError::ExecutionError {
+            error,
+            constructor_selector: None,
+            ..
+        },
+    ) = error
+    else {
+        return None;
+    };
+
+    match error.unannotated() {
+        EntryPointExecutionError::StateError(BlockifierStateError::UndeclaredClassHash(
+            class_hash,
+        )) => Some(class_hash.0),
+        _ => None,
     }
 }
 

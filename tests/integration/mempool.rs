@@ -18,8 +18,12 @@
 //! `Interval(<seconds>)` remains a supported periodic-sealing mode and its functional behavior is
 //! verified here.
 
+use std::sync::Arc;
+
 use serde_json::json;
-use starknet_rs_accounts::{Account, ExecutionEncoding, SingleOwnerAccount};
+use starknet_rs_accounts::{
+    Account, AccountFactory, ExecutionEncoding, OpenZeppelinAccountFactory, SingleOwnerAccount,
+};
 use starknet_rs_core::types::{BlockId, BlockTag, Call, Felt};
 use starknet_rs_core::utils::get_selector_from_name;
 use starknet_rs_providers::Provider;
@@ -28,9 +32,13 @@ use starknet_rs_signers::{LocalWallet, SigningKey};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    PREDEPLOYED_ACCOUNT_ADDRESS, RPC_PATH, STRK_ERC20_CONTRACT_ADDRESS,
+    CAIRO_1_ACCOUNT_CONTRACT_0_8_0_SIERRA_PATH, PREDEPLOYED_ACCOUNT_ADDRESS, RPC_PATH,
+    STRK_ERC20_CONTRACT_ADDRESS,
 };
-use crate::common::utils::{FeeUnit, UniqueAutoDeletableFile, send_ctrl_c_signal_and_wait};
+use crate::common::utils::{
+    FeeUnit, UniqueAutoDeletableFile, get_flattened_sierra_contract_and_casm_hash,
+    send_ctrl_c_signal_and_wait,
+};
 
 /// Returns the ERC20 transfer selector: `transfer(to: ContractAddress, amount: u256)`.
 fn transfer_selector() -> Felt {
@@ -167,6 +175,55 @@ async fn mint_is_force_processed_in_mempool_mode() {
     // System transactions are retained as PRE_CONFIRMED until sealing so proposal abort can
     // restore their effects too.
     assert_phase(&devnet, transaction_hash, "PRE_CONFIRMED").await;
+}
+
+#[tokio::test]
+async fn deploy_account_can_be_admitted_behind_queued_class_declaration() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+    let (account_class, casm_hash) =
+        get_flattened_sierra_contract_and_casm_hash(CAIRO_1_ACCOUNT_CONTRACT_0_8_0_SIERRA_PATH);
+    let class_hash = account_class.class_hash();
+
+    let declaration = account
+        .declare_v3(Arc::new(account_class), casm_hash)
+        .nonce(Felt::ZERO)
+        .l1_gas(100_000)
+        .l1_data_gas(100_000)
+        .l2_gas(1_000_000_000)
+        .l2_gas_price(1_000_000_000)
+        .send()
+        .await
+        .unwrap();
+
+    let signer = LocalWallet::from(SigningKey::from_secret_scalar(Felt::ONE));
+    let factory = OpenZeppelinAccountFactory::new(
+        class_hash,
+        client.chain_id().await.unwrap(),
+        signer,
+        &client,
+    )
+    .await
+    .unwrap();
+    let deployment = factory
+        .deploy_v3(Felt::ONE)
+        .nonce(Felt::ZERO)
+        .l1_gas(0)
+        .l1_data_gas(1_000)
+        .l2_gas(100_000_000)
+        .l2_gas_price(1_000_000_000);
+    devnet.mint(deployment.address(), 1_000_000_000_000_000_000).await;
+    let deployment = deployment.send().await.unwrap();
+
+    assert_phase(&devnet, declaration.transaction_hash, "RECEIVED").await;
+    assert_phase(&devnet, deployment.transaction_hash, "RECEIVED").await;
+
+    let outcome = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    assert_eq!(
+        outcome["pre_confirmed"],
+        json!([declaration.transaction_hash, deployment.transaction_hash])
+    );
 }
 
 /// Restart and block abortion clear RECEIVED/CANDIDATE transactions.

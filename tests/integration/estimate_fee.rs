@@ -127,10 +127,7 @@ async fn estimate_fee_of_invalid_deploy_account() {
         ))) if err.transaction_index == 0 => {
             assert_contains(
                 &format!("{:?}", err.execution_error),
-                &format!(
-                    "Class with hash {} is not declared.",
-                    invalid_class_hash.to_fixed_hex_string()
-                ),
+                &format!("No class hash {invalid_class_hash:x} found"),
             )
             .unwrap();
         }
