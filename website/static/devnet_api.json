@@ -392,10 +392,16 @@
                     "minimum": 0
                   },
                   "sender_address": {
-                    "$ref": "#/components/schemas/ADDRESS"
+                    "anyOf": [
+                      { "$ref": "#/components/schemas/ADDRESS" },
+                      { "type": "null" }
+                    ]
                   },
                   "nonce": {
-                    "$ref": "#/components/schemas/FELT"
+                    "anyOf": [
+                      { "$ref": "#/components/schemas/FELT" },
+                      { "type": "null" }
+                    ]
                   },
                   "tip": {
                     "$ref": "#/components/schemas/FELT"
@@ -504,7 +510,7 @@
           "required": false,
           "schema": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 1
           }
         },
         {

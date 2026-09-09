@@ -29,6 +29,7 @@ use starknet_rs_core::utils::get_selector_from_name;
 use starknet_rs_providers::Provider;
 use starknet_rs_providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet_rs_signers::{LocalWallet, SigningKey};
+use tokio_tungstenite::connect_async;
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
@@ -36,8 +37,9 @@ use crate::common::constants::{
     STRK_ERC20_CONTRACT_ADDRESS,
 };
 use crate::common::utils::{
-    FeeUnit, UniqueAutoDeletableFile, get_flattened_sierra_contract_and_casm_hash,
-    send_ctrl_c_signal_and_wait,
+    FeeUnit, UniqueAutoDeletableFile, assert_no_notifications,
+    get_flattened_sierra_contract_and_casm_hash, receive_rpc_via_ws, send_ctrl_c_signal_and_wait,
+    subscribe,
 };
 
 /// Returns the ERC20 transfer selector: `transfer(to: ContractAddress, amount: u256)`.
@@ -54,7 +56,7 @@ fn strk_transfer_call(recipient: Felt, amount: u128) -> Call {
     }
 }
 
-/// Spawns a devnet in mempool mode with FIFO ordering, max-transactions-per-block = 2.
+/// Spawns a devnet in mempool mode with FIFO ordering and the default block capacity.
 async fn spawn_mempool_devnet() -> BackgroundDevnet {
     BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "mempool"])
         .await
@@ -281,11 +283,10 @@ async fn abort_blocks_clears_mempool() {
     assert_eq!(pre_confirmed_hashes.len(), 0, "open proposal must be empty after abort: {resp}");
 }
 
-/// A transaction submitted in mempool mode goes RECEIVED, then CANDIDATE on selection,
-/// then PRE_CONFIRMED on successful execution. The transition is observable through
-/// `devnet_getMempool` and the open proposal hash list.
+/// RECEIVED and PRE_CONFIRMED are observable through `devnet_getMempool` and the open proposal
+/// hash list. CANDIDATE is internal to synchronous processing under the state lock.
 #[tokio::test]
-async fn mempool_phases_received_candidate_preconfirmed() {
+async fn mempool_phases_received_and_preconfirmed() {
     let devnet = spawn_mempool_devnet().await;
     let client = json_rpc_client(&devnet);
     let account = first_predeployed_account(&devnet, &client).await;
@@ -912,26 +913,46 @@ async fn unregistered_ordering_policy_is_rejected() {
     assert_eq!(snapshot["config"]["ordering"], "fifo");
 }
 
-/// Random ordering with a fixed seed produces deterministic selection. We verify that
-/// the same seed yields a stable `arrival_id`-based selection: submitting three txs and
-/// inspecting the snapshot is enough; the deterministic part is the random_seed itself.
 #[tokio::test]
-async fn random_ordering_seed_is_recorded() {
-    let devnet = spawn_mempool_devnet().await;
-    let resp = devnet
-        .send_custom_rpc(
-            "devnet_setMempoolConfig",
-            json!({ "ordering": "random", "random_seed": 42 }),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp["ordering"], "random");
-    assert_eq!(resp["random_seed"], 42);
-
-    // Subsequent reads should retain the same seed.
-    let snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
-    assert_eq!(snapshot["config"]["random_seed"], 42);
-    assert_eq!(snapshot["config"]["ordering"], "random");
+async fn random_ordering_is_reproducible_and_depends_on_seed() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--accounts",
+        "5",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let mut orders = Vec::new();
+    for seed in [42, 42, 43] {
+        devnet.send_custom_rpc("devnet_restart", json!({})).await.unwrap();
+        devnet
+            .send_custom_rpc(
+                "devnet_setMempoolConfig",
+                json!({
+                    "ordering": "random", "random_seed": seed,
+                }),
+            )
+            .await
+            .unwrap();
+        let mut submitted = Vec::new();
+        for index in 0..5 {
+            let account = nth_predeployed_account(&devnet, &client, index).await;
+            submitted.push(submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await);
+        }
+        let outcome =
+            devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+        assert_eq!(outcome["rejected"], json!([]));
+        let order: Vec<Felt> = serde_json::from_value(outcome["pre_confirmed"].clone()).unwrap();
+        let mut sorted_order = order.clone();
+        sorted_order.sort();
+        submitted.sort();
+        assert_eq!(sorted_order, submitted);
+        orders.push(order);
+    }
+    assert_eq!(orders[0], orders[1], "same seed must reproduce the complete order");
+    assert_ne!(orders[0], orders[2], "selection must use the seed, not always FIFO");
 }
 
 /// Verify that the config endpoint reports the interval and that `Interval(1)` seals a new block
@@ -1831,4 +1852,206 @@ async fn stale_sweep_validation_is_atomic_and_preserves_proposal_entries() {
     devnet.send_custom_rpc("devnet_abortPreconfirmedBlock", json!({})).await.unwrap();
     assert_phase(&devnet, preconfirmed, "RECEIVED").await;
     assert_phase(&devnet, current, "RECEIVED").await;
+}
+
+#[tokio::test]
+async fn dump_load_replays_configuration_updates_in_order() {
+    let dump_file = UniqueAutoDeletableFile::new("mempool-config-replay");
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-max-transactions-per-block",
+        "2",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    let startup_config =
+        devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap()["config"].clone();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+    let first = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let second = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ONE).await;
+    devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    devnet
+        .send_custom_rpc(
+            "devnet_setMempoolConfig",
+            json!({
+                "max_transactions_per_block": 1, "ordering": "random", "random_seed": 123,
+            }),
+        )
+        .await
+        .unwrap();
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["pre_confirmed_transaction_hashes"], json!([first, second]));
+    let nonce_before =
+        client.get_nonce(BlockId::Tag(BlockTag::PreConfirmed), account.address()).await.unwrap();
+    let events = devnet.send_custom_rpc("devnet_dump", json!({"inline": true})).await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({"events": events})).await.unwrap();
+    assert_eq!(devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap(), before);
+    assert_eq!(
+        client.get_nonce(BlockId::Tag(BlockTag::PreConfirmed), account.address()).await.unwrap(),
+        nonce_before
+    );
+    devnet.send_custom_rpc("devnet_restart", json!({})).await.unwrap();
+    let restarted = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(restarted["config"], startup_config);
+    assert_eq!(restarted["transactions"], json!([]));
+}
+
+#[tokio::test]
+async fn queued_transaction_rpc_lifecycle_and_duplicate_hashes() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+    let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    let params = json!({"transaction_hash": hash});
+    let mut transaction =
+        devnet.send_custom_rpc("starknet_getTransactionByHash", params.clone()).await.unwrap();
+    assert_eq!(transaction["transaction_hash"], json!(hash));
+    assert_eq!(transaction["sender_address"], json!(account.address()));
+    transaction.as_object_mut().unwrap().remove("transaction_hash");
+
+    for phase in ["RECEIVED", "PRE_CONFIRMED", "ACCEPTED_ON_L2"] {
+        let status =
+            devnet.send_custom_rpc("starknet_getTransactionStatus", params.clone()).await.unwrap();
+        assert_eq!(status["finality_status"], phase);
+        if phase == "RECEIVED" {
+            assert!(status.get("execution_status").is_none());
+            for method in ["starknet_getTransactionReceipt", "starknet_traceTransaction"] {
+                let error = devnet.send_custom_rpc(method, params.clone()).await.unwrap_err();
+                assert_eq!(error.code, 29, "{method}: {error:?}");
+            }
+        } else {
+            assert_eq!(status["execution_status"], "SUCCEEDED");
+            let receipt = devnet
+                .send_custom_rpc("starknet_getTransactionReceipt", params.clone())
+                .await
+                .unwrap();
+            assert_eq!(receipt["transaction_hash"], json!(hash));
+            devnet.send_custom_rpc("starknet_traceTransaction", params.clone()).await.unwrap();
+        }
+        let duplicate = devnet
+            .send_custom_rpc(
+                "starknet_addInvokeTransaction",
+                json!({"invoke_transaction": transaction}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(duplicate.code, 59, "duplicate in {phase}: {duplicate:?}");
+        match phase {
+            "RECEIVED" => {
+                devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+            }
+            "PRE_CONFIRMED" => {
+                devnet.send_custom_rpc("devnet_sealBlock", json!({})).await.unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn websocket_reports_mempool_admission_abort_and_sealing() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+    let mut hashes = Vec::new();
+    let mut subscriptions = Vec::new();
+    let mut transactions = Vec::new();
+    // Obtain signed transactions, then remove them so subscriptions precede admission.
+    for nonce in 0_u64..2 {
+        let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::from(nonce)).await;
+        let params = json!({"transaction_hash": hash});
+        let mut transaction =
+            devnet.send_custom_rpc("starknet_getTransactionByHash", params.clone()).await.unwrap();
+        transaction.as_object_mut().unwrap().remove("transaction_hash");
+        devnet.send_custom_rpc("devnet_removeFromMempool", params.clone()).await.unwrap();
+        subscriptions
+            .push(subscribe(&mut ws, "starknet_subscribeTransactionStatus", params).await.unwrap());
+        hashes.push(hash);
+        transactions.push(transaction);
+    }
+    for transaction in transactions {
+        devnet
+            .send_custom_rpc(
+                "starknet_addInvokeTransaction",
+                json!({"invoke_transaction": transaction}),
+            )
+            .await
+            .unwrap();
+    }
+    for (phase, next_action) in [
+        ("RECEIVED", Some("devnet_preconfirmTransactions")),
+        ("PRE_CONFIRMED", Some("devnet_abortPreconfirmedBlock")),
+        ("RECEIVED", Some("devnet_preconfirmTransactions")),
+        ("PRE_CONFIRMED", Some("devnet_sealBlock")),
+        ("ACCEPTED_ON_L2", None),
+    ] {
+        for (hash, subscription_id) in hashes.iter().zip(&subscriptions) {
+            let notification = receive_rpc_via_ws(&mut ws).await.unwrap();
+            assert_eq!(notification["method"], "starknet_subscriptionTransactionStatus");
+            assert_eq!(notification["params"]["subscription_id"], json!(subscription_id));
+            let result = &notification["params"]["result"];
+            assert_eq!(result["transaction_hash"], json!(hash));
+            assert_eq!(result["status"]["finality_status"], phase);
+            if phase == "RECEIVED" {
+                assert!(result["status"].get("execution_status").is_none());
+            } else {
+                assert_eq!(result["status"]["execution_status"], "SUCCEEDED");
+            }
+        }
+        if let Some(method) = next_action {
+            devnet.send_custom_rpc(method, json!({})).await.unwrap();
+        }
+    }
+    assert_no_notifications(&mut ws).await.unwrap();
+}
+
+#[tokio::test]
+async fn proposal_abort_restores_transaction_count_metric() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let metrics_port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--metrics-host",
+        "127.0.0.1",
+        "--metrics-port",
+        &metrics_port.to_string(),
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    let account = first_predeployed_account(&devnet, &client).await;
+    submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+    // Retain a sealed transaction so abort must subtract only the live proposal.
+    devnet.send_custom_rpc("devnet_createBlock", json!({})).await.unwrap();
+    submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ONE).await;
+    for (method, expected) in [
+        ("devnet_preconfirmTransactions", 2),
+        ("devnet_abortPreconfirmedBlock", 1),
+        ("devnet_preconfirmTransactions", 2),
+        ("devnet_abortPreconfirmedBlock", 1),
+    ] {
+        devnet.send_custom_rpc(method, json!({})).await.unwrap();
+        let metrics = reqwest::get(format!("http://127.0.0.1:{metrics_port}/metrics"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let count = metrics
+            .lines()
+            .find_map(|line| line.strip_prefix("starknet_transaction_count "))
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert_eq!(count, expected, "incorrect metric after {method}");
+    }
 }

@@ -154,7 +154,7 @@ impl TransactionOrderingPolicy for RandomOrderingPolicy {
             context.random_seed ^ context.block_number ^ context.proposal_selection_counter,
         );
         eligible
-            .get((mixed as usize) % eligible.len())
+            .get((mixed % eligible.len() as u64) as usize)
             .map(|entry| *entry.transaction.get_transaction_hash())
     }
 }

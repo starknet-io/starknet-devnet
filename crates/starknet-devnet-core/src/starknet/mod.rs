@@ -200,9 +200,7 @@ impl Starknet {
         &mut self,
         update: mempool::MempoolConfigUpdate,
     ) -> DevnetResult<mempool::MempoolConfig> {
-        let config = self.mempool.set_config(update)?;
-        self.config.mempool_config = config.clone();
-        Ok(config)
+        self.mempool.set_config(update)
     }
 
     pub fn get_queued_transaction(
@@ -405,6 +403,9 @@ impl Starknet {
         for hash in &hashes {
             self.transactions.remove(hash);
         }
+        let transaction_count = crate::metrics::TRANSACTION_COUNT.get();
+        crate::metrics::TRANSACTION_COUNT.reset();
+        crate::metrics::TRANSACTION_COUNT.inc_by(transaction_count - hashes.len() as u64);
         let block_number = self.blocks.pre_confirmed_block.block_number().0;
         let mut classes = self.rpc_contract_classes.write();
         classes.remove_classes_at(block_number);

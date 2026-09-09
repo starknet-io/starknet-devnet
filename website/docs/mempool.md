@@ -5,13 +5,13 @@ Manual mempool mode separates transaction admission, preconfirmation, and block 
 ## Transaction lifecycle
 
 - `RECEIVED`: admitted to the pool and waiting to become nonce-eligible and selected.
-- `CANDIDATE`: selected for processing but not yet published in the live pre-confirmed block.
+- `CANDIDATE`: selected for processing but not yet published in the live pre-confirmed block. This is an internal transition during synchronous processing; concurrent RPC calls cannot observe it while execution holds the state lock.
 - `PRE_CONFIRMED`: executed and appended to the live proposal. Later transactions execute against its speculative state.
 - `ACCEPTED_ON_L2`: permanently included when the proposal is sealed.
 
 Selection is incremental and proceeds in transient rounds of up to 100 user transactions. Each round snapshots the currently nonce-eligible account heads; a nonce `n + 1` exposed by executing nonce `n` waits for the next round and cannot overtake another account head already in the current snapshot. Multiple rounds may run in one processing request. A transaction arriving after part of the proposal is already pre-confirmed can outrank transactions in a later round, but cannot reorder the published pre-confirmed prefix.
 
-Queued `RECEIVED` and `CANDIDATE` transactions can be returned by `starknet_getTransactionByHash` and their phase can be returned by `starknet_getTransactionStatus`. They have no receipt or trace until they execute, and they are excluded from block and state-update queries.
+Queued transactions are returned by `starknet_getTransactionByHash`, and `starknet_getTransactionStatus` reports `RECEIVED` before processing. They have no receipt or trace until they execute, and they are excluded from block and state-update queries. The status model also supports the internal `CANDIDATE` phase.
 
 ## Inspect the pool
 
@@ -122,6 +122,6 @@ Remove every received transaction with `devnet_clearMempool`. Neither method rem
 
 ## Restarting, dumping, and loading
 
-Restarting clears the entire mempool and open proposal. Dumping records admission and each exact selected-hash sequence, configuration update, removal, clear, seal, and abort action so loading reproduces deterministic ordering without relying on timing or current policy defaults. Use the same startup account, class, block-generation, and mempool configuration when loading events into another Devnet instance.
+Restarting clears the entire mempool and open proposal and restores the startup mempool configuration. Runtime configuration is available through `devnet_getMempool`; `devnet_getConfig` reports startup settings. Dumping records admission and each exact selected-hash sequence, configuration update, removal, clear, seal, and abort action so loading reproduces deterministic ordering without relying on timing or current policy defaults. Loading begins with the startup configuration and replays runtime updates in order. Use the same startup account, class, block-generation, and mempool configuration when loading events into another Devnet instance.
 
 Preconfirmation events also record stale-nonce removals separately from selection attempts, including removals made when the proposal is already full. Replay validates these removals before changing the pool.
