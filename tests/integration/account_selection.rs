@@ -124,11 +124,7 @@ async fn argent_account_undeployable_by_default() {
 
     let account_hash = Felt::from_hex_unchecked(ARGENT_ACCOUNT_CLASS_HASH);
     let error = deploy_argent_account(&devnet, account_hash).await.unwrap_err();
-    assert_contains(
-        &error.to_string(),
-        &format!("Class with hash {ARGENT_ACCOUNT_CLASS_HASH} is not declared"),
-    )
-    .unwrap();
+    assert_contains(&error.to_string(), &format!("No class hash {account_hash:x} found")).unwrap();
 }
 
 #[tokio::test]

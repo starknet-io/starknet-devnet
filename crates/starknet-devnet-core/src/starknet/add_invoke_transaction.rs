@@ -1,5 +1,4 @@
 use blockifier::transaction::account_transaction::ExecutionFlags;
-use blockifier::transaction::transactions::ExecutableTransaction;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::TransactionHash;
 use starknet_types::rpc::transactions::invoke_transaction_v3::InvokeTransactionV3;
@@ -9,12 +8,31 @@ use starknet_types::rpc::transactions::{
 
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
+use crate::starknet::mempool::{MempoolLane, PreparedTransaction};
 use crate::starknet::proofs::verify_proof;
 use crate::starknet::starknet_config::ProofMode;
 
 pub fn add_invoke_transaction(
     starknet: &mut Starknet,
     broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+) -> DevnetResult<TransactionHash> {
+    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::User)
+}
+
+/// Like [`add_invoke_transaction`] but submits on the system lane, so execution happens
+/// regardless of the configured block-generation mode. Used by `devnet_mint` so its balance
+/// change is observable immediately even in `mempool` mode.
+pub fn add_invoke_transaction_system(
+    starknet: &mut Starknet,
+    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+) -> DevnetResult<TransactionHash> {
+    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::System)
+}
+
+fn add_invoke_transaction_in_lane(
+    starknet: &mut Starknet,
+    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
+    lane: MempoolLane,
 ) -> DevnetResult<TransactionHash> {
     if !broadcasted_invoke_transaction.are_gas_bounds_valid() {
         return Err(TransactionValidationError::InsufficientResourcesForValidate.into());
@@ -67,14 +85,10 @@ pub fn add_invoke_transaction(
         &ContractAddress::from(sn_api_transaction.sender_address()),
     )?);
 
-    let block_context = starknet.block_context.clone();
-
     let strict_nonce_check = broadcasted_invoke_transaction
-        .requires_strict_nonce_check(starknet.config.uses_pre_confirmed_block());
+        .requires_strict_nonce_check(starknet.config.requires_strict_nonce_check());
 
-    let state = &mut starknet.get_state().state;
-
-    let execution_info = blockifier::transaction::account_transaction::AccountTransaction {
+    let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::Invoke(sn_api_transaction),
         execution_flags: ExecutionFlags {
             only_query: false,
@@ -82,14 +96,18 @@ pub fn add_invoke_transaction(
             validate,
             strict_nonce_check,
         },
-    }
-    .execute(state, &block_context);
-
-    let execution_info = execution_info?;
+    };
 
     let transaction = TransactionWithHash::new(transaction_hash, invoke_transaction);
 
-    starknet.handle_accepted_transaction(transaction, execution_info)?;
+    let prepared = match lane {
+        MempoolLane::User => PreparedTransaction::account(transaction, executable, None),
+        MempoolLane::System => PreparedTransaction::system_account(transaction, executable, None),
+    };
+    let transaction_hash = match lane {
+        MempoolLane::User => starknet.submit_prepared_transaction(prepared)?,
+        MempoolLane::System => starknet.submit_system_prepared_transaction(prepared)?,
+    };
 
     Ok(transaction_hash)
 }

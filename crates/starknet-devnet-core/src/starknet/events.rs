@@ -495,7 +495,8 @@ mod tests {
             let transaction_hash = Felt::from(idx as u128 + 100);
             transaction = TransactionWithHash::new(transaction_hash, transaction.transaction);
 
-            starknet.handle_accepted_transaction(transaction.clone(), txn_info).unwrap();
+            starknet.append_accepted_transaction(transaction.clone(), txn_info).unwrap();
+            starknet.generate_new_block_and_state();
         }
 
         assert_eq!(

@@ -53,6 +53,29 @@ async fn deploy_account_to_an_address_with_insufficient_balance_should_fail() {
 }
 
 #[tokio::test]
+async fn deploy_account_with_undeclared_class_should_return_class_hash_not_found() {
+    let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
+    let signer = get_deployable_account_signer();
+    let factory = OpenZeppelinAccountFactory::new(
+        Felt::from_hex_unchecked("0xdead"),
+        constants::CHAIN_ID,
+        signer,
+        devnet.clone_provider(),
+    )
+    .await
+    .unwrap();
+    let deployment = factory.deploy_v3(Felt::THREE).l1_gas(0).l1_data_gas(1_000).l2_gas(10_000_000);
+    devnet.mint(deployment.address(), 1e21 as u128).await;
+
+    match deployment.send().await.unwrap_err() {
+        starknet_rs_accounts::AccountFactoryError::Provider(ProviderError::StarknetError(
+            StarknetError::ClassHashNotFound,
+        )) => {}
+        other => panic!("Unexpected error: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn declare_deploy_happy_path() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     let (sierra_artifact, casm_hash) = get_simple_contract_artifacts();

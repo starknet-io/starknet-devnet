@@ -10,10 +10,18 @@ When no methods are specified, the following default methods will be restricted,
 - devnet_load
 - devnet_restart
 - devnet_createBlock
+- devnet_sealBlock
+- devnet_removeFromMempool
+- devnet_clearMempool
+- devnet_preconfirmTransactions
+- devnet_setMempoolConfig
+- devnet_abortPreconfirmedBlock
 - devnet_abortBlocks
 - devnet_impersonateAccount
 - devnet_autoImpersonate
 - devnet_getPredeployedAccounts
+
+`devnet_getMempool` is read-only and is not restricted by default.
 
 ## Usage
 

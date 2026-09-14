@@ -1,5 +1,4 @@
 use blockifier::transaction::account_transaction::ExecutionFlags;
-use blockifier::transaction::transactions::ExecutableTransaction;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::TransactionHash;
 use starknet_types::rpc::transactions::deploy_account_transaction_v3::DeployAccountTransactionV3;
@@ -9,7 +8,7 @@ use starknet_types::rpc::transactions::{
 
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
-use crate::state::CustomStateReader;
+use crate::starknet::mempool::PreparedTransaction;
 
 pub fn add_deploy_account_transaction(
     starknet: &mut Starknet,
@@ -30,27 +29,19 @@ pub fn add_deploy_account_transaction(
 
     let address = executable_deploy_account_tx.contract_address.into();
 
-    let (class_hash, deploy_account_transaction) = match broadcasted_deploy_account_transaction {
-        BroadcastedDeployAccountTransaction::V3(ref v3) => {
-            let deploy_account_transaction =
-                Transaction::DeployAccount(DeployAccountTransaction::V3(Box::new(
-                    DeployAccountTransactionV3::new(v3, address),
-                )));
-
-            (v3.class_hash, deploy_account_transaction)
-        }
+    let deploy_account_transaction = match broadcasted_deploy_account_transaction {
+        BroadcastedDeployAccountTransaction::V3(ref v3) => Transaction::DeployAccount(
+            DeployAccountTransaction::V3(Box::new(DeployAccountTransactionV3::new(v3, address))),
+        ),
     };
 
-    if !starknet.pre_confirmed_state.is_contract_declared(class_hash) {
-        return Err(Error::StateError(crate::error::StateError::NoneClassHash(class_hash)));
-    }
     let transaction_hash = executable_deploy_account_tx.tx_hash.0;
     let transaction = TransactionWithHash::new(transaction_hash, deploy_account_transaction);
 
     let strict_nonce_check = broadcasted_deploy_account_transaction
-        .requires_strict_nonce_check(starknet.config.uses_pre_confirmed_block());
+        .requires_strict_nonce_check(starknet.config.requires_strict_nonce_check());
 
-    let execution_info = blockifier::transaction::account_transaction::AccountTransaction {
+    let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::DeployAccount(
             executable_deploy_account_tx,
         ),
@@ -60,10 +51,10 @@ pub fn add_deploy_account_transaction(
             validate: true,
             strict_nonce_check,
         },
-    }
-    .execute(&mut starknet.pre_confirmed_state.state, &starknet.block_context)?;
+    };
 
-    starknet.handle_accepted_transaction(transaction, execution_info)?;
+    let prepared = PreparedTransaction::account(transaction, executable, None);
+    starknet.submit_prepared_transaction(prepared)?;
 
     Ok((transaction_hash, address))
 }
