@@ -91,6 +91,15 @@ pub trait TransactionOrderingPolicy: Send + Sync {
     ) -> PolicySelection {
         self.select(eligible, context).map_or(PolicySelection::Stop, PolicySelection::Transaction)
     }
+
+    /// Explains why an otherwise nonce-eligible transaction cannot currently be selected.
+    fn blocking_reason(
+        &self,
+        _entry: &MempoolEntry,
+        _context: &SelectionContext,
+    ) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -135,6 +144,15 @@ impl TransactionOrderingPolicy for StarknetOrderingPolicy {
             .filter(|entry| entry.max_l2_gas_price >= context.current_l2_gas_price)
             .max_by(|left, right| starknet_comparator(left, right))
             .map(|entry| *entry.transaction.get_transaction_hash())
+    }
+
+    fn blocking_reason(&self, entry: &MempoolEntry, context: &SelectionContext) -> Option<String> {
+        (entry.max_l2_gas_price < context.current_l2_gas_price).then(|| {
+            format!(
+                "max L2 gas price {:#x} is below the current L2 gas price {:#x}",
+                entry.max_l2_gas_price, context.current_l2_gas_price
+            )
+        })
     }
 }
 
@@ -370,6 +388,22 @@ mod tests {
 
         // Threshold dropped below the tx's price: visible, returns the tx.
         assert_eq!(pool.select_policy(&[pending], 0, 100), Some(pending));
+    }
+
+    #[test]
+    fn starknet_policy_explains_below_threshold_entries() {
+        let entry = entry_with(Felt::from(0x10), 0, 5, 700);
+        let context = SelectionContext {
+            block_number: 1,
+            current_l2_gas_price: 1_000,
+            proposal_selection_counter: 0,
+            random_seed: 0,
+        };
+
+        assert_eq!(
+            StarknetOrderingPolicy.blocking_reason(&entry, &context).as_deref(),
+            Some("max L2 gas price 0x2bc is below the current L2 gas price 0x3e8")
+        );
     }
 
     #[test]

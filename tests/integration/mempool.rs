@@ -517,8 +517,8 @@ async fn max_transactions_per_block_caps_selection() {
     // Submit 4 transfers (FIFO order; same sender nonce sequence).
     let _h1 = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
     let _h2 = submit_transfer_in_mempool(&account, Felt::from(2u64), 1, 0, Felt::ONE).await;
-    let _h3 = submit_transfer_in_mempool(&account, Felt::from(3u64), 1, 0, Felt::TWO).await;
-    let _h4 = submit_transfer_in_mempool(&account, Felt::from(4u64), 1, 0, Felt::THREE).await;
+    let h3 = submit_transfer_in_mempool(&account, Felt::from(3u64), 1, 0, Felt::TWO).await;
+    let h4 = submit_transfer_in_mempool(&account, Felt::from(4u64), 1, 0, Felt::THREE).await;
     assert_received_count(&devnet, 4).await;
 
     // Set max to 2 and pre-confirm without forcing hashes.
@@ -532,6 +532,11 @@ async fn max_transactions_per_block_caps_selection() {
     let pre_confirmed: Vec<serde_json::Value> = resp["pre_confirmed"].as_array().unwrap().clone();
     assert_eq!(pre_confirmed.len(), 2, "max_transactions_per_block must cap selection: {resp}");
     assert_eq!(resp["block_full"], true);
+    assert_eq!(resp["blocked"].as_array().unwrap().len(), 1, "{resp}");
+    assert_eq!(resp["blocked"][0]["transaction_hash"], format!("{h4:#x}"));
+    assert!(resp["blocked"][0]["reason"].as_str().unwrap().contains("nonce gap"));
+    assert_phase(&devnet, h3, "RECEIVED").await;
+    assert_phase(&devnet, h4, "RECEIVED").await;
 
     // Two remaining RECEIVED.
     let snapshot = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
@@ -585,6 +590,38 @@ async fn forced_hashes_respect_eligibility() {
     assert!(resp["pre_confirmed"].as_array().unwrap().is_empty(), "{resp}");
     assert_eq!(resp["blocked"][0]["transaction_hash"], format!("{h_future:#x}"));
     assert_phase(&devnet, h_future, "RECEIVED").await;
+}
+
+/// Policy processing reports every nonce-blocked transaction in deterministic arrival order while
+/// continuing to process eligible transactions from other accounts.
+#[tokio::test]
+async fn policy_processing_reports_mixed_blocked_transactions() {
+    let devnet = spawn_mempool_devnet().await;
+    let client = json_rpc_client(&devnet);
+    let blocked_account = first_predeployed_account(&devnet, &client).await;
+    let eligible_account = nth_predeployed_account(&devnet, &client, 1).await;
+
+    let gap_two = submit_transfer_in_mempool(&blocked_account, Felt::ONE, 1, 0, Felt::TWO).await;
+    let eligible = submit_transfer_in_mempool(&eligible_account, Felt::TWO, 1, 0, Felt::ZERO).await;
+    let gap_one = submit_transfer_in_mempool(&blocked_account, Felt::THREE, 1, 0, Felt::ONE).await;
+
+    let resp = devnet.send_custom_rpc("devnet_preconfirmTransactions", json!({})).await.unwrap();
+    assert_eq!(resp["pre_confirmed"], json!([format!("{eligible:#x}")]));
+    assert_eq!(
+        resp["blocked"],
+        json!([
+            {
+                "transaction_hash": format!("{gap_two:#x}"),
+                "reason": "nonce gap: expected 0x0, got 0x2"
+            },
+            {
+                "transaction_hash": format!("{gap_one:#x}"),
+                "reason": "nonce gap: expected 0x0, got 0x1"
+            }
+        ])
+    );
+    assert_phase(&devnet, gap_two, "RECEIVED").await;
+    assert_phase(&devnet, gap_one, "RECEIVED").await;
 }
 
 /// A second transaction for the same account and nonce is rejected as an invalid request.
@@ -690,6 +727,11 @@ async fn starknet_policy_hides_below_threshold_txs() {
     assert!(
         resp["pre_confirmed"].as_array().unwrap().is_empty(),
         "below-threshold tx must remain unselected: {resp}"
+    );
+    assert_eq!(resp["blocked"][0]["transaction_hash"], format!("{hash_pending:#x}"));
+    assert!(
+        resp["blocked"][0]["reason"].as_str().unwrap().contains("below the current L2 gas price"),
+        "{resp}"
     );
     assert_phase(&devnet, hash_pending, "RECEIVED").await;
 
@@ -1045,6 +1087,7 @@ async fn next_nonce_becomes_eligible_after_preconfirm() {
         pre_confirmed.contains(&format!("{:#x}", h_second)),
         "the next nonce must become eligible during the same processing call: {resp}"
     );
+    assert!(resp["blocked"].as_array().unwrap().is_empty(), "{resp}");
 }
 
 /// An entry's `transaction` field is only populated when `include_transactions: true`.
