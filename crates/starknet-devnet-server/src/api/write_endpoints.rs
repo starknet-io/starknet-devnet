@@ -118,7 +118,7 @@ impl JsonRpcHandler {
         drop(starknet);
         drop(dumpable_events);
         drop(snapshots);
-        sockets.notify_subscribers(&notifications).await;
+        sockets.notify_subscribers(&notifications);
         Ok(DevnetResponse::Reverted(true).into())
     }
 

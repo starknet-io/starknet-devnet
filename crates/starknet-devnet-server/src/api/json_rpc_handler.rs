@@ -1,16 +1,13 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
-use futures::stream::SplitSink;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use starknet_core::StarknetBlock;
 use starknet_core::starknet::mempool::MempoolPhase;
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_types::emitted_event::SubscriptionEmittedEvent;
 use starknet_types::rpc::block::{BlockId, BlockTag, ReorgData};
 use starknet_types::rpc::transactions::TransactionFinalityStatus;
-use tokio::sync::Mutex;
 use tracing::{info, trace};
 
 use crate::api::models::{
@@ -24,15 +21,16 @@ use crate::api::models::{
     SimulateTransactionsInput, StarknetSpecExtRequest, StarknetSpecRequest, StateUpdateInput,
     ToRpcResponseResult, TransactionHashAndFlagsInput, TransactionHashInput, to_json_rpc_request,
 };
-use crate::api::origin_forwarder::OriginForwarder;
+use crate::api::origin_forwarder::{OriginForwarder, PreparedOriginCall};
 use crate::api::{Api, ApiError, error};
-use crate::dump_util::dump_event;
+use crate::dump_util::{clear_dump_file, dump_event};
 use crate::restrictive_mode::is_json_rpc_method_restricted;
 use crate::rpc_core;
 use crate::rpc_core::error::{ErrorCode, RpcError};
 use crate::rpc_core::request::{Request, RequestParams, RpcCall, RpcMethodCall};
 use crate::rpc_core::response::{Response, ResponseResult, RpcResponse};
 use crate::rpc_handler::{RpcHandler, handle_request};
+use crate::socket_writer::SocketSender;
 use crate::subscribe::{
     NewTransactionNotification, NewTransactionReceiptNotification, NewTransactionStatus,
     NotificationData, SocketId,
@@ -47,6 +45,26 @@ pub struct JsonRpcHandler {
     pub origin_caller: Option<OriginForwarder>,
 }
 
+struct RequestOutcome {
+    result: error::StrictRpcResult,
+    forwarded: Option<PreparedOriginCall>,
+}
+
+impl From<error::StrictRpcResult> for RequestOutcome {
+    fn from(result: error::StrictRpcResult) -> Self {
+        Self { result, forwarded: None }
+    }
+}
+
+impl RequestOutcome {
+    async fn finish(self) -> ResponseResult {
+        match self.forwarded {
+            Some(call) => call.execute().await,
+            None => self.result.to_rpc_result(),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl RpcHandler for JsonRpcHandler {
     type Request = JsonRpcRequest;
@@ -56,13 +74,20 @@ impl RpcHandler for JsonRpcHandler {
         request: Self::Request,
         original_call: RpcMethodCall,
     ) -> ResponseResult {
-        if request.is_mutating() {
+        // Authorization does not inspect state and should not queue behind unrelated work.
+        if !self.allows_method(&original_call.method) {
+            return ResponseResult::Error(RpcError::new(ErrorCode::MethodForbidden));
+        }
+        let outcome = if request.is_mutating() {
             let _lifecycle = self.api.lifecycle.write().await;
             self.on_request_locked(request, original_call).await
         } else {
             let _lifecycle = self.api.lifecycle.read().await;
             self.on_request_locked(request, original_call).await
-        }
+        };
+        // Owned local responses can be serialized after releasing the guard. Origin fallbacks
+        // likewise use the acceptance context prepared inside it, without holding up writes.
+        outcome.finish().await
     }
 
     async fn on_call(&self, call: RpcMethodCall) -> RpcResponse {
@@ -79,11 +104,11 @@ impl JsonRpcHandler {
         &self,
         request: JsonRpcRequest,
         original_call: RpcMethodCall,
-    ) -> ResponseResult {
+    ) -> RequestOutcome {
         info!(target: "rpc", "received method in on_request {}", request);
 
         if !self.allows_method(&original_call.method) {
-            return ResponseResult::Error(RpcError::new(ErrorCode::MethodForbidden));
+            return Err(ApiError::RpcError(RpcError::new(ErrorCode::MethodForbidden))).into();
         }
 
         let is_request_forwardable = request.is_forwardable_to_origin(); // applicable if forking
@@ -113,7 +138,10 @@ impl JsonRpcHandler {
         {
             // if a block or state is requested that was only added to origin after
             // forking happened, it will be normally returned; we don't extra-handle this case
-            return forwarder.call(&original_call).await;
+            return RequestOutcome {
+                result: starknet_resp,
+                forwarded: Some(forwarder.prepare_call(original_call).await),
+            };
         }
 
         let dump_event = canonical_dump_event(&original_call, &starknet_resp);
@@ -121,19 +149,19 @@ impl JsonRpcHandler {
             && is_request_dumpable
             && let Err(e) = self.update_dump(&dump_event).await
         {
-            return ResponseResult::Error(e);
+            return Err(ApiError::RpcError(e)).into();
         }
 
         if let Err(e) = self.broadcast_changes(old_latest_block, old_pre_confirmed_block).await {
-            return ResponseResult::Error(e.api_error_to_rpc_error());
+            return Err(e).into();
         }
         if let Some(old_mempool_phases) = old_mempool_phases
             && let Err(e) = self.broadcast_mempool_status_changes(old_mempool_phases).await
         {
-            return ResponseResult::Error(e.api_error_to_rpc_error());
+            return Err(e).into();
         }
 
-        starknet_resp.to_rpc_result()
+        starknet_resp.into()
     }
 
     pub(crate) async fn on_call_with_lifecycle(
@@ -152,7 +180,7 @@ impl JsonRpcHandler {
                 let result = if acquire_lifecycle {
                     self.on_request(req, call).await
                 } else {
-                    self.on_request_locked(req, call).await
+                    self.on_request_locked(req, call).await.finish().await
                 };
                 RpcResponse::new(id, result)
             }
@@ -174,19 +202,29 @@ impl JsonRpcHandler {
 
     async fn handle_websocket(&self, socket: WebSocket) {
         let (socket_writer, mut socket_reader) = socket.split();
-        let socket_writer = Arc::new(Mutex::new(socket_writer));
+        let (sender, writer) = SocketSender::channel();
+        let mut closed = sender.closed();
+        let mut writer_task = tokio::spawn(writer.run(socket_writer));
 
-        let socket_id = self.api.sockets.lock().await.insert(socket_writer.clone());
+        let socket_id = self.api.sockets.lock().await.insert(sender.clone());
 
         // listen to new messages coming through the socket
         let mut socket_safely_closed = false;
-        while let Some(msg) = socket_reader.next().await {
+        loop {
+            let msg = tokio::select! {
+                biased;
+                _ = closed.wait_for(|value| *value) => break,
+                msg = socket_reader.next() => match msg {
+                    Some(msg) => msg,
+                    None => break,
+                },
+            };
             match msg {
                 Ok(Message::Text(text)) => {
-                    self.on_websocket_call(text.as_bytes(), socket_writer.clone(), socket_id).await;
+                    self.on_websocket_call(text.as_bytes(), &sender, socket_id).await;
                 }
                 Ok(Message::Binary(bytes)) => {
-                    self.on_websocket_call(&bytes, socket_writer.clone(), socket_id).await;
+                    self.on_websocket_call(&bytes, &sender, socket_id).await;
                 }
                 Ok(Message::Close(_)) => {
                     socket_safely_closed = true;
@@ -199,6 +237,13 @@ impl JsonRpcHandler {
         }
 
         self.api.sockets.lock().await.remove(&socket_id);
+        drop(sender);
+        // Dropping all senders drains the queue and closes the writer. Bound cleanup even if
+        // a disconnected peer has an outstanding write; no lifecycle guard is held here.
+        if tokio::time::timeout(std::time::Duration::from_secs(1), &mut writer_task).await.is_err()
+        {
+            writer_task.abort();
+        }
         if socket_safely_closed {
             tracing::info!("Websocket disconnected");
         } else {
@@ -294,7 +339,7 @@ impl JsonRpcHandler {
         drop(starknet);
 
         if !notifications.is_empty() {
-            self.api.sockets.lock().await.notify_subscribers(&notifications).await;
+            self.api.sockets.lock().await.notify_subscribers(&notifications);
         }
         Ok(())
     }
@@ -359,7 +404,7 @@ impl JsonRpcHandler {
 
             drop(starknet); // Drop immediately after last use
 
-            self.api.sockets.lock().await.notify_subscribers(&notifications).await;
+            self.api.sockets.lock().await.notify_subscribers(&notifications);
         }
 
         Ok(())
@@ -421,7 +466,7 @@ impl JsonRpcHandler {
             }));
         }
 
-        self.api.sockets.lock().await.notify_subscribers(&notifications).await;
+        self.api.sockets.lock().await.notify_subscribers(&notifications);
         Ok(())
     }
 
@@ -473,7 +518,7 @@ impl JsonRpcHandler {
             ending_block_number: old_latest_block.block_number(),
         });
 
-        self.api.sockets.lock().await.notify_subscribers(&[notification]).await;
+        self.api.sockets.lock().await.notify_subscribers(&[notification]);
         Ok(())
     }
 
@@ -709,12 +754,7 @@ impl JsonRpcHandler {
     }
 
     /// Takes `bytes` to be an encoded RPC request, executes it, and sends the response via `ws`.
-    async fn on_websocket_call(
-        &self,
-        bytes: &[u8],
-        ws: Arc<Mutex<SplitSink<WebSocket, Message>>>,
-        socket_id: SocketId,
-    ) {
+    async fn on_websocket_call(&self, bytes: &[u8], ws: &SocketSender, socket_id: SocketId) {
         let response = match serde_json::from_slice(bytes) {
             Ok(Request::Single(RpcCall::MethodCall(rpc_call))) => {
                 match self.on_websocket_rpc_call(&rpc_call, socket_id).await {
@@ -733,9 +773,7 @@ impl JsonRpcHandler {
         };
         let response_serialized = serde_json::to_string(&response).unwrap_or_default();
 
-        if let Err(e) = ws.lock().await.send(Message::Text(response_serialized.into())).await {
-            tracing::error!("Error sending websocket message: {e}");
-        }
+        ws.send(response_serialized);
     }
 
     fn allows_method(&self, method: &str) -> bool {
@@ -773,7 +811,7 @@ impl JsonRpcHandler {
 
                 match resp_result {
                     ResponseResult::Success(result_value) => {
-                        socket_context.send_rpc_response(result_value, call.id.clone()).await;
+                        socket_context.send_rpc_response(result_value, call.id.clone());
                         Ok(())
                     }
                     ResponseResult::Error(rpc_error) => Err(rpc_error),
@@ -824,6 +862,16 @@ impl JsonRpcHandler {
 
     pub async fn re_execute(&self, events: &[RpcMethodCall]) -> Result<(), RpcError> {
         let _lifecycle = self.api.lifecycle.write().await;
+        // Startup decoding is read-only. Any journal replacement belongs to this coordinated
+        // application phase, just as it does for devnet_load.
+        self.api.snapshots.lock().await.checkpoints.clear();
+        if let (Some(DumpOn::Block), Some(path)) =
+            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
+        {
+            clear_dump_file(path).map_err(|error| {
+                RpcError::internal_error_with(format!("Failed clearing startup journal: {error}"))
+            })?;
+        }
         self.re_execute_locked(events).await
     }
 

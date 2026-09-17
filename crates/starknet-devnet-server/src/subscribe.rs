@@ -1,9 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket};
-use futures::SinkExt;
-use futures::stream::SplitSink;
 use serde::{self, Deserialize, Serialize};
 use starknet_core::starknet::events::check_if_filter_applies_for_event;
 use starknet_rs_core::types::Felt;
@@ -15,11 +11,11 @@ use starknet_types::rpc::transaction_receipt::TransactionReceipt;
 use starknet_types::rpc::transactions::{
     TransactionFinalityStatus, TransactionStatus, TransactionWithHash,
 };
-use tokio::sync::Mutex;
 
 use crate::api::error::ApiError;
 use crate::api::models::{SubscriptionId, SubscriptionTag};
 use crate::rpc_core::request::Id;
+use crate::socket_writer::SocketSender;
 
 pub type SocketId = u64;
 
@@ -38,7 +34,7 @@ impl SocketCollection {
     }
 
     /// Assigns a random socket ID to the socket whose `socket_writer` is provided. Returns the ID.
-    pub fn insert(&mut self, socket_writer: Arc<Mutex<SplitSink<WebSocket, Message>>>) -> SocketId {
+    pub(crate) fn insert(&mut self, socket_writer: SocketSender) -> SocketId {
         let socket_id = rand::random();
         self.sockets.insert(socket_id, SocketContext::from_sender(socket_writer));
         socket_id
@@ -48,10 +44,10 @@ impl SocketCollection {
         self.sockets.remove(socket_id);
     }
 
-    pub async fn notify_subscribers(&self, notifications: &[NotificationData]) {
+    pub fn notify_subscribers(&self, notifications: &[NotificationData]) {
         for (_, socket_context) in self.sockets.iter() {
             for notification in notifications {
-                socket_context.notify_subscribers(notification).await;
+                socket_context.notify_subscribers(notification);
             }
         }
     }
@@ -330,22 +326,20 @@ impl SubscriptionResponse {
 
 pub struct SocketContext {
     /// The sender part of the socket's own channel
-    sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
+    sender: SocketSender,
     subscriptions: HashMap<SubscriptionId, Subscription>,
 }
 
 impl SocketContext {
-    pub fn from_sender(sender: Arc<Mutex<SplitSink<WebSocket, Message>>>) -> Self {
+    pub(crate) fn from_sender(sender: SocketSender) -> Self {
         Self { sender, subscriptions: HashMap::new() }
     }
 
-    async fn send_serialized(&self, resp: String) {
-        if let Err(e) = self.sender.lock().await.send(Message::Text(resp.into())).await {
-            tracing::error!("Failed writing to socket: {}", e.to_string());
-        }
+    fn send_serialized(&self, resp: String) {
+        self.sender.send(resp);
     }
 
-    pub async fn send_rpc_response(&self, result: serde_json::Value, id: Id) {
+    pub fn send_rpc_response(&self, result: serde_json::Value, id: Id) {
         let resp_serialized = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -354,21 +348,17 @@ impl SocketContext {
         .to_string();
 
         tracing::trace!(target: "ws.json-rpc-api", response = %resp_serialized, "JSON-RPC response");
-        self.send_serialized(resp_serialized).await;
+        self.send_serialized(resp_serialized);
     }
 
-    async fn send_subscription_response(&self, resp: SubscriptionResponse) {
+    fn send_subscription_response(&self, resp: SubscriptionResponse) {
         let resp_serialized = resp.to_serialized_rpc_response().to_string();
 
         tracing::trace!(target: "ws.subscriptions", response = %resp_serialized, "subscription response");
-        self.send_serialized(resp_serialized).await;
+        self.send_serialized(resp_serialized);
     }
 
-    pub async fn subscribe(
-        &mut self,
-        rpc_request_id: Id,
-        subscription: Subscription,
-    ) -> SubscriptionId {
+    pub fn subscribe(&mut self, rpc_request_id: Id, subscription: Subscription) -> SubscriptionId {
         loop {
             let subscription_id: SubscriptionId = rand::random::<u64>().into();
             if self.subscriptions.contains_key(&subscription_id) {
@@ -381,14 +371,13 @@ impl SocketContext {
             self.send_subscription_response(SubscriptionResponse::Confirmation {
                 rpc_request_id,
                 result: confirmation,
-            })
-            .await;
+            });
 
             return subscription_id;
         }
     }
 
-    pub async fn unsubscribe(
+    pub fn unsubscribe(
         &mut self,
         rpc_request_id: Id,
         subscription_id: SubscriptionId,
@@ -397,12 +386,11 @@ impl SocketContext {
         self.send_subscription_response(SubscriptionResponse::Confirmation {
             rpc_request_id,
             result: SubscriptionConfirmation::Unsubscription(true),
-        })
-        .await;
+        });
         Ok(())
     }
 
-    pub async fn notify(
+    pub fn notify(
         &self,
         subscription_id: SubscriptionId,
         subscription: &Subscription,
@@ -453,14 +441,13 @@ impl SocketContext {
 
         self.send_subscription_response(SubscriptionResponse::Notification(Box::new(
             notification_data,
-        )))
-        .await;
+        )));
     }
 
-    pub async fn notify_subscribers(&self, notification: &NotificationData) {
+    pub fn notify_subscribers(&self, notification: &NotificationData) {
         for (subscription_id, subscription) in self.subscriptions.iter() {
             if subscription.matches(notification) {
-                self.notify(*subscription_id, subscription, notification.clone()).await;
+                self.notify(*subscription_id, subscription, notification.clone());
             }
         }
     }

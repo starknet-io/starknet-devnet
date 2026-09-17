@@ -21,13 +21,14 @@ const TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY: usize = 1024;
 
 pub(crate) struct OriginAcceptance {
     accepted_on_l1_through: Option<u64>,
-    transaction_block_numbers: LruCache<Felt, u64>,
+    transaction_block_numbers: Arc<Mutex<LruCache<Felt, u64>>>,
 }
 
 impl OriginAcceptance {
     pub(crate) fn restore(&mut self, accepted_on_l1_through: Option<u64>) {
         self.accepted_on_l1_through = accepted_on_l1_through;
-        self.transaction_block_numbers.clear();
+        // In-flight reads retain the old cache, so they cannot repopulate the restored one.
+        self.transaction_block_numbers = Self::default().transaction_block_numbers;
     }
 }
 
@@ -35,11 +36,24 @@ impl Default for OriginAcceptance {
     fn default() -> Self {
         Self {
             accepted_on_l1_through: None,
-            transaction_block_numbers: LruCache::new(
+            transaction_block_numbers: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY)
                     .unwrap_or(NonZeroUsize::MIN),
-            ),
+            ))),
         }
+    }
+}
+
+/// Captured under lifecycle coordination; network I/O can finish after a concurrent restore.
+/// The response belongs to this read's acceptance context, not the state at delivery time.
+pub(crate) struct PreparedOriginCall {
+    forwarder: OriginForwarder,
+    call: RpcMethodCall,
+}
+
+impl PreparedOriginCall {
+    pub(crate) async fn execute(self) -> ResponseResult {
+        self.forwarder.call(&self.call).await
     }
 }
 
@@ -61,6 +75,16 @@ pub struct OriginForwarder {
 }
 
 impl OriginForwarder {
+    pub(crate) async fn prepare_call(&self, call: RpcMethodCall) -> PreparedOriginCall {
+        let acceptance = self.acceptance.read().await;
+        let mut forwarder = self.clone();
+        forwarder.acceptance = Arc::new(RwLock::new(OriginAcceptance {
+            accepted_on_l1_through: acceptance.accepted_on_l1_through,
+            transaction_block_numbers: acceptance.transaction_block_numbers.clone(),
+        }));
+        PreparedOriginCall { forwarder, call }
+    }
+
     pub fn new(url: url::Url, block_number: u64) -> Self {
         Self {
             reqwest_client: reqwest::Client::new(),
@@ -351,8 +375,8 @@ impl OriginForwarder {
     }
 
     async fn transaction_block_number(&self, transaction_hash: Felt) -> Option<u64> {
-        let cached_block_number =
-            self.acceptance.write().await.transaction_block_numbers.get(&transaction_hash).copied();
+        let cache = self.acceptance.read().await.transaction_block_numbers.clone();
+        let cached_block_number = cache.lock().await.get(&transaction_hash).copied();
         if let Some(block_number) = cached_block_number {
             return Some(block_number);
         }
@@ -369,7 +393,7 @@ impl OriginForwarder {
             }
         };
         let block_number = receipt.block.block_number();
-        self.acceptance.write().await.transaction_block_numbers.put(transaction_hash, block_number);
+        cache.lock().await.put(transaction_hash, block_number);
 
         Some(block_number)
     }
@@ -450,12 +474,35 @@ fn transaction_hash_from_call(rpc_call: &RpcMethodCall) -> Option<Felt> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use serde_json::json;
     use starknet_rs_core::types::Felt;
 
     use super::{AcceptanceResponseKind, OriginForwarder, TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY};
     use crate::rpc_core::request::RpcMethodCall;
     use crate::rpc_core::response::ResponseResult;
+
+    #[tokio::test]
+    async fn prepared_read_keeps_acceptance_and_cannot_repopulate_restored_cache() {
+        let forwarder = OriginForwarder::new(url::Url::parse("http://dummy.com").unwrap(), 10);
+        forwarder.set_accepted_on_l1_through(5).await;
+        let request = serde_json::from_value(json!({
+            "jsonrpc": "2.0", "id": 1, "method": "starknet_getTransactionStatus",
+            "params": { "transaction_hash": "0x1" }
+        }))
+        .unwrap();
+        let prepared = forwarder.prepare_call(request).await;
+        let old_cache =
+            prepared.forwarder.acceptance.read().await.transaction_block_numbers.clone();
+        forwarder.lock_acceptance().await.restore(None);
+        old_cache.lock().await.put(Felt::ONE, 5);
+        assert_eq!(prepared.forwarder.acceptance_boundary().await, Some(5));
+        assert_eq!(forwarder.acceptance_boundary().await, None);
+        let new_cache = forwarder.acceptance.read().await.transaction_block_numbers.clone();
+        assert!(!Arc::ptr_eq(&old_cache, &new_cache));
+        assert!(new_cache.lock().await.is_empty());
+    }
 
     #[test]
     fn test_replacing_block_id() {
@@ -561,7 +608,9 @@ mod tests {
         forwarder.set_accepted_on_l1_through(5).await;
 
         assert_eq!(forwarder.acceptance.read().await.accepted_on_l1_through, Some(5));
-        assert!(forwarder.acceptance.read().await.transaction_block_numbers.is_empty());
+        assert!(
+            forwarder.acceptance.read().await.transaction_block_numbers.lock().await.is_empty()
+        );
         assert_eq!(
             forwarder
                 .intercept_response(&request, response, AcceptanceResponseKind::Block, 5,)
@@ -605,7 +654,14 @@ mod tests {
             }))
         );
 
-        forwarder.acceptance.write().await.transaction_block_numbers.put(transaction_hash, 5);
+        forwarder
+            .acceptance
+            .read()
+            .await
+            .transaction_block_numbers
+            .lock()
+            .await
+            .put(transaction_hash, 5);
         let status_request: RpcMethodCall = serde_json::from_value(json!({
             "jsonrpc": "2.0",
             "method": "starknet_getTransactionStatus",
@@ -679,9 +735,10 @@ mod tests {
         let covered_transaction_hash = Felt::from(123_u64);
         let uncovered_transaction_hash = Felt::from(456_u64);
         {
-            let mut acceptance = forwarder.acceptance.write().await;
-            acceptance.transaction_block_numbers.put(covered_transaction_hash, 5);
-            acceptance.transaction_block_numbers.put(uncovered_transaction_hash, 6);
+            let acceptance = forwarder.acceptance.read().await;
+            let mut cache = acceptance.transaction_block_numbers.lock().await;
+            cache.put(covered_transaction_hash, 5);
+            cache.put(uncovered_transaction_hash, 6);
         }
         let request: RpcMethodCall = serde_json::from_value(json!({
             "jsonrpc": "2.0",
@@ -721,21 +778,15 @@ mod tests {
     #[tokio::test]
     async fn transaction_block_number_cache_is_bounded() {
         let forwarder = OriginForwarder::new(url::Url::parse("http://dummy.com").unwrap(), 10);
-        let mut acceptance = forwarder.acceptance.write().await;
+        let acceptance = forwarder.acceptance.read().await;
+        let mut cache = acceptance.transaction_block_numbers.lock().await;
 
         for number in 0..=TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY as u64 {
-            acceptance.transaction_block_numbers.put(Felt::from(number), number);
+            cache.put(Felt::from(number), number);
         }
 
-        assert_eq!(
-            acceptance.transaction_block_numbers.len(),
-            TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY
-        );
-        assert!(!acceptance.transaction_block_numbers.contains(&Felt::ZERO));
-        assert!(
-            acceptance
-                .transaction_block_numbers
-                .contains(&Felt::from(TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY as u64))
-        );
+        assert_eq!(cache.len(), TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY);
+        assert!(!cache.contains(&Felt::ZERO));
+        assert!(cache.contains(&Felt::from(TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY as u64)));
     }
 }

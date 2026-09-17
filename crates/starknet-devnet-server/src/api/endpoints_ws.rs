@@ -55,7 +55,7 @@ impl JsonRpcHandler {
             JsonRpcSubscriptionRequest::Unsubscribe(SubscriptionIdInput { subscription_id }) => {
                 let mut sockets = self.api.sockets.lock().await;
                 let socket_context = sockets.get_mut(&socket_id)?;
-                socket_context.unsubscribe(rpc_request_id, subscription_id).await
+                socket_context.unsubscribe(rpc_request_id, subscription_id)
             }
         }
     }
@@ -226,8 +226,7 @@ impl JsonRpcHandler {
         // perform the actual subscription
         let mut sockets = self.api.sockets.lock().await;
         let socket_context = sockets.get_mut(&socket_id)?;
-        let subscription_id =
-            socket_context.subscribe(rpc_request_id, Subscription::NewHeads).await;
+        let subscription_id = socket_context.subscribe(rpc_request_id, Subscription::NewHeads);
 
         if let BlockId::Tag(_) = block_id {
             // if the specified block ID is a tag (i.e. latest/pre-confirmed), no old block handling
@@ -255,7 +254,7 @@ impl JsonRpcHandler {
 
         for header in headers {
             let notification = NotificationData::NewHeads(header);
-            socket_context.notify(subscription_id, &Subscription::NewHeads, notification).await;
+            socket_context.notify(subscription_id, &Subscription::NewHeads, notification);
         }
 
         Ok(())
@@ -295,7 +294,7 @@ impl JsonRpcHandler {
         let socket_context = sockets.get_mut(&socket_id)?;
 
         let subscription = Subscription::NewTransactions { address_filter, status_filter, tags };
-        socket_context.subscribe(rpc_request_id, subscription).await;
+        socket_context.subscribe(rpc_request_id, subscription);
 
         Ok(())
     }
@@ -329,7 +328,7 @@ impl JsonRpcHandler {
         let socket_context = sockets.get_mut(&socket_id)?;
 
         let subscription = Subscription::NewTransactionReceipts { address_filter, status_filter };
-        socket_context.subscribe(rpc_request_id, subscription).await;
+        socket_context.subscribe(rpc_request_id, subscription);
 
         Ok(())
     }
@@ -345,7 +344,7 @@ impl JsonRpcHandler {
         let socket_context = sockets.get_mut(&socket_id)?;
 
         let subscription = Subscription::TransactionStatus { transaction_hash };
-        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone()).await;
+        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone());
 
         let starknet = self.api.starknet.lock().await;
 
@@ -355,7 +354,7 @@ impl JsonRpcHandler {
                 transaction_hash,
                 status,
             });
-            socket_context.notify(subscription_id, &subscription, notification).await;
+            socket_context.notify(subscription_id, &subscription, notification);
         } else if let Some(phase) = starknet.get_queued_transaction_phase(&transaction_hash) {
             use starknet_core::starknet::mempool::MempoolPhase;
             use starknet_types::rpc::transactions::{TransactionFinalityStatus, TransactionStatus};
@@ -369,7 +368,7 @@ impl JsonRpcHandler {
                 transaction_hash,
                 status: TransactionStatus::pre_execution(finality_status),
             });
-            socket_context.notify(subscription_id, &subscription, notification).await;
+            socket_context.notify(subscription_id, &subscription, notification);
         } else {
             tracing::debug!("Tx status subscription: tx not yet received")
         }
@@ -448,7 +447,7 @@ impl JsonRpcHandler {
             keys_filter: keys_filter.clone(),
             status_filter: StatusFilter::new(vec![finality_status]),
         };
-        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone()).await;
+        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone());
 
         // Fetch events from origin chain if we're in a fork and need historical data
         let origin_events = if let Some((origin_start, origin_end)) = origin_range {
@@ -481,7 +480,7 @@ impl JsonRpcHandler {
                     emitted_event: event,
                     finality_status,
                 });
-                socket_context.notify(subscription_id, &subscription, notification_data).await;
+                socket_context.notify(subscription_id, &subscription, notification_data);
             }
         }
 
@@ -491,7 +490,7 @@ impl JsonRpcHandler {
                 emitted_event: event,
                 finality_status,
             });
-            socket_context.notify(subscription_id, &subscription, notification_data).await;
+            socket_context.notify(subscription_id, &subscription, notification_data);
         }
 
         Ok(())

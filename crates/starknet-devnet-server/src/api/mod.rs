@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use starknet_core::starknet::starknet_config::StarknetConfig;
 use starknet_core::starknet::{Starknet, StarknetCheckpoint};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::error;
 
 use crate::ServerConfig;
@@ -17,6 +17,9 @@ mod endpoints;
 mod endpoints_ws;
 pub mod error;
 pub mod json_rpc_handler;
+pub mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 pub mod models;
 pub(crate) mod origin_forwarder;
 #[cfg(test)]
@@ -38,7 +41,7 @@ pub struct Api {
     pub dumpable_events: Arc<Mutex<Vec<DumpEvent>>>,
     pub sockets: Arc<Mutex<SocketCollection>>,
     pub(crate) snapshots: Arc<Mutex<SnapshotStore>>,
-    pub lifecycle: Arc<RwLock<()>>,
+    pub lifecycle: Arc<lifecycle::Lifecycle>,
 }
 
 pub(crate) struct ServerCheckpoint {

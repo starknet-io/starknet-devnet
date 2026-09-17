@@ -475,8 +475,66 @@ impl JsonRpcRequest {
                 | DevnetSpecRequest::DevnetConfig
                 | DevnetSpecRequest::DevnetStatus,
             ) => false,
-            Self::DevnetSpecRequest(_) => true,
-            Self::StarknetSpecRequest(_) | Self::StarknetSpecExtRequest(_) => false,
+            Self::DevnetSpecRequest(
+                DevnetSpecRequest::ImpersonateAccount(_)
+                | DevnetSpecRequest::StopImpersonateAccount(_)
+                | DevnetSpecRequest::AutoImpersonate
+                | DevnetSpecRequest::StopAutoImpersonate
+                | DevnetSpecRequest::Dump(_)
+                | DevnetSpecRequest::Snapshot
+                | DevnetSpecRequest::Revert(_)
+                | DevnetSpecRequest::Load(_)
+                | DevnetSpecRequest::PostmanLoadL1MessagingContract(_)
+                | DevnetSpecRequest::PostmanFlush(_)
+                | DevnetSpecRequest::PostmanSendMessageToL2(_)
+                | DevnetSpecRequest::PostmanConsumeMessageFromL2(_)
+                | DevnetSpecRequest::CreateBlock
+                | DevnetSpecRequest::RemoveFromMempool(_)
+                | DevnetSpecRequest::ClearMempool
+                | DevnetSpecRequest::PreconfirmTransactions(_)
+                | DevnetSpecRequest::SetMempoolConfig(_)
+                | DevnetSpecRequest::SealBlock
+                | DevnetSpecRequest::AbortPreconfirmedBlock
+                | DevnetSpecRequest::AbortBlocks(_)
+                | DevnetSpecRequest::AcceptOnL1(_)
+                | DevnetSpecRequest::SetGasPrice(_)
+                | DevnetSpecRequest::Restart(_)
+                | DevnetSpecRequest::SetTime(_)
+                | DevnetSpecRequest::IncreaseTime(_)
+                | DevnetSpecRequest::Mint(_),
+            ) => true,
+            Self::StarknetSpecRequest(
+                StarknetSpecRequest::SpecVersion
+                | StarknetSpecRequest::BlockWithTransactionHashes(_)
+                | StarknetSpecRequest::BlockWithFullTransactions(_)
+                | StarknetSpecRequest::BlockWithReceipts(_)
+                | StarknetSpecRequest::StateUpdate(_)
+                | StarknetSpecRequest::StorageAt(_)
+                | StarknetSpecRequest::StorageProof(_)
+                | StarknetSpecRequest::TransactionByHash(_)
+                | StarknetSpecRequest::TransactionByBlockAndIndex(_)
+                | StarknetSpecRequest::TransactionReceiptByTransactionHash(_)
+                | StarknetSpecRequest::TransactionStatusByHash(_)
+                | StarknetSpecRequest::MessagesStatusByL1Hash(_)
+                | StarknetSpecRequest::ClassByHash(_)
+                | StarknetSpecRequest::CompiledCasmByClassHash(_)
+                | StarknetSpecRequest::ClassHashAtContractAddress(_)
+                | StarknetSpecRequest::ClassAtContractAddress(_)
+                | StarknetSpecRequest::BlockTransactionCount(_)
+                | StarknetSpecRequest::Call(_)
+                | StarknetSpecRequest::EstimateFee(_)
+                | StarknetSpecRequest::BlockNumber
+                | StarknetSpecRequest::BlockHashAndNumber
+                | StarknetSpecRequest::ChainId
+                | StarknetSpecRequest::Syncing
+                | StarknetSpecRequest::Events(_)
+                | StarknetSpecRequest::ContractNonce(_)
+                | StarknetSpecRequest::EstimateMessageFee(_)
+                | StarknetSpecRequest::SimulateTransactions(_)
+                | StarknetSpecRequest::TraceTransaction(_)
+                | StarknetSpecRequest::BlockTransactionTraces(_),
+            )
+            | Self::StarknetSpecExtRequest(StarknetSpecExtRequest::ProveTransaction(_)) => false,
         }
     }
 
