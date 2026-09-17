@@ -66,6 +66,7 @@ impl StarknetCheckpoint {
 
     pub fn restore(self, starknet: &mut Starknet) {
         *starknet = self.0;
+        starknet.sync_metrics();
     }
 }
 
@@ -76,7 +77,6 @@ impl Starknet {
 
     pub fn restore_checkpoint(&mut self, checkpoint: StarknetCheckpoint) {
         checkpoint.restore(self);
-        self.sync_metrics();
     }
 }
 

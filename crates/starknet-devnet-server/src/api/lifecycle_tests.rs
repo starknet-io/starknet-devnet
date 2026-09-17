@@ -84,7 +84,11 @@ async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
             json!([]),
         )
     });
-    for result in join_all(calls).await {
+    let lifecycle = handler.api.lifecycle.write().await;
+    let mut calls = Box::pin(join_all(calls));
+    assert!(poll!(&mut calls).is_pending());
+    drop(lifecycle);
+    for result in calls.await {
         assert!(matches!(result, ResponseResult::Success(_)));
     }
     let snapshots = handler.api.snapshots.lock().await;
@@ -102,9 +106,17 @@ async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
 async fn allocator_exhaustion_preserves_existing_checkpoints() {
     let handler = handler();
     call(&handler, "devnet_snapshot", json!([])).await;
-    handler.api.snapshots.lock().await.next_id = u64::MAX;
+    handler.api.snapshots.lock().await.last_id = u64::MAX - 1;
+    assert_eq!(
+        call(&handler, "devnet_snapshot", json!([])).await,
+        ResponseResult::Success(json!("0xffffffffffffffff"))
+    );
     assert!(matches!(call(&handler, "devnet_snapshot", json!([])).await, ResponseResult::Error(_)));
-    assert_eq!(handler.api.snapshots.lock().await.next_id, u64::MAX);
+    assert_eq!(handler.api.snapshots.lock().await.last_id, u64::MAX);
+    assert_eq!(
+        call(&handler, "devnet_revert", json!({"snapshot_id": "0xFFFFFFFFFFFFFFFF"})).await,
+        ResponseResult::Success(json!(true))
+    );
     assert_eq!(
         call(&handler, "devnet_revert", json!({"snapshot_id": "0x1"})).await,
         ResponseResult::Success(json!(true))

@@ -42,8 +42,7 @@ impl JsonRpcHandler {
     /// devnet_snapshot
     pub async fn snapshot(&self) -> StrictRpcResult {
         let mut snapshots = self.api.snapshots.lock().await;
-        let snapshot_id = snapshots.next_id;
-        let next_id = snapshot_id.checked_add(1).ok_or_else(|| {
+        let snapshot_id = snapshots.last_id.checked_add(1).ok_or_else(|| {
             ApiError::RpcError(RpcError::internal_error_with("Snapshot ID space exhausted"))
         })?;
         let origin_accepted_on_l1_through = match &self.origin_caller {
@@ -53,7 +52,7 @@ impl JsonRpcHandler {
         let dump_event_count = self.api.dumpable_events.lock().await.len();
         let core = self.api.starknet.lock().await.checkpoint();
 
-        snapshots.next_id = next_id;
+        snapshots.last_id = snapshot_id;
         snapshots.checkpoints.insert(
             snapshot_id,
             crate::api::ServerCheckpoint { core, dump_event_count, origin_accepted_on_l1_through },

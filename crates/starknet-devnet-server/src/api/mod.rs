@@ -50,15 +50,10 @@ pub(crate) struct ServerCheckpoint {
     pub origin_accepted_on_l1_through: Option<u64>,
 }
 
+#[derive(Default)]
 pub(crate) struct SnapshotStore {
-    pub next_id: u64,
+    pub last_id: u64,
     pub checkpoints: BTreeMap<u64, ServerCheckpoint>,
-}
-
-impl Default for SnapshotStore {
-    fn default() -> Self {
-        Self { next_id: 1, checkpoints: BTreeMap::new() }
-    }
 }
 
 impl Api {
