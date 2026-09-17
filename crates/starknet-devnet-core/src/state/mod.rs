@@ -147,6 +147,7 @@ impl CommittedClassStorage {
     }
 }
 
+#[derive(Clone)]
 pub struct StarknetState {
     pub(crate) state: CachedState<DictState>,
     /// The class storage is meant to be shared between states to prevent copying (due to memory
@@ -185,6 +186,13 @@ impl StarknetState {
 
     pub fn clone_rpc_contract_classes(&self) -> CommittedClassStorage {
         self.rpc_contract_classes.read().clone()
+    }
+
+    pub(crate) fn relink_rpc_contract_classes(
+        &mut self,
+        rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
+    ) {
+        self.rpc_contract_classes = rpc_contract_classes;
     }
 
     /// Returns the block number of the most recent update for the given storage slot, if any.

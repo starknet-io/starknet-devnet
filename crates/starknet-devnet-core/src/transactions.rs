@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use blockifier::execution::call_info::CallInfo;
 use blockifier::execution::stack_trace::ErrorStack;
 use blockifier::transaction::objects::TransactionExecutionInfo;
@@ -21,7 +23,7 @@ use starknet_types::rpc::transactions::{
 use crate::error::DevnetResult;
 use crate::traits::{HashIdentified, HashIdentifiedMut};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct StarknetTransactions(IndexMap<TransactionHash, StarknetTransaction>);
 
 impl StarknetTransactions {
@@ -58,15 +60,15 @@ impl HashIdentified for StarknetTransactions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StarknetTransaction {
     pub inner: TransactionWithHash,
     pub(crate) finality_status: TransactionFinalityStatus,
     pub(crate) execution_result: ExecutionResult,
     pub(crate) block_hash: Option<BlockHash>,
     pub(crate) block_number: Option<BlockNumber>,
-    pub(crate) execution_info: TransactionExecutionInfo,
-    pub(crate) trace: Option<TransactionTrace>,
+    pub(crate) execution_info: Arc<TransactionExecutionInfo>,
+    pub(crate) trace: Option<Arc<TransactionTrace>>,
 }
 
 impl StarknetTransaction {
@@ -91,8 +93,8 @@ impl StarknetTransaction {
             inner: transaction.clone(),
             block_hash: None,
             block_number: Some(pre_confirmed_block_number),
-            execution_info,
-            trace: Some(trace),
+            execution_info: Arc::new(execution_info),
+            trace: Some(Arc::new(trace)),
         }
     }
 
@@ -199,7 +201,7 @@ impl StarknetTransaction {
     }
 
     pub fn get_trace(&self) -> Option<TransactionTrace> {
-        self.trace.clone()
+        self.trace.as_deref().cloned()
     }
 
     pub fn get_l2_to_l1_messages(&self) -> Vec<MessageToL1> {

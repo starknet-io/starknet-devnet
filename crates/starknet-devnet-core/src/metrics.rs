@@ -1,20 +1,20 @@
 #![allow(clippy::expect_used)]
 
 use lazy_static::lazy_static;
-use prometheus::{Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts};
+use prometheus::{Histogram, HistogramVec, IntCounterVec, IntGauge, Opts};
 
 lazy_static! {
-    /// Counter tracking total number of transactions in Starknet
-    pub static ref TRANSACTION_COUNT: IntCounter = IntCounter::new(
+    /// Gauge tracking the transactions currently retained by Starknet
+    pub static ref TRANSACTION_COUNT: IntGauge = IntGauge::new(
         "starknet_transaction_count",
-        "Total number of transactions in Starknet"
+        "Current number of retained transactions in Starknet"
     )
     .expect("Failed to create TRANSACTION_COUNT counter");
 
-    /// Counter tracking total number of blocks in Starknet
-    pub static ref BLOCK_COUNT: IntCounter = IntCounter::new(
+    /// Gauge tracking the local blocks currently retained by Starknet
+    pub static ref BLOCK_COUNT: IntGauge = IntGauge::new(
         "starknet_block_count",
-        "Total number of blocks in Starknet"
+        "Current number of retained local blocks in Starknet"
     )
     .expect("Failed to create BLOCK_COUNT counter");
 
