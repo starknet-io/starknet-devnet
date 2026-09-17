@@ -114,7 +114,9 @@ impl StateDiff {
     pub(crate) fn extend(&mut self, other: &StateDiff) {
         self.address_to_class_hash.extend(&other.address_to_class_hash);
         self.address_to_nonce.extend(&other.address_to_nonce);
-        self.storage_updates.extend(other.storage_updates.clone());
+        for (address, slots) in &other.storage_updates {
+            self.storage_updates.entry(*address).or_default().extend(slots);
+        }
         self.class_hash_to_compiled_class_hash.extend(&other.class_hash_to_compiled_class_hash);
         self.cairo_0_declared_contracts.extend(&other.cairo_0_declared_contracts);
         self.declared_contracts.extend(&other.declared_contracts);
@@ -252,6 +254,30 @@ mod tests {
     use starknet_types::traits::TryHashProducer;
 
     use super::StateDiff;
+
+    #[test]
+    fn merging_storage_diffs_preserves_other_slots_and_assigns_zero() {
+        let address = ContractAddress::new_unchecked(Felt::ONE);
+        let first_key = starknet_types::patricia_key::StorageKey::try_from(Felt::ONE).unwrap();
+        let second_key = starknet_types::patricia_key::StorageKey::try_from(Felt::TWO).unwrap();
+        let mut accumulated = StateDiff {
+            storage_updates: [(address, [(first_key, Felt::ONE)].into())].into(),
+            ..Default::default()
+        };
+        accumulated.extend(&StateDiff {
+            storage_updates: [(address, [(second_key, Felt::TWO)].into())].into(),
+            ..Default::default()
+        });
+        accumulated.extend(&StateDiff {
+            storage_updates: [(address, [(first_key, Felt::ZERO)].into())].into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            accumulated.storage_updates[&address],
+            [(first_key, Felt::ZERO), (second_key, Felt::TWO)].into()
+        );
+    }
+
     use crate::account::Account;
     use crate::constants::{ETH_ERC20_CONTRACT_ADDRESS, STRK_ERC20_CONTRACT_ADDRESS};
     use crate::starknet::Starknet;

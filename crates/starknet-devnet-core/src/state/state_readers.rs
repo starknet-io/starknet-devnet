@@ -97,12 +97,8 @@ impl DictState {
         Ok(())
     }
 
-    pub fn increment_nonce(&mut self, contract_address: ContractAddress) -> StateResult<()> {
-        let current_nonce = self.get_nonce_at(contract_address)?;
-        let next_nonce = Nonce(current_nonce.0 + 1);
-        self.address_to_nonce.insert(contract_address, next_nonce);
-
-        Ok(())
+    pub fn set_nonce(&mut self, contract_address: ContractAddress, nonce: Nonce) {
+        self.address_to_nonce.insert(contract_address, nonce);
     }
 
     pub fn set_class_hash_at(

@@ -244,9 +244,9 @@ impl StarknetState {
                 starknet_api::core::CompiledClassHash(casm_hash),
             )?;
         }
-        for (address, _nonce) in state_diff.address_to_nonce {
-            // assuming that historic_state.get_nonce(address) == _nonce - 1
-            historic_state.increment_nonce(address.into())?;
+        for (address, nonce) in state_diff.address_to_nonce {
+            // State diffs contain absolute values, including jumps or explicit overrides.
+            historic_state.set_nonce(address.into(), starknet_api::core::Nonce(nonce));
         }
         for (address, storage_updates) in state_diff.storage_updates {
             let core_address = address.into();
@@ -519,6 +519,33 @@ mod tests {
 
         // check if nonce update was correct
         assert_eq!(state.get_nonce_at(contract_address).unwrap(), Nonce(Felt::ONE));
+    }
+
+    #[test]
+    fn historic_state_assigns_absolute_nonce_values() {
+        let mut state = StarknetState::default();
+        let address = dummy_contract_address();
+        for nonce in [Felt::from(7_u32), Felt::ONE, Felt::ZERO] {
+            let diff = super::StateDiff {
+                address_to_nonce: [(address, nonce)].into(),
+                ..Default::default()
+            };
+            state.expand_historic(diff).unwrap();
+            assert_eq!(state.clone_historic().get_nonce_at(address.into()).unwrap(), Nonce(nonce));
+            state = state.clone_historic();
+        }
+    }
+
+    #[test]
+    fn committing_multiple_nonce_increments_keeps_final_value() {
+        let mut state = StarknetState::default();
+        let address = dummy_contract_address().into();
+        for _ in 0..3 {
+            state.increment_nonce(address).unwrap();
+        }
+        state.commit_diff(1).unwrap();
+        assert_eq!(state.get_nonce_at(address).unwrap(), Nonce(Felt::THREE));
+        assert_eq!(state.clone_historic().get_nonce_at(address).unwrap(), Nonce(Felt::THREE));
     }
 
     #[test]
