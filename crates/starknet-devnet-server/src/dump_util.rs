@@ -4,7 +4,6 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use starknet_core::error::{DevnetResult, Error};
-use starknet_core::starknet::starknet_config::DumpOn;
 
 use crate::rpc_core::request::RpcMethodCall;
 
@@ -88,15 +87,6 @@ pub fn clear_dump_file(path: &str) -> DevnetResult<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(Error::IoError(err)),
     }
-}
-
-/// Returns Devnet events from the provided `path`
-pub fn load_events(dump_on: Option<DumpOn>, path: &str) -> DevnetResult<Vec<DumpEvent>> {
-    let events = read_events(path)?;
-    if let Some(DumpOn::Block) = dump_on {
-        clear_dump_file(path)?;
-    }
-    Ok(events)
 }
 
 /// Read and validate a journal without changing it or any running state.
