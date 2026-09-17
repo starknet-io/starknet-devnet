@@ -1,6 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use starknet_core::error::{DevnetResult, Error};
 use starknet_core::starknet::starknet_config::DumpOn;
@@ -17,6 +18,33 @@ pub fn dump_events(events: &Vec<DumpEvent>, path: &str) -> DevnetResult<()> {
         fs::write(Path::new(&path), events_dump)?;
     }
 
+    Ok(())
+}
+
+/// Atomically replaces a block-mode journal. An empty journal removes the destination because
+/// append-mode dumping expects a missing file instead of an empty JSON array.
+pub fn replace_dump_events(events: &[DumpEvent], path: &str) -> DevnetResult<()> {
+    if events.is_empty() {
+        return clear_dump_file(path);
+    }
+
+    let destination = Path::new(path);
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| Error::UnexpectedInternalError { msg: error.to_string() })?
+        .as_nanos();
+    let temporary = destination.with_extension(format!("snapshot-{nonce}.tmp"));
+    let serialized = serde_json::to_vec(events)
+        .map_err(|error| Error::SerializationError { origin: error.to_string() })?;
+
+    if let Err(error) = fs::write(&temporary, serialized) {
+        let _ = fs::remove_file(&temporary);
+        return Err(Error::IoError(error));
+    }
+    if let Err(error) = fs::rename(&temporary, destination) {
+        let _ = fs::remove_file(&temporary);
+        return Err(Error::IoError(error));
+    }
     Ok(())
 }
 
@@ -64,6 +92,15 @@ pub fn clear_dump_file(path: &str) -> DevnetResult<()> {
 
 /// Returns Devnet events from the provided `path`
 pub fn load_events(dump_on: Option<DumpOn>, path: &str) -> DevnetResult<Vec<DumpEvent>> {
+    let events = read_events(path)?;
+    if let Some(DumpOn::Block) = dump_on {
+        clear_dump_file(path)?;
+    }
+    Ok(events)
+}
+
+/// Read and validate a journal without changing it or any running state.
+pub fn read_events(path: &str) -> DevnetResult<Vec<DumpEvent>> {
     let file_path = Path::new(path);
     if path.is_empty() || !file_path.exists() {
         return Err(Error::FileNotFound);
@@ -72,13 +109,6 @@ pub fn load_events(dump_on: Option<DumpOn>, path: &str) -> DevnetResult<Vec<Dump
     let file = File::open(file_path).map_err(Error::IoError)?;
     let events: Vec<DumpEvent> = serde_json::from_reader(file)
         .map_err(|e| Error::DeserializationError { origin: e.to_string() })?;
-
-    // to avoid doublets in block mode during load, we need to remove the file
-    // because they will be re-executed and saved again
-    if let Some(DumpOn::Block) = dump_on {
-        // TODO refactor: this shouldn't be the responsibility of this method
-        clear_dump_file(path)?;
-    }
 
     Ok(events)
 }

@@ -56,6 +56,30 @@ impl RpcHandler for JsonRpcHandler {
         request: Self::Request,
         original_call: RpcMethodCall,
     ) -> ResponseResult {
+        if request.is_mutating() {
+            let _lifecycle = self.api.lifecycle.write().await;
+            self.on_request_locked(request, original_call).await
+        } else {
+            let _lifecycle = self.api.lifecycle.read().await;
+            self.on_request_locked(request, original_call).await
+        }
+    }
+
+    async fn on_call(&self, call: RpcMethodCall) -> RpcResponse {
+        self.on_call_with_lifecycle(call, true).await
+    }
+
+    async fn on_websocket(&self, socket: WebSocket) {
+        self.handle_websocket(socket).await;
+    }
+}
+
+impl JsonRpcHandler {
+    async fn on_request_locked(
+        &self,
+        request: JsonRpcRequest,
+        original_call: RpcMethodCall,
+    ) -> ResponseResult {
         info!(target: "rpc", "received method in on_request {}", request);
 
         if !self.allows_method(&original_call.method) {
@@ -112,7 +136,11 @@ impl RpcHandler for JsonRpcHandler {
         starknet_resp.to_rpc_result()
     }
 
-    async fn on_call(&self, call: RpcMethodCall) -> RpcResponse {
+    pub(crate) async fn on_call_with_lifecycle(
+        &self,
+        call: RpcMethodCall,
+        acquire_lifecycle: bool,
+    ) -> RpcResponse {
         let id = call.id.clone();
         let method = call.method.clone();
         trace!(target: "rpc",  id = ?id, method = ?method, "received method call");
@@ -121,7 +149,11 @@ impl RpcHandler for JsonRpcHandler {
 
         let response = match to_json_rpc_request(&call) {
             Ok(req) => {
-                let result = self.on_request(req, call).await;
+                let result = if acquire_lifecycle {
+                    self.on_request(req, call).await
+                } else {
+                    self.on_request_locked(req, call).await
+                };
                 RpcResponse::new(id, result)
             }
             Err(e) => RpcResponse::from_rpc_error(e, id),
@@ -140,7 +172,7 @@ impl RpcHandler for JsonRpcHandler {
         response
     }
 
-    async fn on_websocket(&self, socket: WebSocket) {
+    async fn handle_websocket(&self, socket: WebSocket) {
         let (socket_writer, mut socket_reader) = socket.split();
         let socket_writer = Arc::new(Mutex::new(socket_writer));
 
@@ -445,6 +477,36 @@ impl JsonRpcHandler {
         Ok(())
     }
 
+    pub(crate) fn revert_notifications(
+        old_blocks: &[(u64, starknet_types::felt::BlockHash)],
+        new_blocks: &[(u64, starknet_types::felt::BlockHash)],
+        restored_head: StarknetBlock,
+    ) -> Vec<NotificationData> {
+        let common_len =
+            old_blocks.iter().zip(new_blocks).take_while(|(old, new)| old == new).count();
+        let mut notifications = Vec::new();
+
+        if let (Some((starting_number, starting_hash)), Some((ending_number, ending_hash))) =
+            (old_blocks.get(common_len), old_blocks.last())
+        {
+            notifications.push(NotificationData::Reorg(ReorgData {
+                starting_block_hash: *starting_hash,
+                starting_block_number: starknet_types::starknet_api::block::BlockNumber(
+                    *starting_number,
+                ),
+                ending_block_hash: *ending_hash,
+                ending_block_number: starknet_types::starknet_api::block::BlockNumber(
+                    *ending_number,
+                ),
+            }));
+        }
+
+        if new_blocks.len() > common_len {
+            notifications.push(NotificationData::NewHeads((&restored_head).into()));
+        }
+        notifications
+    }
+
     /// Matches the request to the corresponding enum variant and executes the request.
     async fn execute(&self, req: JsonRpcRequest) -> Result<JsonRpcResponse, error::ApiError> {
         trace!(target: "JsonRpcHandler::execute", "executing request");
@@ -603,6 +665,8 @@ impl JsonRpcHandler {
             DevnetSpecRequest::AutoImpersonate => self.set_auto_impersonate(true).await,
             DevnetSpecRequest::StopAutoImpersonate => self.set_auto_impersonate(false).await,
             DevnetSpecRequest::Dump(request) => self.dump(request.unwrap_or_default()).await,
+            DevnetSpecRequest::Snapshot => self.snapshot().await,
+            DevnetSpecRequest::Revert(request) => self.revert(request).await,
             DevnetSpecRequest::Load(request) => self.load(request).await,
             DevnetSpecRequest::PostmanLoadL1MessagingContract(data) => {
                 self.postman_load(data).await
@@ -715,10 +779,12 @@ impl JsonRpcHandler {
                     ResponseResult::Error(rpc_error) => Err(rpc_error),
                 }
             }
-            JsonRpcWsRequest::SubscriptionRequest(req) => self
-                .execute_ws_subscription(req, call.id.clone(), socket_id)
-                .await
-                .map_err(|e| e.api_error_to_rpc_error()),
+            JsonRpcWsRequest::SubscriptionRequest(req) => {
+                let _lifecycle = self.api.lifecycle.read().await;
+                self.execute_ws_subscription(req, call.id.clone(), socket_id)
+                    .await
+                    .map_err(|e| e.api_error_to_rpc_error())
+            }
         };
 
         // Record metrics
@@ -757,8 +823,15 @@ impl JsonRpcHandler {
     }
 
     pub async fn re_execute(&self, events: &[RpcMethodCall]) -> Result<(), RpcError> {
+        let _lifecycle = self.api.lifecycle.write().await;
+        self.re_execute_locked(events).await
+    }
+
+    pub(crate) async fn re_execute_locked(&self, events: &[RpcMethodCall]) -> Result<(), RpcError> {
         for event in events {
-            if let ResponseResult::Error(e) = self.on_call(event.clone()).await.result {
+            if let ResponseResult::Error(e) =
+                Box::pin(self.on_call_with_lifecycle(event.clone(), false)).await.result
+            {
                 return Err(e);
             }
         }

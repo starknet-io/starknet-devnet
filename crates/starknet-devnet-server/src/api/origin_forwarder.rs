@@ -10,7 +10,7 @@ use starknet_rs_core::types::{
 use starknet_rs_providers::jsonrpc::HttpTransport;
 use starknet_rs_providers::{JsonRpcClient, Provider};
 use starknet_types::rpc::block::{BlockId, BlockTag};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
 use super::error::ApiError;
 use crate::rpc_core::error::RpcError;
@@ -19,9 +19,16 @@ use crate::rpc_core::response::{ResponseResult, RpcResponse};
 
 const TRANSACTION_BLOCK_NUMBER_CACHE_CAPACITY: usize = 1024;
 
-struct OriginAcceptance {
+pub(crate) struct OriginAcceptance {
     accepted_on_l1_through: Option<u64>,
     transaction_block_numbers: LruCache<Felt, u64>,
+}
+
+impl OriginAcceptance {
+    pub(crate) fn restore(&mut self, accepted_on_l1_through: Option<u64>) {
+        self.accepted_on_l1_through = accepted_on_l1_through;
+        self.transaction_block_numbers.clear();
+    }
 }
 
 impl Default for OriginAcceptance {
@@ -244,6 +251,14 @@ impl OriginForwarder {
 
     pub(crate) async fn reset_acceptance(&self) {
         *self.acceptance.write().await = OriginAcceptance::default();
+    }
+
+    pub(crate) async fn acceptance_boundary(&self) -> Option<u64> {
+        self.acceptance.read().await.accepted_on_l1_through
+    }
+
+    pub(crate) async fn lock_acceptance(&self) -> RwLockWriteGuard<'_, OriginAcceptance> {
+        self.acceptance.write().await
     }
 
     async fn intercept_response(

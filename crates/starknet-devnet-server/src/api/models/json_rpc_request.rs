@@ -18,7 +18,7 @@ use crate::api::models::{
     FlushParameters, GetMempoolRequest, GetStorageInput, GetStorageProofInput, IncreaseTime,
     JsonRpcResponse, L1TransactionHashInput, LoadRequest, MintTokensRequest,
     PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest, ProveTransactionInput,
-    RemoveFromMempoolRequest, RestartParameters, SetMempoolConfigRequest, SetTime,
+    RemoveFromMempoolRequest, RestartParameters, RevertRequest, SetMempoolConfigRequest, SetTime,
     SimulateTransactionsInput, StateUpdateInput, SubscriptionBlockIdInput, SubscriptionIdInput,
     TransactionHashAndFlagsInput, TransactionHashInput, TransactionReceiptSubscriptionInput,
     TransactionSubscriptionInput,
@@ -151,6 +151,10 @@ pub enum DevnetSpecRequest {
     StopAutoImpersonate,
     #[serde(rename = "devnet_dump", with = "optional_params")]
     Dump(Option<DumpRequest>),
+    #[serde(rename = "devnet_snapshot", with = "empty_params")]
+    Snapshot,
+    #[serde(rename = "devnet_revert")]
+    Revert(RevertRequest),
     #[serde(rename = "devnet_load")]
     Load(LoadRequest),
     #[serde(rename = "devnet_postmanLoad")]
@@ -399,6 +403,8 @@ impl DevnetSpecRequest {
             | Self::AutoImpersonate
             | Self::StopAutoImpersonate
             | Self::Dump(_)
+            | Self::Snapshot
+            | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanLoadL1MessagingContract(_)
             | Self::PostmanConsumeMessageFromL2(_)
@@ -440,6 +446,8 @@ impl DevnetSpecRequest {
             | Self::IncreaseTime(_)
             | Self::Mint(_) => true,
             Self::Dump(_)
+            | Self::Snapshot
+            | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanFlush(_)
             | Self::GetMempool(_)
@@ -453,6 +461,25 @@ impl DevnetSpecRequest {
 }
 
 impl JsonRpcRequest {
+    pub fn is_mutating(&self) -> bool {
+        match self {
+            Self::StarknetSpecRequest(
+                StarknetSpecRequest::AddDeclareTransaction(_)
+                | StarknetSpecRequest::AddDeployAccountTransaction(_)
+                | StarknetSpecRequest::AddInvokeTransaction(_),
+            ) => true,
+            Self::DevnetSpecRequest(
+                DevnetSpecRequest::GetMempool(_)
+                | DevnetSpecRequest::PredeployedAccounts(_)
+                | DevnetSpecRequest::AccountBalance(_)
+                | DevnetSpecRequest::DevnetConfig
+                | DevnetSpecRequest::DevnetStatus,
+            ) => false,
+            Self::DevnetSpecRequest(_) => true,
+            Self::StarknetSpecRequest(_) | Self::StarknetSpecExtRequest(_) => false,
+        }
+    }
+
     pub fn requires_notifying(&self) -> bool {
         #![warn(clippy::wildcard_enum_match_arm)]
         match self {

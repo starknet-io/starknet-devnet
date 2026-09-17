@@ -30,16 +30,98 @@ use crate::api::models::{
     MempoolConfigResponse, MempoolProcessingFailure, MempoolResponse, MempoolTransactionPhase,
     MempoolTransactionResponse, MessageHash, MessagingLoadAddress, MintTokensRequest,
     MintTokensResponse, PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest,
-    PreconfirmTransactionsResponse, RemovedFromMempoolResponse, RestartParameters,
+    PreconfirmTransactionsResponse, RemovedFromMempoolResponse, RestartParameters, RevertRequest,
     SetMempoolConfigRequest, SetTime, SetTimeResponse,
 };
-use crate::dump_util::{clear_dump_file, dump_events, load_events};
+use crate::dump_util::{clear_dump_file, dump_events, read_events, replace_dump_events};
 use crate::rpc_core::error::RpcError;
 use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
-use crate::rpc_handler::RpcHandler;
 
 impl JsonRpcHandler {
+    /// devnet_snapshot
+    pub async fn snapshot(&self) -> StrictRpcResult {
+        let mut snapshots = self.api.snapshots.lock().await;
+        let snapshot_id = snapshots.next_id;
+        let next_id = snapshot_id.checked_add(1).ok_or_else(|| {
+            ApiError::RpcError(RpcError::internal_error_with("Snapshot ID space exhausted"))
+        })?;
+        let origin_accepted_on_l1_through = match &self.origin_caller {
+            Some(origin) => origin.acceptance_boundary().await,
+            None => None,
+        };
+        let dump_event_count = self.api.dumpable_events.lock().await.len();
+        let core = self.api.starknet.lock().await.checkpoint();
+
+        snapshots.next_id = next_id;
+        snapshots.checkpoints.insert(
+            snapshot_id,
+            crate::api::ServerCheckpoint { core, dump_event_count, origin_accepted_on_l1_through },
+        );
+
+        Ok(DevnetResponse::SnapshotId(format!("0x{snapshot_id:x}")).into())
+    }
+
+    /// devnet_revert
+    pub async fn revert(&self, request: RevertRequest) -> StrictRpcResult {
+        let snapshot_id = parse_snapshot_id(&request.snapshot_id)?;
+        if snapshot_id == 0 {
+            return Ok(DevnetResponse::Reverted(false).into());
+        }
+
+        let mut snapshots = self.api.snapshots.lock().await;
+        let std::collections::btree_map::Entry::Occupied(entry) =
+            snapshots.checkpoints.entry(snapshot_id)
+        else {
+            return Ok(DevnetResponse::Reverted(false).into());
+        };
+        // Acquire every destination before publication. Cancellation during preparation must
+        // leave the checkpoint, journal, and live state untouched.
+        let mut dumpable_events = self.api.dumpable_events.lock().await;
+        let mut starknet = self.api.starknet.lock().await;
+        let mut origin_acceptance = match &self.origin_caller {
+            Some(origin) => Some(origin.lock_acceptance().await),
+            None => None,
+        };
+        let sockets = self.api.sockets.lock().await;
+        let checkpoint = entry.get();
+        let dump_event_count = checkpoint.dump_event_count;
+        let origin_accepted_on_l1_through = checkpoint.origin_accepted_on_l1_through;
+        if dump_event_count > dumpable_events.len() {
+            return Err(ApiError::RpcError(RpcError::internal_error_with(
+                "Snapshot dump position exceeds the current journal",
+            )));
+        }
+        let notifications = Self::revert_notifications(
+            &starknet.accepted_block_hashes(),
+            &checkpoint.core.accepted_block_hashes(),
+            checkpoint.core.latest_block()?,
+        );
+
+        if let (Some(DumpOn::Block), Some(path)) =
+            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
+        {
+            replace_dump_events(&dumpable_events[..dump_event_count], path)
+                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?;
+        }
+
+        // Commit: no await or fallible operation between filesystem publication and the
+        // complete in-memory restore, including snapshot consumption.
+        let checkpoint = entry.remove();
+        starknet.restore_checkpoint(checkpoint.core);
+        if let Some(acceptance) = &mut origin_acceptance {
+            acceptance.restore(origin_accepted_on_l1_through);
+        }
+        dumpable_events.truncate(dump_event_count);
+        snapshots.checkpoints.retain(|id, _| *id < snapshot_id);
+        drop(origin_acceptance);
+        drop(starknet);
+        drop(dumpable_events);
+        drop(snapshots);
+        sockets.notify_subscribers(&notifications).await;
+        Ok(DevnetResponse::Reverted(true).into())
+    }
+
     pub async fn add_declare_transaction(
         &self,
         request: BroadcastedDeclareTransaction,
@@ -148,22 +230,23 @@ impl JsonRpcHandler {
         // Serialize file reads and clears with block-mode appends and endpoint rewrites.
         let dumpable_events = self.api.dumpable_events.lock().await;
         let events = match request {
-            LoadRequest::Path { path } => load_events(self.api.config.dump_on, &path)?,
-            LoadRequest::Events { events } => {
-                if let (Some(DumpOn::Block), Some(path)) =
-                    (self.api.config.dump_on, self.api.config.dump_path.as_deref())
-                {
-                    clear_dump_file(path)?;
-                }
-                events
-            }
+            LoadRequest::Path { path } => read_events(&path)?,
+            LoadRequest::Events { events } => events,
         };
+        // File-read/parse errors preserve snapshots. Invalidate before the first destructive
+        // action, including clearing a configured block-mode journal before reset/replay.
+        self.api.snapshots.lock().await.checkpoints.clear();
+        if let (Some(DumpOn::Block), Some(path)) =
+            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
+        {
+            clear_dump_file(path)?;
+        }
         // Re-execution records the loaded events, so release the lock before restarting.
         drop(dumpable_events);
 
         // Necessary to restart before loading; restarting messaging to allow re-execution
         self.restart(Some(RestartParameters { restart_l1_to_l2_messaging: true })).await?;
-        self.re_execute(&events).await.map_err(ApiError::RpcError)?;
+        self.re_execute_locked(&events).await.map_err(ApiError::RpcError)?;
 
         Ok(JsonRpcResponse::Empty)
     }
@@ -397,6 +480,9 @@ impl JsonRpcHandler {
 
     /// devnet_restart
     pub async fn restart(&self, data: Option<RestartParameters>) -> StrictRpcResult {
+        // Invalidate immediately before the first destructive reset. The allocator deliberately
+        // remains monotonic for the lifetime of the process.
+        self.api.snapshots.lock().await.checkpoints.clear();
         self.api.dumpable_events.lock().await.clear();
 
         let _acceptance_guard = if let Some(origin_caller) = &self.origin_caller {
@@ -485,6 +571,20 @@ impl JsonRpcHandler {
     }
 }
 
+fn parse_snapshot_id(value: &str) -> Result<u64, ApiError> {
+    let digits = value.strip_prefix("0x").ok_or_else(|| {
+        ApiError::RpcError(RpcError::invalid_params("snapshot_id must be 0x-prefixed hexadecimal"))
+    })?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::RpcError(RpcError::invalid_params(
+            "snapshot_id must be 0x-prefixed hexadecimal",
+        )));
+    }
+    u64::from_str_radix(digits, 16).map_err(|_| {
+        ApiError::RpcError(RpcError::invalid_params("snapshot_id is outside the u64 range"))
+    })
+}
+
 impl From<&MempoolConfig> for MempoolConfigResponse {
     fn from(config: &MempoolConfig) -> Self {
         Self {
@@ -515,7 +615,7 @@ async fn execute_rpc_tx(
     rpc_handler: &JsonRpcHandler,
     rpc_call: RpcMethodCall,
 ) -> Result<TransactionHash, RpcError> {
-    match rpc_handler.on_call(rpc_call).await.result {
+    match Box::pin(rpc_handler.on_call_with_lifecycle(rpc_call, false)).await.result {
         ResponseResult::Success(result) => {
             let tx_hash_hex = result
                 .get("transaction_hash")
@@ -539,7 +639,18 @@ async fn execute_rpc_tx(
 
 #[cfg(test)]
 mod tests {
+    use super::parse_snapshot_id;
     use crate::api::models::BroadcastedDeployAccountTransactionEnumWrapper;
+
+    #[test]
+    fn parses_snapshot_ids() {
+        assert_eq!(parse_snapshot_id("0x1").unwrap(), 1);
+        assert_eq!(parse_snapshot_id("0x000A").unwrap(), 10);
+        assert!(parse_snapshot_id("1").is_err());
+        assert!(parse_snapshot_id("0x").is_err());
+        assert!(parse_snapshot_id("0xg").is_err());
+        assert!(parse_snapshot_id("0x10000000000000000").is_err());
+    }
 
     #[test]
     fn check_correct_deserialization_of_deploy_account_transaction_request() {

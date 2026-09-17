@@ -458,6 +458,12 @@ pub struct DumpRequest {
     pub inline: bool,
 }
 
+#[derive(Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct RevertRequest {
+    pub snapshot_id: String,
+}
+
 #[derive(Deserialize, Clone)]
 #[serde(untagged, deny_unknown_fields)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
