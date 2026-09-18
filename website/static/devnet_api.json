@@ -110,6 +110,57 @@
       ]
     },
     {
+      "name": "devnet_snapshot",
+      "summary": "Create an in-memory checkpoint of Devnet state",
+      "params": [],
+      "result": {
+        "name": "snapshot_id",
+        "description": "Monotonically increasing hexadecimal snapshot identifier",
+        "schema": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]+$"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/INTERNAL_ERROR"
+        }
+      ]
+    },
+    {
+      "name": "devnet_revert",
+      "summary": "Restore an in-memory Devnet checkpoint",
+      "params": [
+        {
+          "name": "snapshot_id",
+          "description": "0x-prefixed hexadecimal identifier fitting u64; uppercase digits and leading zeros are accepted",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          }
+        }
+      ],
+      "result": {
+        "name": "reverted",
+        "description": "True restores and consumes this snapshot and all newer snapshots; zero, unknown, consumed, or invalidated IDs return false",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/INVALID_PARAMS"
+        },
+        {
+          "$ref": "#/components/errors/INTERNAL_ERROR"
+        },
+        {
+          "$ref": "#/components/errors/DUMP_ERROR"
+        }
+      ]
+    },
+    {
       "name": "devnet_postmanLoad",
       "summary": "Load L1 messaging contract",
       "params": [
@@ -1472,6 +1523,14 @@
       "INVALID_REQUEST": {
         "code": -32600,
         "message": "Invalid request"
+      },
+      "INVALID_PARAMS": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "INTERNAL_ERROR": {
+        "code": -32603,
+        "message": "Internal error"
       },
       "WILDCARD_ERROR": {
         "code": -1,

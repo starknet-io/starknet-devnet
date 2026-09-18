@@ -45,6 +45,8 @@ $ RUST_LOG="REQUEST,RESPONSE,INFO" starknet-devnet
 
 ## Timeout
 
+WebSocket output is queued independently for each connection. Responses and notifications retain their enqueue order. Each connection allows up to 4096 queued messages and 64 MiB of outstanding serialized output; a full queue, an oversized response, or a write stalled for 30 seconds disconnects that client. This prevents a slow subscriber from blocking state-changing RPCs. These limits are separate from the HTTP request timeout below.
+
 Specify the maximum amount of time an HTTP request can be served. This makes it possible to deploy and manage large contracts that take longer to execute.
 
 ```

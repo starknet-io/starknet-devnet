@@ -8,6 +8,8 @@ When no methods are specified, the following default methods will be restricted,
 
 - devnet_mint
 - devnet_load
+- devnet_snapshot
+- devnet_revert
 - devnet_restart
 - devnet_createBlock
 - devnet_sealBlock

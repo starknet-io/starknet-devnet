@@ -71,23 +71,37 @@ The metrics are exposed in Prometheus text format, which can be scraped by Prome
 - `method`: The RPC method name
 - `status`: Either `success` or `error`
 
+### Lifecycle coordination metrics
+
+`devnet_lifecycle_lock_wait_seconds` and `devnet_lifecycle_lock_hold_seconds` are histograms with a `mode` label (`read` or `write`). Wait time includes cancelled lock-acquisition attempts; hold time measures the coordinated state/journal/notification-enqueue phase. Neither is reset by snapshot restoration. Concurrent readers can overlap, so summed read hold time is not a server utilization percentage.
+
+Compare contention and time spent holding exclusive access:
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(devnet_lifecycle_lock_wait_seconds_bucket{mode="write"}[5m])))
+```
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(devnet_lifecycle_lock_hold_seconds_bucket{mode="write"}[5m])))
+```
+
 ### Starknet Core Metrics
 
 #### `starknet_transaction_count`
 
-**Type:** Counter
+**Type:** Gauge
 
-**Description:** Total number of transactions in Starknet
+**Description:** Current number of retained transactions in Starknet
 
-This counter is incremented when a transaction is added to the network and decremented when blocks are aborted.
+This gauge reports transactions currently retained by Devnet, including pre-confirmed transactions and excluding received-only mempool entries. It is updated when state is restarted, aborted, or restored from a snapshot.
 
 #### `starknet_block_count`
 
-**Type:** Counter
+**Type:** Gauge
 
-**Description:** Total number of blocks in Starknet
+**Description:** Current number of retained local blocks in Starknet
 
-This counter is incremented when a new block is created and decremented when blocks are aborted.
+This gauge reports local accepted blocks currently retained by Devnet, including genesis. It is updated when state is restarted, aborted, or restored from a snapshot.
 
 #### `starknet_block_creation_duration_seconds`
 
@@ -164,16 +178,16 @@ rate(rpc_call_count[5m])
 rate(rpc_call_count{status="error"}[5m]) / rate(rpc_call_count[5m])
 ```
 
-### Block creation rate
+### Current block count
 
 ```promql
-rate(starknet_block_count[5m])
+starknet_block_count
 ```
 
-### Transaction throughput
+### Current transaction count
 
 ```promql
-rate(starknet_transaction_count[5m])
+starknet_transaction_count
 ```
 
 ### Upstream call error rate (forking mode)
