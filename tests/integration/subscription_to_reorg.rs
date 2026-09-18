@@ -123,3 +123,49 @@ async fn socket_with_n_subscriptions_should_get_n_reorg_notifications() {
 
     assert_no_notifications(&mut ws).await.unwrap();
 }
+
+#[tokio::test]
+async fn snapshot_revert_reports_equal_height_branch_replacement() {
+    let devnet =
+        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
+            .await
+            .unwrap();
+    let old_block_hash = devnet.create_block().await.unwrap();
+    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+    devnet.abort_blocks(&BlockId::Hash(old_block_hash)).await.unwrap();
+    devnet.mint(starknet_rs_core::types::Felt::from(999_u64), 1).await;
+    let displaced_block_hash = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_hash;
+    assert_ne!(old_block_hash, displaced_block_hash);
+
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+    let subscription_id =
+        subscribe(&mut ws, "starknet_subscribeNewHeads", json!({})).await.unwrap();
+    assert_eq!(
+        devnet
+            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+
+    let reorg = receive_rpc_via_ws(&mut ws).await.unwrap();
+    assert_eq!(
+        reorg,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "starknet_subscriptionReorg",
+            "params": {
+                "result": {
+                    "starting_block_hash": displaced_block_hash,
+                    "starting_block_number": 1,
+                    "ending_block_hash": displaced_block_hash,
+                    "ending_block_number": 1
+                },
+                "subscription_id": subscription_id
+            }
+        })
+    );
+    let restored_head = receive_rpc_via_ws(&mut ws).await.unwrap();
+    assert_eq!(restored_head["method"], "starknet_subscriptionNewHeads");
+    assert_eq!(restored_head["params"]["result"]["block_hash"], json!(old_block_hash));
+}

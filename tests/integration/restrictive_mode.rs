@@ -27,6 +27,15 @@ async fn restrictive_mode_with_default_methods() {
         json_rpc_error,
         RpcError { code: -32604, message: "Method forbidden".into(), data: None }
     );
+
+    for (method, params) in
+        [("devnet_snapshot", json!([])), ("devnet_revert", json!({ "snapshot_id": "0x1" }))]
+    {
+        assert_eq!(
+            devnet.send_custom_rpc(method, params).await.unwrap_err(),
+            RpcError { code: -32604, message: "Method forbidden".into(), data: None }
+        );
+    }
 }
 
 #[tokio::test]
