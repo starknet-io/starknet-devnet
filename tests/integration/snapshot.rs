@@ -2,13 +2,72 @@ use std::fs;
 use std::path::Path;
 
 use serde_json::json;
-use starknet_rs_core::types::{Felt, StarknetError};
+use starknet_rs_core::types::{BlockTag, Felt, StarknetError};
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::utils::{
     FeeUnit, UniqueAutoDeletableFile, assert_tx_succeeded_accepted, send_text_rpc_via_ws,
 };
+
+#[tokio::test]
+async fn restores_pre_confirmed_state_in_demand_and_interval_modes() {
+    for archive in ["none", "full"] {
+        for mode in ["demand", "60"] {
+            let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+                "--block-generation-on",
+                mode,
+                "--state-archive-capacity",
+                archive,
+            ])
+            .await
+            .unwrap();
+            let address = Felt::from(0x987_u64);
+            let retained_tx = devnet.mint(address, 10).await;
+            let before = devnet.get_pre_confirmed_block_with_tx_hashes().await.unwrap();
+            assert_eq!(before.transactions, vec![retained_tx]);
+            let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+
+            let removed_tx = devnet.mint(address, 20).await;
+            assert_eq!(
+                devnet
+                    .get_balance_by_tag(&address, FeeUnit::Fri, BlockTag::PreConfirmed)
+                    .await
+                    .unwrap(),
+                Felt::from(30_u8)
+            );
+            assert_eq!(
+                devnet
+                    .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot }))
+                    .await
+                    .unwrap(),
+                true
+            );
+
+            let restored = devnet.get_pre_confirmed_block_with_tx_hashes().await.unwrap();
+            assert_eq!(restored.transactions, before.transactions, "{archive} {mode}");
+            assert_eq!(restored.timestamp, before.timestamp, "{archive} {mode}");
+            assert_eq!(
+                devnet
+                    .get_balance_by_tag(&address, FeeUnit::Fri, BlockTag::PreConfirmed)
+                    .await
+                    .unwrap(),
+                Felt::from(10_u8),
+                "{archive} {mode}"
+            );
+            assert!(matches!(
+                devnet.json_rpc_client.get_transaction_by_hash(removed_tx, None).await,
+                Err(ProviderError::StarknetError(StarknetError::TransactionHashNotFound))
+            ));
+            devnet.create_block().await.unwrap();
+            assert_eq!(
+                devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(),
+                Felt::from(10_u8),
+                "{archive} {mode}"
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn gauges_follow_restore_then_block_abortion() {

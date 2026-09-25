@@ -82,11 +82,18 @@ impl Starknet {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU128;
+
+    use alloy::primitives::B256;
     use blockifier::state::state_api::{State, StateReader};
     use starknet_api::state::StorageKey;
     use starknet_rs_core::types::Felt;
+    use starknet_types::contract_address::ContractAddress;
+    use starknet_types::rpc::block::{BlockId, BlockTag};
+    use starknet_types::rpc::gas_modification::GasModificationRequest;
 
     use super::Starknet;
+    use crate::starknet::starknet_config::StarknetConfig;
     use crate::state::{CustomState, CustomStateReader};
     use crate::utils::test_utils::{dummy_cairo_1_contract_class, dummy_felt};
 
@@ -109,6 +116,7 @@ mod tests {
     fn declarations_after_capture_do_not_leak_into_checkpoint() {
         let mut starknet = Starknet::new(&Default::default()).unwrap();
         let class_hash = dummy_felt();
+        let pre_confirmed = BlockId::Tag(BlockTag::PreConfirmed);
         let checkpoint = starknet.checkpoint();
 
         starknet
@@ -120,8 +128,58 @@ mod tests {
             )
             .unwrap();
         assert!(starknet.pre_confirmed_state.is_contract_declared(class_hash));
+        assert!(starknet.get_class(&pre_confirmed, class_hash).is_ok());
 
         starknet.restore_checkpoint(checkpoint);
         assert!(!starknet.pre_confirmed_state.is_contract_declared(class_hash));
+        assert!(starknet.get_class(&pre_confirmed, class_hash).is_err());
+    }
+
+    #[test]
+    fn restores_controls_impersonation_and_messaging_queues() {
+        let mut starknet =
+            Starknet::new(&StarknetConfig { lite_mode: true, ..Default::default() }).unwrap();
+        let retained_account = ContractAddress::new(Felt::from(0x123_u64)).unwrap();
+        let discarded_account = ContractAddress::new(Felt::from(0x456_u64)).unwrap();
+        let message_hash = B256::repeat_byte(7);
+
+        starknet.set_time(42, false);
+        starknet.set_next_block_gas(gas_price_request(123)).unwrap();
+        starknet.cheats.impersonate_account(retained_account);
+        starknet.messaging.last_local_block = 11;
+        starknet.messaging.l2_to_l1_messages_hashes.insert(message_hash, 2);
+        let checkpoint = starknet.checkpoint();
+
+        starknet.set_time(91, false);
+        starknet.set_next_block_gas(gas_price_request(456)).unwrap();
+        starknet.cheats.stop_impersonating_account(&retained_account);
+        starknet.cheats.impersonate_account(discarded_account);
+        starknet.cheats.set_auto_impersonate(true);
+        starknet.messaging.last_local_block = 27;
+        starknet.messaging.l2_to_l1_messages_hashes.insert(message_hash, 5);
+
+        starknet.restore_checkpoint(checkpoint);
+        assert!(starknet.cheats.is_impersonated(&retained_account));
+        assert!(!starknet.cheats.is_impersonated(&discarded_account));
+        assert!(!starknet.cheats.is_auto_impersonate());
+        assert_eq!(starknet.messaging.last_local_block, 11);
+        assert_eq!(starknet.messaging.l2_to_l1_messages_hashes.get(&message_hash), Some(&2));
+
+        starknet.create_block_strict().unwrap();
+        let header = &starknet.get_latest_block().unwrap().header.block_header_without_hash;
+        assert_eq!(header.timestamp.0, 42);
+        assert_eq!(header.l1_gas_price.price_in_fri.0, 123);
+    }
+
+    fn gas_price_request(value: u128) -> GasModificationRequest {
+        GasModificationRequest {
+            gas_price_wei: None,
+            data_gas_price_wei: None,
+            gas_price_fri: NonZeroU128::new(value),
+            data_gas_price_fri: None,
+            l2_gas_price_wei: None,
+            l2_gas_price_fri: None,
+            generate_block: None,
+        }
     }
 }

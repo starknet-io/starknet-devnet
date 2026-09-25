@@ -44,7 +44,7 @@ async fn call(handler: &JsonRpcHandler, method: &str, params: Value) -> Response
         .result
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cancellation_during_revert_preparation_preserves_snapshot_and_journal() {
     let handler = handler();
     assert_eq!(
@@ -74,7 +74,7 @@ async fn cancellation_during_revert_preparation_preserves_snapshot_and_journal()
     assert_eq!(handler.api.starknet.lock().await.get_latest_block().unwrap().block_number().0, 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
     let handler = handler();
     let calls = (0..12).map(|index| {
@@ -102,7 +102,7 @@ async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
     assert_eq!(handler.api.dumpable_events.lock().await.len(), 6);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn allocator_exhaustion_preserves_existing_checkpoints() {
     let handler = handler();
     call(&handler, "devnet_snapshot", json!([])).await;
@@ -123,7 +123,7 @@ async fn allocator_exhaustion_preserves_existing_checkpoints() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn slow_origin_fallback_does_not_block_revert_and_uses_captured_acceptance() {
     let mut handler = handler();
     let received = Arc::new(Notify::new());
