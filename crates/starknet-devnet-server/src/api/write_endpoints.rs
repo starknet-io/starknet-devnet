@@ -228,7 +228,8 @@ impl JsonRpcHandler {
         // Serialize file reads and clears with block-mode appends and endpoint rewrites.
         let dumpable_events = self.api.dumpable_events.lock().await;
         let events = match request {
-            LoadRequest::Path { path } => read_events(&path)?,
+            LoadRequest::Path { path } => read_events(&path)
+                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?,
             LoadRequest::Events { events } => events,
         };
         // File-read/parse errors preserve snapshots. Invalidate before the first destructive
@@ -237,7 +238,8 @@ impl JsonRpcHandler {
         if let (Some(DumpOn::Block), Some(path)) =
             (self.api.config.dump_on, self.api.config.dump_path.as_deref())
         {
-            clear_dump_file(path)?;
+            clear_dump_file(path)
+                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?;
         }
         // Re-execution records the loaded events, so release the lock before restarting.
         drop(dumpable_events);

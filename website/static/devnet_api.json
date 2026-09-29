@@ -1550,7 +1550,7 @@
       },
       "DUMP_ERROR": {
         "code": -5,
-        "message": "Dump error: failed to write or serialize the current devnet state to the specified path."
+        "message": "Dump error: failed to access, parse, or write dump data, or dumping is not enabled."
       },
       "MESSAGING_ERROR": {
         "code": -6,

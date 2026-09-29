@@ -123,7 +123,9 @@ async fn malformed_load_preserves_snapshots() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
     let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
     devnet.mint(Felt::ONE, 3).await;
-    assert!(devnet.send_custom_rpc("devnet_load", json!({"path": source.path})).await.is_err());
+    let error =
+        devnet.send_custom_rpc("devnet_load", json!({"path": source.path})).await.unwrap_err();
+    assert_eq!(error.code, -5);
     assert_eq!(devnet.get_balance_latest(&Felt::ONE, FeeUnit::Fri).await.unwrap(), Felt::THREE);
     assert_eq!(
         devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap(),
@@ -279,12 +281,11 @@ async fn restores_block_dump_and_preserves_snapshot_after_rewrite_failure() {
 
     fs::remove_file(&dump_file.path).unwrap();
     fs::create_dir(&dump_file.path).unwrap();
-    assert!(
-        devnet
-            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
-            .await
-            .is_err()
-    );
+    let error = devnet
+        .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, -5);
 
     fs::remove_dir(&dump_file.path).unwrap();
     assert_eq!(
