@@ -263,3 +263,56 @@ async fn snapshot_revert_replays_restored_blocks_and_their_notifications_in_orde
         }
     }
 }
+
+#[tokio::test]
+async fn snapshot_revert_preserves_l1_finality_in_restored_notifications() {
+    let devnet =
+        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
+            .await
+            .unwrap();
+    let restored_tx = devnet.mint(starknet_rs_core::types::Felt::from(42_u64), 1).await;
+    let restored_block_hash = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_hash;
+    devnet.accept_on_l1(&BlockId::Hash(restored_block_hash)).await.unwrap();
+    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+
+    devnet.abort_blocks(&BlockId::Hash(restored_block_hash)).await.unwrap();
+    let displaced_block_hash = devnet.create_block().await.unwrap();
+    assert_ne!(displaced_block_hash, restored_block_hash);
+
+    let (mut tx_ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+    let tx_subscription_id =
+        subscribe(&mut tx_ws, "starknet_subscribeNewTransactions", json!({})).await.unwrap();
+    let (mut events_ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+    let events_subscription_id = subscribe(
+        &mut events_ws,
+        "starknet_subscribeEvents",
+        json!({ "finality_status": "ACCEPTED_ON_L1" }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        devnet
+            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+
+    for (ws, subscription_id) in
+        [(&mut tx_ws, &tx_subscription_id), (&mut events_ws, &events_subscription_id)]
+    {
+        let reorg = receive_rpc_via_ws(ws).await.unwrap();
+        assert_eq!(reorg["method"], "starknet_subscriptionReorg");
+        assert_eq!(reorg["params"]["subscription_id"], json!(subscription_id));
+    }
+
+    assert_no_notifications(&mut tx_ws).await.unwrap();
+
+    let event =
+        receive_notification(&mut events_ws, "starknet_subscriptionEvents", events_subscription_id)
+            .await
+            .unwrap();
+    assert_eq!(event["transaction_hash"], json!(restored_tx));
+    assert_eq!(event["finality_status"], "ACCEPTED_ON_L1");
+}

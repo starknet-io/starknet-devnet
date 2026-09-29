@@ -555,13 +555,14 @@ impl JsonRpcHandler {
 
             for tx_hash in block.get_transactions() {
                 let tx = restored.get_transaction_by_hash(*tx_hash)?;
+                let status = restored.get_transaction_execution_and_finality_status(*tx_hash)?;
                 notifications.push(NotificationData::NewTransaction(NewTransactionNotification {
                     tx: tx.clone(),
-                    finality_status: TransactionFinalityStatus::AcceptedOnL2,
+                    finality_status: status.finality_status(),
                 }));
                 notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
                     transaction_hash: *tx_hash,
-                    status: restored.get_transaction_execution_and_finality_status(*tx_hash)?,
+                    status,
                 }));
                 notifications.push(NotificationData::NewTransactionReceipt(
                     NewTransactionReceiptNotification {
@@ -574,9 +575,12 @@ impl JsonRpcHandler {
             for emitted_event in
                 restored.get_unlimited_events(Some(block_id), Some(block_id), None, None, None)?
             {
+                let finality_status = restored
+                    .get_transaction_execution_and_finality_status(emitted_event.transaction_hash)?
+                    .finality_status();
                 notifications.push(NotificationData::Event(SubscriptionEmittedEvent {
                     emitted_event,
-                    finality_status: TransactionFinalityStatus::AcceptedOnL2,
+                    finality_status,
                 }));
             }
         }
