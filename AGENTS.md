@@ -12,14 +12,9 @@ Newlines are allowed only when they are semantically required by Markdown struct
 
 ## Fast path
 
-```sh
-./scripts/doctor.sh
-./scripts/verify.sh
-```
+Agents should run only focused checks and tests relevant to their changes. For server, RPC, contract, or integration-test changes, run the affected integration test or module rather than the full integration suite. Leave `./scripts/test_integration.sh` to the user or CI. Do not run workspace-wide `./scripts/verify.sh` or `./scripts/ci.sh` unless the user explicitly requests them.
 
-Run `./scripts/test_integration.sh` when a change affects the running server, RPC behavior, contracts, or integration tests. It requires Foundry's `anvil`. `./scripts/verify.sh` (and therefore `./scripts/ci.sh`) requires the native dependencies needed by its all-features Rust checks; `./scripts/doctor.sh` only warns when optional tools are missing and still exits 0. `./scripts/ci.sh` also runs spelling and integration tests.
-
-Use the focused scripts in `scripts/` for individual checks. State which targets you ran in the final handoff and name any skipped target with its reason.
+Use the focused scripts in `scripts/` for individual checks. `./scripts/doctor.sh` can check local tooling; it only warns when optional tools are missing and still exits 0. The full integration suite requires Foundry's `anvil`, and the all-features Rust checks in `./scripts/verify.sh` require the native dependencies exported by CI. State which targets you ran in the final handoff and name any skipped target with its reason.
 
 ## Toolchain
 
@@ -47,7 +42,7 @@ Do not edit `Cargo.lock` or generated web UI assets by hand.
 1. Inspect the nearest production code and existing focused tests before changing behavior. Keep the change narrow and preserve public RPC/CLI behavior unless the task says otherwise.
 2. Add a focused unit test for isolated Rust logic. Add or update an integration test for externally observable JSON-RPC, CLI, server, or process behavior.
 3. Put new Rust dependencies in the root `Cargo.toml` workspace dependencies and reference them as `{ workspace = true }` from member crates.
-4. Run the smallest relevant check first, then `./scripts/verify.sh`; run `./scripts/test_integration.sh` when required by the change. Use `./scripts/format.sh` only to apply formatting and `./scripts/format_check.sh` in validation.
+4. Run the smallest relevant checks and focused tests only. Do not run the full integration, verify, or CI suites unless the user explicitly requests them. Use `./scripts/format.sh` only to apply formatting and `./scripts/format_check.sh` in validation.
 5. Update the current website docs and/or CLI help when behavior visible to users changes.
 
 ## Generated and sensitive areas

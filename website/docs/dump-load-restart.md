@@ -49,7 +49,7 @@ Capture takes O(total retained state) time and additional memory; snapshots are 
 
 Timestamp controls are restored exactly, but wall-clock time continues to advance. A read already forwarded to a fork origin may finish after revert using the acceptance boundary captured before revert. File-read and parse failures during load preserve snapshots; once destructive load/restart work begins, snapshots are invalidated even if later work fails. Request/exit journals are truncated by revert; separately exported files remain unchanged. Dump files still use the replay journal format and cannot store process-local snapshot IDs.
 
-External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced.
+External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced, followed by notifications for each restored block in order, including its header, accepted transactions, receipts, statuses, and events.
 
 ## Dumping
 

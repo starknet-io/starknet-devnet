@@ -10,6 +10,10 @@ use super::Starknet;
 pub struct StarknetCheckpoint(Starknet);
 
 impl StarknetCheckpoint {
+    pub fn as_starknet(&self) -> &Starknet {
+        &self.0
+    }
+
     pub fn accepted_block_hashes(&self) -> Vec<(u64, starknet_types::felt::BlockHash)> {
         self.0.accepted_block_hashes()
     }

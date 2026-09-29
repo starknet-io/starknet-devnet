@@ -6,7 +6,8 @@ use tokio_tungstenite::connect_async;
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::utils::{
-    SubscriptionId, assert_no_notifications, receive_rpc_via_ws, subscribe, unsubscribe,
+    SubscriptionId, assert_no_notifications, receive_notification, receive_rpc_via_ws, subscribe,
+    unsubscribe,
 };
 
 #[tokio::test]
@@ -168,4 +169,97 @@ async fn snapshot_revert_reports_equal_height_branch_replacement() {
     let restored_head = receive_rpc_via_ws(&mut ws).await.unwrap();
     assert_eq!(restored_head["method"], "starknet_subscriptionNewHeads");
     assert_eq!(restored_head["params"]["result"]["block_hash"], json!(old_block_hash));
+}
+
+#[tokio::test]
+async fn snapshot_revert_replays_restored_blocks_and_their_notifications_in_order() {
+    let devnet =
+        BackgroundDevnet::spawn_with_additional_args(&["--state-archive-capacity", "full"])
+            .await
+            .unwrap();
+    let first_hash = devnet.create_block().await.unwrap();
+    let restored_tx = devnet.mint(starknet_rs_core::types::Felt::from(42_u64), 1).await;
+    let second_hash = devnet.get_latest_block_with_tx_hashes().await.unwrap().block_hash;
+    let third_hash = devnet.create_block().await.unwrap();
+    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+
+    devnet.abort_blocks(&BlockId::Hash(first_hash)).await.unwrap();
+    let displaced_tx = devnet.mint(starknet_rs_core::types::Felt::from(43_u64), 1).await;
+    assert_ne!(displaced_tx, restored_tx);
+
+    let mut subscriptions = HashMap::new();
+    for (method, params) in [
+        ("starknet_subscribeNewHeads", json!({})),
+        ("starknet_subscribeNewTransactions", json!({})),
+        ("starknet_subscribeNewTransactionReceipts", json!({})),
+        ("starknet_subscribeEvents", json!({})),
+        ("starknet_subscribeTransactionStatus", json!({ "transaction_hash": restored_tx })),
+    ] {
+        let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+        let subscription_id = subscribe(&mut ws, method, params).await.unwrap();
+        subscriptions.insert(method, (ws, subscription_id));
+    }
+
+    // Events subscriptions backfill the current latest block on registration.
+    let (events_ws, events_id) = subscriptions.get_mut("starknet_subscribeEvents").unwrap();
+    let mut displaced_event_count = 0;
+    loop {
+        match receive_rpc_via_ws(events_ws).await {
+            Ok(notification) => {
+                assert_eq!(notification["method"], "starknet_subscriptionEvents");
+                assert_eq!(notification["params"]["subscription_id"], json!(events_id));
+                assert_eq!(
+                    notification["params"]["result"]["transaction_hash"],
+                    json!(displaced_tx)
+                );
+                displaced_event_count += 1;
+            }
+            Err(error) if error.to_string().contains("deadline has elapsed") => break,
+            Err(error) => panic!("Unexpected WebSocket error: {error}"),
+        }
+    }
+    assert!(displaced_event_count > 0);
+
+    assert_eq!(
+        devnet
+            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+
+    for (ws, subscription_id) in subscriptions.values_mut() {
+        let notification = receive_rpc_via_ws(ws).await.unwrap();
+        assert_eq!(notification["method"], "starknet_subscriptionReorg");
+        assert_eq!(notification["params"]["subscription_id"], json!(subscription_id));
+    }
+
+    let (ws, subscription_id) = subscriptions.get_mut("starknet_subscribeNewHeads").unwrap();
+    for (number, hash) in [(1, first_hash), (2, second_hash), (3, third_hash)] {
+        let head =
+            receive_notification(ws, "starknet_subscriptionNewHeads", subscription_id.clone())
+                .await
+                .unwrap();
+        assert_eq!(head["block_number"], json!(number));
+        assert_eq!(head["block_hash"], json!(hash));
+    }
+    assert_no_notifications(ws).await.unwrap();
+
+    for (method, notification_method) in [
+        ("starknet_subscribeNewTransactions", "starknet_subscriptionNewTransaction"),
+        ("starknet_subscribeNewTransactionReceipts", "starknet_subscriptionNewTransactionReceipts"),
+        ("starknet_subscribeEvents", "starknet_subscriptionEvents"),
+        ("starknet_subscribeTransactionStatus", "starknet_subscriptionTransactionStatus"),
+    ] {
+        let (ws, subscription_id) = subscriptions.get_mut(method).unwrap();
+        let result =
+            receive_notification(ws, notification_method, subscription_id.clone()).await.unwrap();
+        assert_eq!(result["transaction_hash"], json!(restored_tx));
+        if method == "starknet_subscribeEvents" {
+            assert_eq!(result["block_hash"], json!(second_hash));
+            assert_eq!(result["block_number"], json!(2));
+        } else {
+            assert_no_notifications(ws).await.unwrap();
+        }
+    }
 }

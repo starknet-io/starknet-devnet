@@ -93,9 +93,8 @@ impl JsonRpcHandler {
         }
         let notifications = Self::revert_notifications(
             &starknet.accepted_block_hashes(),
-            &checkpoint.core.accepted_block_hashes(),
-            checkpoint.core.latest_block()?,
-        );
+            checkpoint.core.as_starknet(),
+        )?;
 
         if let (Some(DumpOn::Block), Some(path)) =
             (self.api.config.dump_on, self.api.config.dump_path.as_deref())

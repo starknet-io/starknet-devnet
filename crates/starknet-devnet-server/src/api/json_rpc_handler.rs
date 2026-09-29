@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use axum::extract::ws::{Message, WebSocket};
 use futures::StreamExt;
 use starknet_core::StarknetBlock;
+use starknet_core::error::DevnetResult;
+use starknet_core::starknet::Starknet;
 use starknet_core::starknet::mempool::MempoolPhase;
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_types::emitted_event::SubscriptionEmittedEvent;
@@ -524,11 +526,11 @@ impl JsonRpcHandler {
 
     pub(crate) fn revert_notifications(
         old_blocks: &[(u64, starknet_types::felt::BlockHash)],
-        new_blocks: &[(u64, starknet_types::felt::BlockHash)],
-        restored_head: StarknetBlock,
-    ) -> Vec<NotificationData> {
+        restored: &Starknet,
+    ) -> DevnetResult<Vec<NotificationData>> {
+        let new_blocks = restored.accepted_block_hashes();
         let common_len =
-            old_blocks.iter().zip(new_blocks).take_while(|(old, new)| old == new).count();
+            old_blocks.iter().zip(&new_blocks).take_while(|(old, new)| old == new).count();
         let mut notifications = Vec::new();
 
         if let (Some((starting_number, starting_hash)), Some((ending_number, ending_hash))) =
@@ -546,10 +548,39 @@ impl JsonRpcHandler {
             }));
         }
 
-        if new_blocks.len() > common_len {
-            notifications.push(NotificationData::NewHeads((&restored_head).into()));
+        for (number, _) in new_blocks.iter().skip(common_len) {
+            let block_id = BlockId::Number(*number);
+            let block = restored.get_block(&block_id)?;
+            notifications.push(NotificationData::NewHeads(block.into()));
+
+            for tx_hash in block.get_transactions() {
+                let tx = restored.get_transaction_by_hash(*tx_hash)?;
+                notifications.push(NotificationData::NewTransaction(NewTransactionNotification {
+                    tx: tx.clone(),
+                    finality_status: TransactionFinalityStatus::AcceptedOnL2,
+                }));
+                notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
+                    transaction_hash: *tx_hash,
+                    status: restored.get_transaction_execution_and_finality_status(*tx_hash)?,
+                }));
+                notifications.push(NotificationData::NewTransactionReceipt(
+                    NewTransactionReceiptNotification {
+                        tx_receipt: restored.get_transaction_receipt_by_hash(tx_hash)?,
+                        sender_address: tx.get_sender_address(),
+                    },
+                ));
+            }
+
+            for emitted_event in
+                restored.get_unlimited_events(Some(block_id), Some(block_id), None, None, None)?
+            {
+                notifications.push(NotificationData::Event(SubscriptionEmittedEvent {
+                    emitted_event,
+                    finality_status: TransactionFinalityStatus::AcceptedOnL2,
+                }));
+            }
         }
-        notifications
+        Ok(notifications)
     }
 
     /// Matches the request to the corresponding enum variant and executes the request.
