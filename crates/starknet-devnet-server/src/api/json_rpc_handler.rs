@@ -821,7 +821,7 @@ impl JsonRpcHandler {
     /// errors is left to individual RPC method handlers and this method returns an empty successful
     /// Result. A one-time request also returns an empty successful result, but actually sends the
     /// message.
-    async fn on_websocket_rpc_call(
+    pub(super) async fn on_websocket_rpc_call(
         &self,
         call: &RpcMethodCall,
         socket_id: SocketId,
@@ -849,10 +849,15 @@ impl JsonRpcHandler {
                 }
             }
             JsonRpcWsRequest::SubscriptionRequest(req) => {
-                let _lifecycle = self.api.lifecycle.read().await;
-                self.execute_ws_subscription(req, call.id.clone(), socket_id)
-                    .await
-                    .map_err(|e| e.api_error_to_rpc_error())
+                match self.prepare_ws_subscription(req).await {
+                    Ok(prepared) => {
+                        let _lifecycle = self.api.lifecycle.read().await;
+                        self.execute_ws_subscription(prepared, call.id.clone(), socket_id)
+                            .await
+                            .map_err(|e| e.api_error_to_rpc_error())
+                    }
+                    Err(error) => Err(error.api_error_to_rpc_error()),
+                }
             }
         };
 

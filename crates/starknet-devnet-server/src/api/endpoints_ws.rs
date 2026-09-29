@@ -19,7 +19,7 @@ use starknet_types::starknet_api::hash::PoseidonHash;
 use super::JsonRpcHandler;
 use super::error::ApiError;
 use super::models::{
-    EventsSubscriptionInput, SubscriptionBlockIdInput, SubscriptionIdInput, TransactionHashInput,
+    EventsSubscriptionInput, SubscriptionIdInput, TransactionHashInput,
     TransactionReceiptSubscriptionInput, TransactionSubscriptionInput,
 };
 use crate::api::models::JsonRpcSubscriptionRequest;
@@ -28,35 +28,124 @@ use crate::subscribe::{
     AddressFilter, NewTransactionStatus, NotificationData, SocketId, StatusFilter, Subscription,
 };
 
+pub(crate) enum PreparedWsSubscription {
+    NewHeads(PreparedNewHeads),
+    Events(PreparedEvents),
+    Other(JsonRpcSubscriptionRequest),
+}
+
+pub(crate) struct PreparedNewHeads {
+    block_id: BlockId,
+    origin_header: Option<BlockHeader>,
+    origin_range: Option<(u64, u64)>,
+    origin_headers: Vec<BlockHeader>,
+}
+
+pub(crate) struct PreparedEvents {
+    input: Option<EventsSubscriptionInput>,
+    block_id: BlockId,
+    origin_header: Option<BlockHeader>,
+    origin_range: Option<(u64, u64)>,
+    origin_events: Vec<EmittedEvent>,
+}
+
 /// The definitions of JSON-RPC read endpoints defined in starknet_ws_api.json
 impl JsonRpcHandler {
-    pub async fn execute_ws_subscription(
+    /// Fetch immutable fork history before entering lifecycle coordination. The local range is
+    /// checked again when publishing, so writes and reverts during this phase are included.
+    pub(crate) async fn prepare_ws_subscription(
         &self,
         request: JsonRpcSubscriptionRequest,
+    ) -> Result<PreparedWsSubscription, ApiError> {
+        match request {
+            JsonRpcSubscriptionRequest::NewHeads(input) => {
+                let block_id = input
+                    .map(|input| input.block_id.into())
+                    .unwrap_or(BlockId::Tag(BlockTag::Latest));
+                let (query_block_number, origin_header) =
+                    self.resolve_start_block(block_id).await?;
+                let (_, _, origin_range) =
+                    self.validate_block_number_range(query_block_number).await?;
+                let origin_headers = if !matches!(block_id, BlockId::Tag(_)) {
+                    if let Some((start, end)) = origin_range {
+                        self.fetch_origin_heads(start, end).await?
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                Ok(PreparedWsSubscription::NewHeads(PreparedNewHeads {
+                    block_id,
+                    origin_header,
+                    origin_range,
+                    origin_headers,
+                }))
+            }
+            JsonRpcSubscriptionRequest::Events(input) => {
+                let block_id = input
+                    .as_ref()
+                    .and_then(|input| input.block_id.as_ref().map(BlockId::from))
+                    .unwrap_or(BlockId::Tag(BlockTag::Latest));
+                let (query_block_number, origin_header) =
+                    self.resolve_start_block(block_id).await?;
+                let (_, _, origin_range) =
+                    self.validate_block_number_range(query_block_number).await?;
+                let origin_events = if let Some((start, end)) = origin_range {
+                    self.fetch_origin_events(
+                        start,
+                        end,
+                        input.as_ref().and_then(|input| input.from_address.clone()),
+                        input.as_ref().and_then(|input| input.keys.clone()),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                Ok(PreparedWsSubscription::Events(PreparedEvents {
+                    input,
+                    block_id,
+                    origin_header,
+                    origin_range,
+                    origin_events,
+                }))
+            }
+            other => Ok(PreparedWsSubscription::Other(other)),
+        }
+    }
+
+    pub(crate) async fn execute_ws_subscription(
+        &self,
+        request: PreparedWsSubscription,
         rpc_request_id: Id,
         socket_id: SocketId,
     ) -> Result<(), ApiError> {
         match request {
-            JsonRpcSubscriptionRequest::NewHeads(data) => {
-                self.subscribe_new_heads(data, rpc_request_id, socket_id).await
+            PreparedWsSubscription::NewHeads(prepared) => {
+                self.subscribe_new_heads(prepared, rpc_request_id, socket_id).await
             }
-            JsonRpcSubscriptionRequest::TransactionStatus(TransactionHashInput {
-                transaction_hash,
-            }) => self.subscribe_tx_status(transaction_hash, rpc_request_id, socket_id).await,
-            JsonRpcSubscriptionRequest::NewTransactions(data) => {
+            PreparedWsSubscription::Events(prepared) => {
+                self.subscribe_events(prepared, rpc_request_id, socket_id).await
+            }
+            PreparedWsSubscription::Other(JsonRpcSubscriptionRequest::TransactionStatus(
+                TransactionHashInput { transaction_hash },
+            )) => self.subscribe_tx_status(transaction_hash, rpc_request_id, socket_id).await,
+            PreparedWsSubscription::Other(JsonRpcSubscriptionRequest::NewTransactions(data)) => {
                 self.subscribe_new_txs(data, rpc_request_id, socket_id).await
             }
-            JsonRpcSubscriptionRequest::NewTransactionReceipts(data) => {
-                self.subscribe_new_tx_receipts(data, rpc_request_id, socket_id).await
-            }
-            JsonRpcSubscriptionRequest::Events(data) => {
-                self.subscribe_events(data, rpc_request_id, socket_id).await
-            }
-            JsonRpcSubscriptionRequest::Unsubscribe(SubscriptionIdInput { subscription_id }) => {
+            PreparedWsSubscription::Other(JsonRpcSubscriptionRequest::NewTransactionReceipts(
+                data,
+            )) => self.subscribe_new_tx_receipts(data, rpc_request_id, socket_id).await,
+            PreparedWsSubscription::Other(JsonRpcSubscriptionRequest::Unsubscribe(
+                SubscriptionIdInput { subscription_id },
+            )) => {
                 let mut sockets = self.api.sockets.lock().await;
                 let socket_context = sockets.get_mut(&socket_id)?;
                 socket_context.unsubscribe(rpc_request_id, subscription_id)
             }
+            PreparedWsSubscription::Other(
+                JsonRpcSubscriptionRequest::NewHeads(_) | JsonRpcSubscriptionRequest::Events(_),
+            ) => unreachable!("historical subscriptions are prepared above"),
         }
     }
 
@@ -131,29 +220,57 @@ impl JsonRpcHandler {
         Ok(block.into())
     }
 
-    /// Returns (starting block number, latest block number). Returns an error in case the starting
-    /// block does not exist or there are too many blocks.
-    async fn get_validated_block_number_range(
+    async fn resolve_start_block(
         &self,
-        mut starting_block_id: BlockId,
-    ) -> Result<(u64, u64, Option<(u64, u64)>), ApiError> {
-        // Convert pre-confirmed to latest to prevent getting block_number = 0
-        starting_block_id = match starting_block_id {
+        starting_block_id: BlockId,
+    ) -> Result<(u64, Option<BlockHeader>), ApiError> {
+        let starting_block_id = match starting_block_id {
             BlockId::Tag(BlockTag::PreConfirmed) => BlockId::Tag(BlockTag::Latest),
             other => other,
         };
 
-        let query_block_number = match starting_block_id {
-            BlockId::Number(n) => n,
+        match starting_block_id {
+            BlockId::Number(n) => Ok((n, None)),
             block_id => match self.get_local_block_header_by_id(&block_id).await {
-                Ok(block) => block.block_number.0,
+                Ok(block) => Ok((block.block_number.0, None)),
                 Err(ApiError::BlockNotFound) if self.origin_caller.is_some() => {
-                    self.get_origin_block_header_by_id(block_id).await?.block_number.0
+                    let origin_header = self.get_origin_block_header_by_id(block_id).await?;
+                    Ok((origin_header.block_number.0, Some(origin_header)))
                 }
-                Err(other) => return Err(other),
+                Err(other) => Err(other),
             },
-        };
+        }
+    }
 
+    /// Rechecks the start block after origin I/O, without another origin request. A local hash
+    /// removed by a concurrent revert is rejected instead of silently selecting its old height.
+    async fn revalidate_start_block(
+        &self,
+        starting_block_id: BlockId,
+        origin_header: Option<&BlockHeader>,
+    ) -> Result<u64, ApiError> {
+        let starting_block_id = match starting_block_id {
+            BlockId::Tag(BlockTag::PreConfirmed) => BlockId::Tag(BlockTag::Latest),
+            other => other,
+        };
+        match starting_block_id {
+            BlockId::Number(n) => Ok(n),
+            block_id => match self.get_local_block_header_by_id(&block_id).await {
+                Ok(block) => Ok(block.block_number.0),
+                Err(ApiError::BlockNotFound) => {
+                    origin_header.map(|header| header.block_number.0).ok_or(ApiError::BlockNotFound)
+                }
+                Err(other) => Err(other),
+            },
+        }
+    }
+
+    /// Returns (starting local block number, latest block number, origin range). Checks both
+    /// the initial range and the range at publication after origin I/O completes.
+    async fn validate_block_number_range(
+        &self,
+        query_block_number: u64,
+    ) -> Result<(u64, u64, Option<(u64, u64)>), ApiError> {
         let starknet = self.api.starknet.lock().await;
         let latest_block_number =
             starknet.get_block(&BlockId::Tag(BlockTag::Latest))?.block_number().0;
@@ -209,50 +326,40 @@ impl JsonRpcHandler {
     /// subscribed to new blocks.
     async fn subscribe_new_heads(
         &self,
-        block_input: Option<SubscriptionBlockIdInput>,
+        prepared: PreparedNewHeads,
         rpc_request_id: Id,
         socket_id: SocketId,
     ) -> Result<(), ApiError> {
-        let block_id = if let Some(SubscriptionBlockIdInput { block_id }) = block_input {
-            block_id.into()
-        } else {
-            // if no block ID input, this eventually just subscribes the user to new blocks
-            BlockId::Tag(BlockTag::Latest)
-        };
-
-        let (query_block_number, latest_block_number, origin_range) =
-            self.get_validated_block_number_range(block_id).await?;
-
-        // perform the actual subscription
-        let mut sockets = self.api.sockets.lock().await;
-        let socket_context = sockets.get_mut(&socket_id)?;
-        let subscription_id = socket_context.subscribe(rpc_request_id, Subscription::NewHeads);
-
-        if let BlockId::Tag(_) = block_id {
-            // if the specified block ID is a tag (i.e. latest/pre-confirmed), no old block handling
-            return Ok(());
-        }
-
-        let mut headers = Vec::new();
-        if let Some((origin_start, origin_end)) = origin_range {
-            // It's better to fetch all origin headers first, in case fetching some fetching fails
-            // halfway through notifying the socket
-            let origin_headers = self.fetch_origin_heads(origin_start, origin_end).await?;
-            headers.extend(origin_headers.iter().cloned());
+        let PreparedNewHeads {
+            block_id,
+            origin_header,
+            origin_range: prepared_origin_range,
+            mut origin_headers,
+        } = prepared;
+        let query_block_number =
+            self.revalidate_start_block(block_id, origin_header.as_ref()).await?;
+        let (local_start, latest_block_number, origin_range) =
+            self.validate_block_number_range(query_block_number).await?;
+        if origin_range != prepared_origin_range {
+            return Err(ApiError::BlockNotFound);
         }
 
         // Notifying of old blocks. latest_block_number inclusive?
-        // Yes, only if block_id != latest/pre-confirmed (handled above)
-        let starknet = self.api.starknet.lock().await;
-        for block_n in query_block_number..=latest_block_number {
-            let old_block = starknet
-                .get_block(&BlockId::Number(block_n))
-                .map_err(ApiError::StarknetDevnetError)?;
-
-            headers.push(old_block.into());
+        // Yes, only if block_id != latest/pre-confirmed.
+        if !matches!(block_id, BlockId::Tag(_)) {
+            let starknet = self.api.starknet.lock().await;
+            for block_n in local_start..=latest_block_number {
+                let old_block = starknet
+                    .get_block(&BlockId::Number(block_n))
+                    .map_err(ApiError::StarknetDevnetError)?;
+                origin_headers.push(old_block.into());
+            }
         }
 
-        for header in headers {
+        let mut sockets = self.api.sockets.lock().await;
+        let socket_context = sockets.get_mut(&socket_id)?;
+        let subscription_id = socket_context.subscribe(rpc_request_id, Subscription::NewHeads);
+        for header in origin_headers {
             let notification = NotificationData::NewHeads(header);
             socket_context.notify(subscription_id, &Subscription::NewHeads, notification);
         }
@@ -416,21 +523,28 @@ impl JsonRpcHandler {
 
     async fn subscribe_events(
         &self,
-        maybe_subscription_input: Option<EventsSubscriptionInput>,
+        prepared: PreparedEvents,
         rpc_request_id: Id,
         socket_id: SocketId,
     ) -> Result<(), ApiError> {
+        let PreparedEvents {
+            input: maybe_subscription_input,
+            block_id: starting_block_id,
+            origin_header,
+            origin_range: prepared_origin_range,
+            origin_events,
+        } = prepared;
         let addresses = maybe_subscription_input
             .as_ref()
             .and_then(|subscription_input| subscription_input.from_address.clone());
 
-        let starting_block_id = maybe_subscription_input
-            .as_ref()
-            .and_then(|subscription_input| subscription_input.block_id.as_ref().map(BlockId::from))
-            .unwrap_or(BlockId::Tag(BlockTag::Latest));
-
+        let query_block_number =
+            self.revalidate_start_block(starting_block_id, origin_header.as_ref()).await?;
         let (validated_start_block_number, _, origin_range) =
-            self.get_validated_block_number_range(starting_block_id).await?;
+            self.validate_block_number_range(query_block_number).await?;
+        if origin_range != prepared_origin_range {
+            return Err(ApiError::BlockNotFound);
+        }
 
         let keys_filter = maybe_subscription_input
             .as_ref()
@@ -440,28 +554,10 @@ impl JsonRpcHandler {
             .and_then(|subscription_input| subscription_input.finality_status)
             .unwrap_or(TransactionFinalityStatus::AcceptedOnL2);
 
-        let mut sockets = self.api.sockets.lock().await;
-        let socket_context = sockets.get_mut(&socket_id)?;
         let subscription = Subscription::Events {
             addresses: addresses.clone(),
             keys_filter: keys_filter.clone(),
             status_filter: StatusFilter::new(vec![finality_status]),
-        };
-        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone());
-
-        // Fetch events from origin chain if we're in a fork and need historical data
-        let origin_events = if let Some((origin_start, origin_end)) = origin_range {
-            Some(
-                self.fetch_origin_events(
-                    origin_start,
-                    origin_end,
-                    addresses.clone(),
-                    keys_filter.clone(),
-                )
-                .await?,
-            )
-        } else {
-            None
         };
 
         // Get events from local chain
@@ -473,15 +569,17 @@ impl JsonRpcHandler {
             Some(finality_status),
         )?;
 
+        let mut sockets = self.api.sockets.lock().await;
+        let socket_context = sockets.get_mut(&socket_id)?;
+        let subscription_id = socket_context.subscribe(rpc_request_id, subscription.clone());
+
         // Process origin events first (chronological order)
-        if let Some(origin_events) = origin_events {
-            for event in origin_events {
-                let notification_data = NotificationData::Event(SubscriptionEmittedEvent {
-                    emitted_event: event,
-                    finality_status,
-                });
-                socket_context.notify(subscription_id, &subscription, notification_data);
-            }
+        for event in origin_events {
+            let notification_data = NotificationData::Event(SubscriptionEmittedEvent {
+                emitted_event: event,
+                finality_status,
+            });
+            socket_context.notify(subscription_id, &subscription, notification_data);
         }
 
         // Process local events after origin events

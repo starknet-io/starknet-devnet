@@ -4,7 +4,7 @@ use std::time::Duration;
 use axum::routing::post;
 use axum::{Json, Router};
 use futures::future::join_all;
-use futures::poll;
+use futures::{StreamExt, poll};
 use serde_json::{Value, json};
 use starknet_core::starknet::Starknet;
 use starknet_core::starknet::starknet_config::{DumpOn, StarknetConfig};
@@ -15,6 +15,7 @@ use super::{Api, JsonRpcHandler};
 use crate::ServerConfig;
 use crate::rpc_core::response::ResponseResult;
 use crate::rpc_handler::RpcHandler;
+use crate::socket_writer::SocketSender;
 
 fn handler() -> JsonRpcHandler {
     let config = StarknetConfig { dump_on: Some(DumpOn::Request), ..Default::default() };
@@ -180,5 +181,142 @@ async fn slow_origin_fallback_does_not_block_revert_and_uses_captured_acceptance
             "block_number": 5, "finality_status": "ACCEPTED_ON_L1"
         }))
     );
+    origin_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slow_subscription_backfill_does_not_block_writes_or_lose_new_heads() {
+    let mut handler = handler();
+    let received = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let origin = Router::new().route(
+        "/",
+        post({
+            let received = received.clone();
+            let release = release.clone();
+            move |Json(request): Json<Value>| {
+                let received = received.clone();
+                let release = release.clone();
+                async move {
+                    received.notify_one();
+                    release.notified().await;
+                    let result = if request["method"] == "starknet_getEvents" {
+                        json!({"events": [], "continuation_token": null})
+                    } else {
+                        json!({
+                            "status": "ACCEPTED_ON_L2",
+                            "block_hash": "0x1",
+                            "parent_hash": "0x0",
+                            "block_number": 0,
+                            "new_root": "0x0",
+                            "timestamp": 0,
+                            "sequencer_address": "0x0",
+                            "l1_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+                            "l2_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+                            "l1_data_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+                            "l1_da_mode": "CALLDATA",
+                            "starknet_version": "0.13.0",
+                            "event_commitment": "0x0",
+                            "transaction_commitment": "0x0",
+                            "receipt_commitment": "0x0",
+                            "state_diff_commitment": "0x0",
+                            "event_count": 0,
+                            "transaction_count": 0,
+                            "state_diff_length": 0,
+                            "transactions": []
+                        })
+                    };
+                    Json(json!({"jsonrpc": "2.0", "id": request["id"], "result": result}))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url: url::Url = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
+    let origin_task = tokio::spawn(async move { axum::serve(listener, origin).await.unwrap() });
+    let config = Arc::make_mut(&mut handler.api.config);
+    config.fork_config.url = Some(url.clone());
+    config.fork_config.block_number = Some(0);
+    handler.origin_caller = Some(OriginForwarder::new(url, 0));
+
+    let (sender, writer) = SocketSender::channel();
+    let (output, mut messages) = futures::channel::mpsc::unbounded();
+    let writer_task = tokio::spawn(writer.run(output));
+    let socket_id = handler.api.sockets.lock().await.insert(sender);
+
+    for (method, create_block) in
+        [("starknet_subscribeNewHeads", true), ("starknet_subscribeEvents", false)]
+    {
+        let request = serde_json::from_value(json!({
+            "jsonrpc": "2.0", "id": 1, "method": method,
+            "params": {"block_id": {"block_number": 0}},
+        }))
+        .unwrap();
+        let subscription = tokio::spawn({
+            let handler = handler.clone();
+            async move { handler.on_websocket_rpc_call(&request, socket_id).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), received.notified()).await.unwrap();
+        assert!(handler.api.sockets.try_lock().is_ok());
+        let snapshot = tokio::time::timeout(
+            Duration::from_secs(5),
+            call(&handler, "devnet_snapshot", json!([])),
+        )
+        .await
+        .unwrap();
+        let ResponseResult::Success(snapshot_id) = snapshot else {
+            panic!("snapshot failed during origin backfill");
+        };
+        if create_block {
+            let block = tokio::time::timeout(
+                Duration::from_secs(5),
+                call(&handler, "devnet_createBlock", json!([])),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(block, ResponseResult::Success(_)));
+            let reverted = tokio::time::timeout(
+                Duration::from_secs(5),
+                call(&handler, "devnet_revert", json!({"snapshot_id": snapshot_id})),
+            )
+            .await
+            .unwrap();
+            assert_eq!(reverted, ResponseResult::Success(json!(true)));
+            let replacement = tokio::time::timeout(
+                Duration::from_secs(5),
+                call(&handler, "devnet_createBlock", json!([])),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(replacement, ResponseResult::Success(_)));
+        }
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), subscription).await.unwrap().unwrap().unwrap();
+
+        let confirmation =
+            tokio::time::timeout(Duration::from_secs(5), messages.next()).await.unwrap().unwrap();
+        let axum::extract::ws::Message::Text(confirmation) = confirmation else {
+            panic!("expected subscription confirmation");
+        };
+        assert!(serde_json::from_str::<Value>(&confirmation).unwrap()["result"].is_string());
+        if create_block {
+            for expected_number in 0..=1 {
+                let notification = tokio::time::timeout(Duration::from_secs(5), messages.next())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let axum::extract::ws::Message::Text(notification) = notification else {
+                    panic!("expected new-head notification");
+                };
+                assert_eq!(
+                    serde_json::from_str::<Value>(&notification).unwrap()["params"]["result"]
+                        ["block_number"],
+                    json!(expected_number)
+                );
+            }
+        }
+    }
+
+    writer_task.abort();
     origin_task.abort();
 }
