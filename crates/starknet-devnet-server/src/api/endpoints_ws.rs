@@ -62,6 +62,16 @@ impl JsonRpcHandler {
                 let block_id = input
                     .map(|input| input.block_id.into())
                     .unwrap_or(BlockId::Tag(BlockTag::Latest));
+                if matches!(block_id, BlockId::Tag(BlockTag::Latest)) {
+                    // Latest has no history to fetch. Register only after lifecycle access is
+                    // acquired, so a concurrent revert cannot invalidate a prepared height.
+                    return Ok(PreparedWsSubscription::NewHeads(PreparedNewHeads {
+                        block_id,
+                        origin_header: None,
+                        origin_range: None,
+                        origin_headers: Vec::new(),
+                    }));
+                }
                 let (query_block_number, origin_header) =
                     self.resolve_start_block(block_id).await?;
                 let (_, _, origin_range) =
@@ -87,6 +97,17 @@ impl JsonRpcHandler {
                     .as_ref()
                     .and_then(|input| input.block_id.as_ref().map(BlockId::from))
                     .unwrap_or(BlockId::Tag(BlockTag::Latest));
+                if matches!(block_id, BlockId::Tag(BlockTag::Latest)) {
+                    // Latest events are read from local state during publication. There is no
+                    // origin backfill to prepare for a moving tag.
+                    return Ok(PreparedWsSubscription::Events(PreparedEvents {
+                        input,
+                        block_id,
+                        origin_header: None,
+                        origin_range: None,
+                        origin_events: Vec::new(),
+                    }));
+                }
                 let (query_block_number, origin_header) =
                     self.resolve_start_block(block_id).await?;
                 let (_, _, origin_range) =
@@ -336,6 +357,11 @@ impl JsonRpcHandler {
             origin_range: prepared_origin_range,
             mut origin_headers,
         } = prepared;
+        if matches!(block_id, BlockId::Tag(BlockTag::Latest)) {
+            let mut sockets = self.api.sockets.lock().await;
+            sockets.get_mut(&socket_id)?.subscribe(rpc_request_id, Subscription::NewHeads);
+            return Ok(());
+        }
         let query_block_number =
             self.revalidate_start_block(block_id, origin_header.as_ref()).await?;
         let (local_start, latest_block_number, origin_range) =
@@ -538,13 +564,18 @@ impl JsonRpcHandler {
             .as_ref()
             .and_then(|subscription_input| subscription_input.from_address.clone());
 
-        let query_block_number =
-            self.revalidate_start_block(starting_block_id, origin_header.as_ref()).await?;
-        let (validated_start_block_number, _, origin_range) =
-            self.validate_block_number_range(query_block_number).await?;
-        if origin_range != prepared_origin_range {
-            return Err(ApiError::BlockNotFound);
-        }
+        let local_start = if matches!(starting_block_id, BlockId::Tag(BlockTag::Latest)) {
+            BlockId::Tag(BlockTag::Latest)
+        } else {
+            let query_block_number =
+                self.revalidate_start_block(starting_block_id, origin_header.as_ref()).await?;
+            let (validated_start_block_number, _, origin_range) =
+                self.validate_block_number_range(query_block_number).await?;
+            if origin_range != prepared_origin_range {
+                return Err(ApiError::BlockNotFound);
+            }
+            BlockId::Number(validated_start_block_number)
+        };
 
         let keys_filter = maybe_subscription_input
             .as_ref()
@@ -562,7 +593,7 @@ impl JsonRpcHandler {
 
         // Get events from local chain
         let local_events = self.api.starknet.lock().await.get_unlimited_events(
-            Some(BlockId::Number(validated_start_block_number)),
+            Some(local_start),
             Some(BlockId::Tag(BlockTag::PreConfirmed)), // Last block; filtering by status
             addresses,
             keys_filter,

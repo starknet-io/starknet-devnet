@@ -8,8 +8,12 @@ use futures::{StreamExt, poll};
 use serde_json::{Value, json};
 use starknet_core::starknet::Starknet;
 use starknet_core::starknet::starknet_config::{DumpOn, StarknetConfig};
+use starknet_types::rpc::block::SubscriptionBlockId;
 use tokio::sync::Notify;
 
+use super::models::{
+    EventsSubscriptionInput, JsonRpcSubscriptionRequest, SubscriptionBlockIdInput,
+};
 use super::origin_forwarder::OriginForwarder;
 use super::{Api, JsonRpcHandler};
 use crate::ServerConfig;
@@ -43,6 +47,33 @@ async fn call(handler: &JsonRpcHandler, method: &str, params: Value) -> Response
         )
         .await
         .result
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn latest_subscription_preparation_does_not_read_moving_state() {
+    let handler = handler();
+    let _lifecycle = handler.api.lifecycle.write().await;
+    let _starknet = handler.api.starknet.lock().await;
+    let requests = [
+        JsonRpcSubscriptionRequest::NewHeads(None),
+        JsonRpcSubscriptionRequest::NewHeads(Some(SubscriptionBlockIdInput {
+            block_id: SubscriptionBlockId::Latest,
+        })),
+        JsonRpcSubscriptionRequest::Events(None),
+        JsonRpcSubscriptionRequest::Events(Some(EventsSubscriptionInput {
+            block_id: Some(SubscriptionBlockId::Latest),
+            from_address: None,
+            keys: None,
+            finality_status: None,
+        })),
+    ];
+
+    for request in requests {
+        tokio::time::timeout(Duration::from_secs(1), handler.prepare_ws_subscription(request))
+            .await
+            .expect("latest preparation waited for local state")
+            .unwrap();
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
