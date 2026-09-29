@@ -80,6 +80,25 @@ impl RpcHandler for JsonRpcHandler {
         if !self.allows_method(&original_call.method) {
             return ResponseResult::Error(RpcError::new(ErrorCode::MethodForbidden));
         }
+        // Event queries coordinate their local reads separately so origin range resolution and
+        // pagination never retain lifecycle access across network I/O.
+        if let JsonRpcRequest::StarknetSpecRequest(StarknetSpecRequest::Events(EventsInput {
+            filter,
+        })) = request
+        {
+            info!(target: "rpc", "received method in on_request starknet_getEvents");
+            let result = self.get_events(filter).await;
+            if let (Err(error), Some(forwarder)) = (&result, &self.origin_caller)
+                && error.is_forwardable_to_origin()
+            {
+                let forwarded = {
+                    let _lifecycle = self.api.lifecycle.read().await;
+                    forwarder.prepare_call(original_call).await
+                };
+                return forwarded.execute().await;
+            }
+            return result.to_rpc_result();
+        }
         let outcome = if request.is_mutating() {
             let _lifecycle = self.api.lifecycle.write().await;
             self.on_request_locked(request, original_call).await
@@ -525,9 +544,10 @@ impl JsonRpcHandler {
     }
 
     pub(crate) fn revert_notifications(
-        old_blocks: &[(u64, starknet_types::felt::BlockHash)],
+        previous: &Starknet,
         restored: &Starknet,
     ) -> DevnetResult<Vec<NotificationData>> {
+        let old_blocks = previous.accepted_block_hashes();
         let new_blocks = restored.accepted_block_hashes();
         let common_len =
             old_blocks.iter().zip(&new_blocks).take_while(|(old, new)| old == new).count();
@@ -546,6 +566,23 @@ impl JsonRpcHandler {
                     *ending_number,
                 ),
             }));
+        }
+
+        // Acceptance status is mutable without changing a block hash. Retained transactions
+        // still need status updates when restoring an earlier acceptance boundary.
+        for (number, _) in new_blocks.iter().take(common_len) {
+            let block = restored.get_block(&BlockId::Number(*number))?;
+            for tx_hash in block.get_transactions() {
+                let status = restored.get_transaction_execution_and_finality_status(*tx_hash)?;
+                let old_status =
+                    previous.get_transaction_execution_and_finality_status(*tx_hash)?;
+                if status.finality_status() != old_status.finality_status() {
+                    notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
+                        transaction_hash: *tx_hash,
+                        status,
+                    }));
+                }
+            }
         }
 
         for (number, _) in new_blocks.iter().skip(common_len) {
@@ -669,7 +706,9 @@ impl JsonRpcHandler {
             StarknetSpecRequest::BlockHashAndNumber => self.block_hash_and_number().await,
             StarknetSpecRequest::ChainId => self.chain_id().await,
             StarknetSpecRequest::Syncing => self.syncing().await,
-            StarknetSpecRequest::Events(EventsInput { filter }) => self.get_events(filter).await,
+            StarknetSpecRequest::Events(EventsInput { filter }) => {
+                self.get_events_with_lifecycle(filter, false).await
+            }
             StarknetSpecRequest::ContractNonce(BlockAndContractAddressInput {
                 block_id,
                 contract_address,

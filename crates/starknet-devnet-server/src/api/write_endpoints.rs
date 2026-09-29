@@ -91,10 +91,7 @@ impl JsonRpcHandler {
                 "Snapshot dump position exceeds the current journal",
             )));
         }
-        let notifications = Self::revert_notifications(
-            &starknet.accepted_block_hashes(),
-            checkpoint.core.as_starknet(),
-        )?;
+        let notifications = Self::revert_notifications(&starknet, checkpoint.core.as_starknet())?;
 
         if let (Some(DumpOn::Block), Some(path)) =
             (self.api.config.dump_on, self.api.config.dump_path.as_deref())

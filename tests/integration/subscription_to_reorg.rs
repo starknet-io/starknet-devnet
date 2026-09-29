@@ -11,6 +11,61 @@ use crate::common::utils::{
 };
 
 #[tokio::test]
+async fn snapshot_revert_reports_status_changes_without_replacing_blocks() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    let transaction_hash = devnet.mint(starknet_rs_core::types::Felt::ONE, 1).await;
+    let accepted_block = devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let unchanged_tx = devnet.mint(starknet_rs_core::types::Felt::TWO, 1).await;
+    let saved_head = devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+    devnet.accept_on_l1(&BlockId::Hash(accepted_block.block_hash)).await.unwrap();
+
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+    let status_id = subscribe(
+        &mut ws,
+        "starknet_subscribeTransactionStatus",
+        json!({"transaction_hash": transaction_hash}),
+    )
+    .await
+    .unwrap();
+    let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+    assert_eq!(initial["params"]["result"]["status"]["finality_status"], "ACCEPTED_ON_L1");
+    subscribe(
+        &mut ws,
+        "starknet_subscribeTransactionStatus",
+        json!({"transaction_hash": unchanged_tx}),
+    )
+    .await
+    .unwrap();
+    let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+    assert_eq!(initial["params"]["result"]["status"]["finality_status"], "ACCEPTED_ON_L2");
+    subscribe(&mut ws, "starknet_subscribeNewHeads", json!({})).await.unwrap();
+
+    assert_eq!(
+        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot_id})).await.unwrap(),
+        true
+    );
+    let restored_head = devnet.get_latest_block_with_tx_hashes().await.unwrap();
+    assert_eq!(restored_head.block_hash, saved_head.block_hash);
+    let status = devnet
+        .send_custom_rpc(
+            "starknet_getTransactionStatus",
+            json!({"transaction_hash": transaction_hash}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status["finality_status"], "ACCEPTED_ON_L2");
+    let notification =
+        receive_notification(&mut ws, "starknet_subscriptionTransactionStatus", status_id)
+            .await
+            .unwrap();
+    assert_eq!(notification["transaction_hash"], json!(transaction_hash));
+    assert_eq!(notification["status"], status);
+    // Unchanged statuses and retained headers must not produce duplicate notifications or reorgs.
+    assert_no_notifications(&mut ws).await.unwrap();
+}
+
+#[tokio::test]
 async fn reorg_notification_for_all_subscriptions() {
     let devnet_args = ["--state-archive-capacity", "full"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();

@@ -49,6 +49,137 @@ async fn call(handler: &JsonRpcHandler, method: &str, params: Value) -> Response
         .result
 }
 
+fn empty_origin_block() -> Value {
+    json!({
+        "status": "ACCEPTED_ON_L2",
+        "block_hash": "0x1",
+        "parent_hash": "0x0",
+        "block_number": 0,
+        "new_root": "0x0",
+        "timestamp": 0,
+        "sequencer_address": "0x0",
+        "l1_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+        "l2_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+        "l1_data_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
+        "l1_da_mode": "CALLDATA",
+        "starknet_version": "0.13.0",
+        "event_commitment": "0x0",
+        "transaction_commitment": "0x0",
+        "receipt_commitment": "0x0",
+        "state_diff_commitment": "0x0",
+        "event_count": 0,
+        "transaction_count": 0,
+        "state_diff_length": 0,
+        "transactions": []
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slow_event_queries_and_origin_bound_resolution_do_not_block_writes() {
+    let mut handler = handler();
+    let (received, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(Notify::new());
+    let origin = Router::new().route(
+        "/",
+        post({
+            let release = release.clone();
+            move |Json(request): Json<Value>| {
+                let received = received.clone();
+                let release = release.clone();
+                async move {
+                    received.send(request.clone()).unwrap();
+                    release.notified().await;
+                    let result = if request["method"] == "starknet_getEvents" {
+                        json!({"events": [], "continuation_token": null})
+                    } else {
+                        empty_origin_block()
+                    };
+                    Json(json!({"jsonrpc": "2.0", "id": request["id"], "result": result}))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url: url::Url = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
+    let origin_task = tokio::spawn(async move { axum::serve(listener, origin).await.unwrap() });
+    handler.origin_caller = Some(OriginForwarder::new(url, 0));
+
+    for (from_block, to_block, origin_requests) in [
+        (json!({"block_number": 0}), json!({"block_number": 0}), 1),
+        (json!({"block_hash": "0xabc"}), json!({"block_number": 0}), 2),
+        (json!({"block_number": 0}), json!({"block_hash": "0xabc"}), 2),
+        (json!("l1_accepted"), json!({"block_number": 0}), 2),
+    ] {
+        let events = tokio::spawn({
+            let handler = handler.clone();
+            async move {
+                call(
+                    &handler,
+                    "starknet_getEvents",
+                    json!({"filter": {
+                        "from_block": from_block, "to_block": to_block, "chunk_size": 1,
+                    }}),
+                )
+                .await
+            }
+        });
+        for _ in 0..origin_requests {
+            let request = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(handler.api.starknet.try_lock().is_ok(), "{request}");
+            let snapshot = tokio::time::timeout(
+                Duration::from_secs(5),
+                call(&handler, "devnet_snapshot", json!([])),
+            )
+            .await
+            .unwrap();
+            let ResponseResult::Success(snapshot_id) = snapshot else {
+                panic!("snapshot failed while origin request was pending: {request}");
+            };
+            assert!(matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    call(&handler, "devnet_createBlock", json!([]))
+                )
+                .await
+                .unwrap(),
+                ResponseResult::Success(_)
+            ));
+            assert_eq!(
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    call(&handler, "devnet_revert", json!({"snapshot_id": snapshot_id}))
+                )
+                .await
+                .unwrap(),
+                ResponseResult::Success(json!(true))
+            );
+            release.notify_one();
+        }
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), events).await.unwrap().unwrap(),
+            ResponseResult::Success(json!({"events": []}))
+        );
+    }
+    origin_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replay_can_read_events_without_reacquiring_lifecycle_access() {
+    let handler = handler();
+    let event = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "starknet_getEvents",
+        "params": {"filter": {"chunk_size": 1}},
+    }))
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), handler.re_execute(&[event]))
+        .await
+        .expect("event replay reacquired lifecycle access")
+        .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn latest_subscription_preparation_does_not_read_moving_state() {
     let handler = handler();
@@ -234,28 +365,7 @@ async fn slow_subscription_backfill_does_not_block_writes_or_lose_new_heads() {
                     let result = if request["method"] == "starknet_getEvents" {
                         json!({"events": [], "continuation_token": null})
                     } else {
-                        json!({
-                            "status": "ACCEPTED_ON_L2",
-                            "block_hash": "0x1",
-                            "parent_hash": "0x0",
-                            "block_number": 0,
-                            "new_root": "0x0",
-                            "timestamp": 0,
-                            "sequencer_address": "0x0",
-                            "l1_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
-                            "l2_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
-                            "l1_data_gas_price": {"price_in_wei": "0x0", "price_in_fri": "0x0"},
-                            "l1_da_mode": "CALLDATA",
-                            "starknet_version": "0.13.0",
-                            "event_commitment": "0x0",
-                            "transaction_commitment": "0x0",
-                            "receipt_commitment": "0x0",
-                            "state_diff_commitment": "0x0",
-                            "event_count": 0,
-                            "transaction_count": 0,
-                            "state_diff_length": 0,
-                            "transactions": []
-                        })
+                        empty_origin_block()
                     };
                     Json(json!({"jsonrpc": "2.0", "id": request["id"], "result": result}))
                 }

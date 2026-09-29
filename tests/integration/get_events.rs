@@ -35,6 +35,47 @@ async fn get_events_follow_continuation_token(
     Ok(events)
 }
 
+#[tokio::test]
+async fn fork_pagination_preserves_origin_and_local_ranges() {
+    let origin = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    origin.mint(Felt::ONE, 10).await;
+    let origin_head = origin.get_latest_block_with_tx_hashes().await.unwrap();
+    origin.accept_on_l1(&BlockId::Hash(origin_head.block_hash)).await.unwrap();
+    let fork = origin.fork().await.unwrap();
+    let first_local_block = fork.get_latest_block_with_tx_hashes().await.unwrap();
+    fork.mint(Felt::ONE, 10).await;
+    let local_head = fork.get_latest_block_with_tx_hashes().await.unwrap();
+
+    for (from_block, to_block, expected_events) in [
+        (BlockId::Number(origin_head.block_number), None, 4),
+        (BlockId::Hash(origin_head.block_hash), None, 4),
+        (BlockId::Tag(BlockTag::L1Accepted), None, 4),
+        (BlockId::Number(origin_head.block_number), Some(BlockId::Hash(origin_head.block_hash)), 2),
+        (BlockId::Hash(origin_head.block_hash), Some(BlockId::Number(origin_head.block_number)), 2),
+        (
+            BlockId::Hash(first_local_block.block_hash),
+            Some(BlockId::Hash(local_head.block_hash)),
+            2,
+        ),
+    ] {
+        let events = get_events_follow_continuation_token(
+            &fork,
+            EventFilter {
+                from_block: Some(from_block),
+                to_block,
+                address: Some(starknet_rs_core::types::AddressFilter::Single(
+                    STRK_ERC20_CONTRACT_ADDRESS,
+                )),
+                keys: Some(vec![vec![get_selector_from_name("Transfer").unwrap()]]),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(events.len(), expected_events, "{from_block:?}..{to_block:?}");
+    }
+}
+
 /// A helper function which asserts that the `starknet_getEvents` RPC method returns the correct
 /// events. It expects a running Devnet, gets the first predeployed account and uses it to declare
 /// and deploy a contract that emits events. Then the events are fetched: first all in a single

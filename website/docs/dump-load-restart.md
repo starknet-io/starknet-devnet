@@ -51,6 +51,8 @@ Timestamp controls are restored exactly, but wall-clock time continues to advanc
 
 External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced, followed by notifications for each restored block in order, including its header, accepted transactions, receipts, statuses, and events.
 
+Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
+
 ## Dumping
 
 To preserve your Devnet instance for future use, these are the options:
