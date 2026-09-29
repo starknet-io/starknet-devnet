@@ -126,9 +126,11 @@ impl<'a> BlockBuilder<'a> {
         policy: Option<&dyn TransactionOrderingPolicy>,
     ) -> DevnetResult<BuildOutcome> {
         let mut outcome = BuildOutcome::default();
+        let mut policy_exhausted_hashes = Vec::new();
         self.starknet.evict_stale_received_transactions(&mut outcome)?;
         if self.starknet.mempool.remaining_capacity() == 0 {
             outcome.block_full = true;
+            self.report_blocked_received_entries(&mut outcome, policy, &policy_exhausted_hashes)?;
             return Ok(outcome);
         }
 
@@ -152,6 +154,7 @@ impl<'a> BlockBuilder<'a> {
             if selection_round.should_refresh() {
                 let new_view = self.eligible_user_hashes(&eligible_hashes);
                 if selection_round.exhausted && selection_round.user_hashes == new_view {
+                    policy_exhausted_hashes = new_view;
                     break;
                 }
                 selection_round.refresh(new_view);
@@ -160,23 +163,7 @@ impl<'a> BlockBuilder<'a> {
             let selected = {
                 let eligible =
                     self.starknet.mempool.eligible_transactions(&selection_round.user_hashes);
-                let context = SelectionContext {
-                    block_number: self.starknet.blocks.pre_confirmed_block.block_number().0,
-                    current_l2_gas_price: self
-                        .starknet
-                        .block_context
-                        .block_info()
-                        .gas_prices
-                        .l2_gas_price(&FeeType::Strk)
-                        .get()
-                        .0,
-                    proposal_selection_counter: self
-                        .starknet
-                        .mempool
-                        .open_proposal()
-                        .selection_counter(),
-                    random_seed: self.starknet.mempool.config().random_seed,
-                };
+                let context = self.selection_context();
                 match policy {
                     Some(policy) => policy.select_in_round(&eligible, &context),
                     None => self.starknet.mempool.select_configured_policy(&eligible, &context)?,
@@ -203,7 +190,71 @@ impl<'a> BlockBuilder<'a> {
         }
 
         outcome.block_full = self.starknet.mempool.remaining_capacity() == 0;
+        self.report_blocked_received_entries(&mut outcome, policy, &policy_exhausted_hashes)?;
         Ok(outcome)
+    }
+
+    fn selection_context(&self) -> SelectionContext {
+        SelectionContext {
+            block_number: self.starknet.blocks.pre_confirmed_block.block_number().0,
+            current_l2_gas_price: self
+                .starknet
+                .block_context
+                .block_info()
+                .gas_prices
+                .l2_gas_price(&FeeType::Strk)
+                .get()
+                .0,
+            proposal_selection_counter: self.starknet.mempool.open_proposal().selection_counter(),
+            random_seed: self.starknet.mempool.config().random_seed,
+        }
+    }
+
+    fn report_blocked_received_entries(
+        &mut self,
+        outcome: &mut BuildOutcome,
+        policy: Option<&dyn TransactionOrderingPolicy>,
+        policy_exhausted_hashes: &[TransactionHash],
+    ) -> DevnetResult<()> {
+        let received_hashes = self
+            .starknet
+            .mempool
+            .entries()
+            .filter_map(|(hash, entry)| (entry.phase == MempoolPhase::Received).then_some(*hash))
+            .collect::<Vec<_>>();
+        let context = self.selection_context();
+
+        for hash in received_hashes {
+            let reason = match self.starknet.eligibility(hash)? {
+                TransactionEligibility::Blocked(reason) => Some(reason),
+                TransactionEligibility::Eligible => {
+                    let policy_reason = match policy {
+                        Some(policy) => self
+                            .starknet
+                            .mempool
+                            .get(&hash)
+                            .and_then(|entry| policy.blocking_reason(entry, &context)),
+                        None => self
+                            .starknet
+                            .mempool
+                            .configured_policy_blocking_reason(&hash, &context)?,
+                    };
+                    policy_reason.or_else(|| {
+                        policy_exhausted_hashes
+                            .contains(&hash)
+                            .then(|| "transaction is not selectable by the ordering policy".into())
+                    })
+                }
+                TransactionEligibility::Stale(_) => None,
+            };
+
+            if let Some(reason) = reason
+                && !outcome.blocked.iter().any(|failure| failure.transaction_hash == hash)
+            {
+                outcome.blocked.push(BuildFailure { transaction_hash: hash, reason });
+            }
+        }
+        Ok(())
     }
 
     fn eligible_user_hashes(&self, eligible_hashes: &[TransactionHash]) -> Vec<TransactionHash> {
@@ -341,6 +392,26 @@ mod tests {
         }
     }
 
+    struct ExhaustedPolicy;
+
+    impl TransactionOrderingPolicy for ExhaustedPolicy {
+        fn select(
+            &self,
+            _eligible: &EligibleTransactions<'_>,
+            _context: &SelectionContext,
+        ) -> Option<TransactionHash> {
+            None
+        }
+
+        fn select_in_round(
+            &self,
+            _eligible: &EligibleTransactions<'_>,
+            _context: &SelectionContext,
+        ) -> PolicySelection {
+            PolicySelection::RoundExhausted
+        }
+    }
+
     #[test]
     fn custom_policy_cannot_select_outside_the_eligible_view() {
         let mut starknet = Starknet::default();
@@ -350,6 +421,30 @@ mod tests {
             matches!(error, Error::UnsupportedAction { msg } if msg.contains("ineligible transaction"))
         );
         assert_eq!(starknet.mempool.entries().count(), 0);
+    }
+
+    #[test]
+    fn exhausted_policy_reports_unselected_eligible_transactions_as_blocked() {
+        let mut starknet = Starknet::default();
+        let hash = Felt::from(0x10);
+        let mut prepared = PreparedTransaction::system(
+            TransactionWithHash::new(hash, Transaction::L1Handler(L1HandlerTransaction::default())),
+            Default::default(),
+        );
+        prepared.lane = MempoolLane::User;
+        starknet.mempool.admit(prepared).unwrap();
+
+        let outcome = starknet.block_builder().build_policy_chunk(None, &ExhaustedPolicy).unwrap();
+
+        assert!(outcome.pre_confirmed.is_empty());
+        assert_eq!(
+            outcome.blocked,
+            vec![BuildFailure {
+                transaction_hash: hash,
+                reason: "transaction is not selectable by the ordering policy".into(),
+            }]
+        );
+        assert_eq!(starknet.mempool.get(&hash).unwrap().phase, MempoolPhase::Received);
     }
 
     #[test]

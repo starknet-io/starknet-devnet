@@ -18,7 +18,7 @@ sidebar_position: 1
 - Block hashes on devnet differ from mainnet because some mainnet block fields are unavailable to devnet, resulting in different hash outputs despite using the same hashing algorithm.
 - Transactions are never automatically `ACCEPTED_ON_L1`, unless the user performs an action.
   - Read more about transitioning a transaction [from `ACCEPTED_ON_L2` to `ACCEPTED_ON_L1`](./blocks#accepting-blocks-on-l1).
-- `RECEIVED` and `CANDIDATE` statuses are not used in Devnet.
+- In [manual mempool mode](./mempool), admitted transactions remain `RECEIVED` until they are selected for processing. `CANDIDATE` is an internal transition during synchronous processing and is generally not observable through concurrent RPC calls.
 - In Starknet 0.14.1, field `migrated_compiled_classes` was introduced to the `state_diff`. In devnet, this field will always be empty:
   - When starting devnet without forking there is nothing to migrate
   - In forking mode, there is no RPC support to fetch compiled class hashes from origin, so it is impossible for devnet to determine which classes have to be migrated

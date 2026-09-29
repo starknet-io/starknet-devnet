@@ -60,9 +60,9 @@ For deterministic tests, supply an ordered list of hashes instead. Forced select
 }
 ```
 
-The response separates `pre_confirmed`, `rejected`, and `blocked` hashes. Blocked transactions remain received; rejected transactions are removed; reverted executions are accepted and pre-confirmed with reverted receipts.
+The response separates `pre_confirmed`, `rejected`, and `blocked` hashes. Policy-driven processing reports all transactions that remain blocked after the processing call in deterministic arrival order, including nonce gaps and policy exclusions such as a maximum L2 gas price below the active proposal threshold. Blocked transactions remain received; rejected transactions are removed; reverted executions are accepted and pre-confirmed with reverted receipts.
 
-`max_transactions` limits processing attempts, including rejected transactions. Block capacity counts only pre-confirmed transactions. A filtered-out selection round can refresh to include newly eligible successors without selecting below-threshold transactions.
+`max_transactions` limits processing attempts, including rejected transactions. Block capacity counts only pre-confirmed transactions. An eligible transaction left unprocessed because of an attempt or capacity limit is not reported as blocked, while other received transactions with nonce gaps are. A filtered-out selection round can refresh to include newly eligible successors without selecting below-threshold transactions.
 
 Eligible system-lane transactions are processed FIFO before user ordering policies. Under `starknet` ordering, a user transaction remains received while its maximum L2 gas price is below the active proposal's L2 gas price. `devnet_setGasPrice` with `generate_block: false` configures the next proposal and does not change ordering or execution prices midway through the open proposal; seal the current proposal to activate the new price.
 

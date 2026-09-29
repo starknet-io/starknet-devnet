@@ -268,6 +268,18 @@ impl Mempool {
         Ok(policy.select_in_round(eligible, context))
     }
 
+    pub(crate) fn configured_policy_blocking_reason(
+        &self,
+        hash: &TransactionHash,
+        context: &SelectionContext,
+    ) -> DevnetResult<Option<String>> {
+        let policy = self
+            .ordering_policies
+            .resolve(&self.config.ordering)
+            .ok_or_else(|| unknown_policy_error(&self.config.ordering, &self.ordering_policies))?;
+        Ok(self.get(hash).and_then(|entry| policy.blocking_reason(entry, context)))
+    }
+
     pub(crate) fn eligible_transactions<'a>(
         &'a self,
         hashes: &'a [TransactionHash],
