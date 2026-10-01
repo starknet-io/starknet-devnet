@@ -38,18 +38,32 @@ async fn get_events_follow_continuation_token(
 #[tokio::test]
 async fn fork_pagination_preserves_origin_and_local_ranges() {
     let origin = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
-    origin.mint(Felt::ONE, 10).await;
+    let origin_tx = origin.mint(Felt::ONE, 10).await;
     let origin_head = origin.get_latest_block_with_tx_hashes().await.unwrap();
     origin.accept_on_l1(&BlockId::Hash(origin_head.block_hash)).await.unwrap();
     let fork = origin.fork().await.unwrap();
     let first_local_block = fork.get_latest_block_with_tx_hashes().await.unwrap();
-    fork.mint(Felt::ONE, 10).await;
+    let local_tx = fork.mint(Felt::ONE, 10).await;
     let local_head = fork.get_latest_block_with_tx_hashes().await.unwrap();
+
+    // Both chains now contain different transactions at the same post-fork heights.
+    origin.mint(Felt::TWO, 20).await;
+    origin.mint(Felt::THREE, 30).await;
+    assert_eq!(
+        origin.get_latest_block_with_tx_hashes().await.unwrap().block_number,
+        local_head.block_number
+    );
 
     for (from_block, to_block, expected_events) in [
         (BlockId::Number(origin_head.block_number), None, 4),
         (BlockId::Hash(origin_head.block_hash), None, 4),
         (BlockId::Tag(BlockTag::L1Accepted), None, 4),
+        (
+            BlockId::Number(origin_head.block_number),
+            Some(BlockId::Number(local_head.block_number)),
+            4,
+        ),
+        (BlockId::Hash(origin_head.block_hash), Some(BlockId::Hash(local_head.block_hash)), 4),
         (BlockId::Number(origin_head.block_number), Some(BlockId::Hash(origin_head.block_hash)), 2),
         (BlockId::Hash(origin_head.block_hash), Some(BlockId::Number(origin_head.block_number)), 2),
         (
@@ -58,21 +72,26 @@ async fn fork_pagination_preserves_origin_and_local_ranges() {
             2,
         ),
     ] {
-        let events = get_events_follow_continuation_token(
-            &fork,
-            EventFilter {
-                from_block: Some(from_block),
-                to_block,
-                address: Some(starknet_rs_core::types::AddressFilter::Single(
-                    STRK_ERC20_CONTRACT_ADDRESS,
-                )),
-                keys: Some(vec![vec![get_selector_from_name("Transfer").unwrap()]]),
-            },
-            1,
-        )
-        .await
-        .unwrap();
-        assert_eq!(events.len(), expected_events, "{from_block:?}..{to_block:?}");
+        for chunk_size in [1, 100] {
+            let events = get_events_follow_continuation_token(
+                &fork,
+                EventFilter {
+                    from_block: Some(from_block),
+                    to_block,
+                    address: Some(starknet_rs_core::types::AddressFilter::Single(
+                        STRK_ERC20_CONTRACT_ADDRESS,
+                    )),
+                    keys: Some(vec![vec![get_selector_from_name("Transfer").unwrap()]]),
+                },
+                chunk_size,
+            )
+            .await
+            .unwrap();
+            assert_eq!(events.len(), expected_events, "{from_block:?}..{to_block:?}");
+            assert!(
+                events.iter().all(|event| [origin_tx, local_tx].contains(&event.transaction_hash))
+            );
+        }
     }
 }
 

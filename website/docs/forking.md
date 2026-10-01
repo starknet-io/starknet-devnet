@@ -12,6 +12,8 @@ The value passed to `--fork-network` should be the URL to a Starknet JSON-RPC AP
 
 When you send a request to a forked Devnet instance, it first queries Devnet's local state, then tries the forking origin. Forking is not a step simply performed on Devnet startup, but happens continuously while the Devnet instance is alive.
 
+Event queries combine origin events up to and including the fork block with events from Devnet's local blocks. Later blocks from the origin are excluded even if the origin chain advances after Devnet starts.
+
 :::
 
 ## Upstream caching

@@ -617,7 +617,7 @@ impl JsonRpcHandler {
             }
         } else {
             EventBlockRange::Resolved {
-                origin: Some((from_block_number, to_block_number)),
+                origin: Some((from_block_number, fork_block_number)),
                 local_start: Some(BlockId::Number(fork_block_number + 1)),
                 local_end: Some(BlockId::Number(to_block_number)),
             }
