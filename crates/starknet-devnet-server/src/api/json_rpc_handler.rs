@@ -621,6 +621,30 @@ impl JsonRpcHandler {
                 }));
             }
         }
+        // These transactions are outside accepted blocks, but their restored statuses must
+        // reach existing subscribers even when the accepted chain has not changed.
+        let pre_confirmed_block = restored.get_block(&BlockId::Tag(BlockTag::PreConfirmed))?;
+        let queued_hashes = restored
+            .mempool()
+            .entries()
+            .filter(|(_, entry)| entry.phase != MempoolPhase::PreConfirmed)
+            .map(|(hash, _)| hash);
+        for tx_hash in pre_confirmed_block.get_transactions().iter().chain(queued_hashes) {
+            let status = restored.get_transaction_execution_and_finality_status(*tx_hash)?;
+            let unchanged = previous
+                .get_transaction_execution_and_finality_status(*tx_hash)
+                .is_ok_and(|old_status| {
+                    old_status.finality_status() == status.finality_status()
+                        && old_status.execution_status() == status.execution_status()
+                        && old_status.failure_reason() == status.failure_reason()
+                });
+            if !unchanged {
+                notifications.push(NotificationData::TransactionStatus(NewTransactionStatus {
+                    transaction_hash: *tx_hash,
+                    status,
+                }));
+            }
+        }
         Ok(notifications)
     }
 

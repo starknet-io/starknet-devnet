@@ -11,6 +11,51 @@ use crate::common::utils::{
 };
 
 #[tokio::test]
+async fn snapshot_revert_reports_restored_preconfirmed_status_after_reorg() {
+    for mode in ["demand", "mempool"] {
+        let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", mode])
+            .await
+            .unwrap();
+        let transaction_hash = devnet.mint(starknet_rs_core::types::Felt::ONE, 1).await;
+        let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+        devnet.create_block().await.unwrap();
+        let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+        let status_id = subscribe(
+            &mut ws,
+            "starknet_subscribeTransactionStatus",
+            json!({"transaction_hash": transaction_hash}),
+        )
+        .await
+        .unwrap();
+        let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(initial["params"]["result"]["status"]["finality_status"], "ACCEPTED_ON_L2");
+
+        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap();
+        let reorg = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(reorg["method"], "starknet_subscriptionReorg");
+        let status = devnet
+            .send_custom_rpc(
+                "starknet_getTransactionStatus",
+                json!({"transaction_hash": transaction_hash}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["finality_status"], "PRE_CONFIRMED");
+        let notification =
+            receive_notification(&mut ws, "starknet_subscriptionTransactionStatus", status_id)
+                .await
+                .unwrap();
+        assert_eq!(notification["transaction_hash"], json!(transaction_hash));
+        assert_eq!(notification["status"], status);
+        assert_no_notifications(&mut ws).await.unwrap();
+
+        let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap();
+        assert_no_notifications(&mut ws).await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn snapshot_revert_reports_status_changes_without_replacing_blocks() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
     let transaction_hash = devnet.mint(starknet_rs_core::types::Felt::ONE, 1).await;

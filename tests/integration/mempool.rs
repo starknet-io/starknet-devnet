@@ -545,6 +545,68 @@ async fn max_transactions_per_block_caps_selection() {
 }
 
 #[tokio::test]
+async fn snapshot_revert_notifies_restored_received_status() {
+    for discard in [false, true] {
+        let devnet = spawn_mempool_devnet().await;
+        let client = json_rpc_client(&devnet);
+        let account = first_predeployed_account(&devnet, &client).await;
+        let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+        let unchanged = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ONE).await;
+        let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+        if discard {
+            devnet
+                .send_custom_rpc("devnet_removeFromMempool", json!({"transaction_hash": hash}))
+                .await
+                .unwrap();
+        } else {
+            devnet
+                .send_custom_rpc(
+                    "devnet_preconfirmTransactions",
+                    json!({"transaction_hashes": [hash]}),
+                )
+                .await
+                .unwrap();
+            assert_phase(&devnet, hash, "PRE_CONFIRMED").await;
+        }
+
+        let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+        subscribe(
+            &mut ws,
+            "starknet_subscribeTransactionStatus",
+            json!({"transaction_hash": hash}),
+        )
+        .await
+        .unwrap();
+        if !discard {
+            let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+            assert_eq!(initial["params"]["result"]["status"]["finality_status"], "PRE_CONFIRMED");
+        }
+        subscribe(
+            &mut ws,
+            "starknet_subscribeTransactionStatus",
+            json!({"transaction_hash": unchanged}),
+        )
+        .await
+        .unwrap();
+        let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(initial["params"]["result"]["status"]["finality_status"], "RECEIVED");
+        subscribe(&mut ws, "starknet_subscribeNewHeads", json!({})).await.unwrap();
+
+        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap();
+        assert_phase(&devnet, hash, "RECEIVED").await;
+        let status = devnet
+            .send_custom_rpc("starknet_getTransactionStatus", json!({"transaction_hash": hash}))
+            .await
+            .unwrap();
+        let notification = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(notification["method"], "starknet_subscriptionTransactionStatus");
+        assert_eq!(notification["params"]["result"]["transaction_hash"], json!(hash));
+        assert_eq!(notification["params"]["result"]["status"], status);
+        assert_no_notifications(&mut ws).await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn snapshot_restores_mempool_entries_config_and_selection_state() {
     let devnet = BackgroundDevnet::spawn_with_additional_args(&[
         "--block-generation-on",
