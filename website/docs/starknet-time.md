@@ -2,7 +2,7 @@
 
 Block and state timestamp can be manipulated by setting the exact time or setting the time offset. By default, timestamp methods `devnet_setTime` and `devnet_increaseTime` of JSON-RPC API generate a new block. This can be changed for `devnet_setTime` by setting the optional parameter `generate_block` to `false`. This skips immediate new block generation, but will use the specified timestamp whenever the next block is supposed to be generated.
 
-All values should be set in [Unix time seconds](https://en.wikipedia.org/wiki/Unix_time). After [startup](#start-time), the time progresses naturally.
+Time parameters are non-negative JSON integers in [Unix time seconds](https://en.wikipedia.org/wiki/Unix_time). After [startup](#start-time), the time progresses naturally.
 
 ## Set time
 
@@ -61,7 +61,7 @@ Imagine a block is generated with timestamp `T1`, some time passes (let's call t
 
 ## Start time
 
-Devnet's starting timestamp can be defined via CLI by providing a positive value of [Unix time seconds](https://en.wikipedia.org/wiki/Unix_time) to `--start-time`:
+Devnet's starting timestamp can be defined via CLI by providing a non-negative value of [Unix time seconds](https://en.wikipedia.org/wiki/Unix_time) to `--start-time`:
 
 ```
 $ starknet-devnet --start-time <SECONDS>

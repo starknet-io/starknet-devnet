@@ -1,29 +1,24 @@
 # Cairo Contracts
 
-This folder contains a Scarb package to compile and deploy Cairo 1
-contracts on Devnet for development purposes.
+This folder contains a Scarb package to compile and deploy Cairo 1 contracts on Devnet for development purposes.
 
 ## Work with Scarb
 
-Start by installing Scarb (with `asdf` **highly** recommended) [from the tutorial](https://docs.swmansion.com/scarb/).
-Ensure you've at least version `2.3.1` installed.
+Install Scarb [from the tutorial](https://docs.swmansion.com/scarb/). The package declares Starknet `>=2.3.1` in `Scarb.toml`; use a compatible compiler.
 
 ### Build
 
-To build contracts, use:
+To build contracts from this directory, use:
+
 ```bash
 scarb build
 ```
 
-The contracts artifacts are generated into `target/dev` folder.
-Two files can be found there:
-* The Sierra class file: `package_contract.contract_class.json`
-* The compiled CASM file: `package_contract.compiled_contract_class.json`
+The contract artifacts are generated into `target/dev`. Each contract produces:
+
+- The Sierra class file: `cairo_<contract-name>.contract_class.json`
+- The compiled CASM file: `cairo_<contract-name>.compiled_contract_class.json`
 
 ### Interact with Devnet
 
-To interact with Devnet, [Starkli](https://book.starkli.rs/) is the easiest CLI tool to use.
-To work with Starkli, you need two files:
-* The keystore file with the private key being encrypted there. This file can also be replaced by the private
-  key in plain text, which is totally fine for testing.
-* The account file with the account definition and address.
+To interact with Devnet, you can use [Starkli](https://book.starkli.rs/). Configure an account file containing the deployed account definition and address, along with a keystore or a private key. The [parent guide](../README.md) uses the bundled test account and a Devnet started with `--seed 42 --account-class cairo0`.

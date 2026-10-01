@@ -8,31 +8,13 @@ use starknet_types::rpc::transactions::{
 
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
-use crate::starknet::mempool::{MempoolLane, PreparedTransaction};
 use crate::starknet::proofs::verify_proof;
 use crate::starknet::starknet_config::ProofMode;
+use crate::starknet::transaction_execution::PreparedTransaction;
 
 pub fn add_invoke_transaction(
     starknet: &mut Starknet,
     broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
-) -> DevnetResult<TransactionHash> {
-    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::User)
-}
-
-/// Like [`add_invoke_transaction`] but submits on the system lane, so execution happens
-/// regardless of the configured block-generation mode. Used by `devnet_mint` so its balance
-/// change is observable immediately even in `mempool` mode.
-pub fn add_invoke_transaction_system(
-    starknet: &mut Starknet,
-    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
-) -> DevnetResult<TransactionHash> {
-    add_invoke_transaction_in_lane(starknet, broadcasted_invoke_transaction, MempoolLane::System)
-}
-
-fn add_invoke_transaction_in_lane(
-    starknet: &mut Starknet,
-    broadcasted_invoke_transaction: BroadcastedInvokeTransaction,
-    lane: MempoolLane,
 ) -> DevnetResult<TransactionHash> {
     if !broadcasted_invoke_transaction.are_gas_bounds_valid() {
         return Err(TransactionValidationError::InsufficientResourcesForValidate.into());
@@ -86,7 +68,7 @@ fn add_invoke_transaction_in_lane(
     )?);
 
     let strict_nonce_check = broadcasted_invoke_transaction
-        .requires_strict_nonce_check(starknet.config.requires_strict_nonce_check());
+        .requires_strict_nonce_check(starknet.config.uses_pre_confirmed_block());
 
     let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::Invoke(sn_api_transaction),
@@ -100,14 +82,8 @@ fn add_invoke_transaction_in_lane(
 
     let transaction = TransactionWithHash::new(transaction_hash, invoke_transaction);
 
-    let prepared = match lane {
-        MempoolLane::User => PreparedTransaction::account(transaction, executable, None),
-        MempoolLane::System => PreparedTransaction::system_account(transaction, executable, None),
-    };
-    let transaction_hash = match lane {
-        MempoolLane::User => starknet.submit_prepared_transaction(prepared)?,
-        MempoolLane::System => starknet.submit_system_prepared_transaction(prepared)?,
-    };
+    let prepared = PreparedTransaction::account(transaction, executable, None);
+    let transaction_hash = starknet.submit_prepared_transaction(prepared)?;
 
     Ok(transaction_hash)
 }
@@ -147,6 +123,56 @@ mod tests {
         cairo_0_account_without_validations, dummy_contract_address, dummy_felt, dummy_key_pair,
         resource_bounds_with_price_1, test_invoke_transaction_v3,
     };
+
+    #[test]
+    fn duplicate_submission_does_not_execute_again() {
+        for mode in [
+            BlockGenerationOn::Transaction,
+            BlockGenerationOn::Demand,
+            BlockGenerationOn::Interval(60),
+        ] {
+            let (mut starknet, account, contract_address, selector, storage_key) = setup();
+            starknet.config.block_generation_on = mode;
+            let tx = test_invoke_transaction_v3(
+                account.get_address(),
+                contract_address,
+                selector,
+                &[Felt::from(10)],
+                0,
+                resource_bounds_with_price_1(0, 1000, 2e6 as u64),
+            );
+            let transaction_hash = starknet.add_invoke_transaction(tx.clone()).unwrap();
+            let block_hashes = starknet.accepted_block_hashes();
+            let transaction_count = starknet.transactions.len();
+            let nonce =
+                starknet.pre_confirmed_state.get_nonce_at(account.get_address().into()).unwrap();
+            let value = starknet
+                .pre_confirmed_state
+                .get_storage_at(contract_address.into(), (*storage_key.get_storage_key()).into())
+                .unwrap();
+
+            assert!(matches!(
+                starknet.add_invoke_transaction(tx),
+                Err(Error::DuplicateTransaction { transaction_hash: hash }) if hash == transaction_hash
+            ));
+            assert_eq!(starknet.accepted_block_hashes(), block_hashes);
+            assert_eq!(starknet.transactions.len(), transaction_count);
+            assert_eq!(
+                starknet.pre_confirmed_state.get_nonce_at(account.get_address().into()).unwrap(),
+                nonce
+            );
+            assert_eq!(
+                starknet
+                    .pre_confirmed_state
+                    .get_storage_at(
+                        contract_address.into(),
+                        (*storage_key.get_storage_key()).into()
+                    )
+                    .unwrap(),
+                value
+            );
+        }
+    }
 
     #[test]
     fn invoke_transaction_v3_with_only_query_version_should_return_an_error() {

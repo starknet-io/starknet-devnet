@@ -43,7 +43,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl: `${GITHUB_REPO_URL}/blob/master/website`,
+          editUrl: `${GITHUB_REPO_URL}/blob/main/website`,
         },
         theme: {
           customCss: './src/css/custom.css',

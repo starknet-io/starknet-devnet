@@ -15,13 +15,11 @@ use crate::api::models::{
     BlockTransactionTracesInput, BroadcastedDeclareTransactionInput,
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionInput, CallInput,
     ClassHashInput, DumpRequest, EstimateFeeInput, EventsInput, EventsSubscriptionInput,
-    FlushParameters, GetMempoolRequest, GetStorageInput, GetStorageProofInput, IncreaseTime,
-    JsonRpcResponse, L1TransactionHashInput, LoadRequest, MintTokensRequest,
-    PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest, ProveTransactionInput,
-    RemoveFromMempoolRequest, RestartParameters, RevertRequest, SetMempoolConfigRequest, SetTime,
-    SimulateTransactionsInput, StateUpdateInput, SubscriptionBlockIdInput, SubscriptionIdInput,
-    TransactionHashAndFlagsInput, TransactionHashInput, TransactionReceiptSubscriptionInput,
-    TransactionSubscriptionInput,
+    FlushParameters, GetStorageInput, GetStorageProofInput, IncreaseTime, JsonRpcResponse,
+    L1TransactionHashInput, LoadRequest, MintTokensRequest, PostmanLoadL1MessagingContract,
+    ProveTransactionInput, RestartParameters, RevertRequest, SetTime, SimulateTransactionsInput,
+    StateUpdateInput, SubscriptionBlockIdInput, SubscriptionIdInput, TransactionHashAndFlagsInput,
+    TransactionHashInput, TransactionReceiptSubscriptionInput, TransactionSubscriptionInput,
 };
 use crate::api::serde_helpers::{empty_params, optional_params};
 use crate::rpc_core::error::RpcError;
@@ -167,20 +165,6 @@ pub enum DevnetSpecRequest {
     PostmanConsumeMessageFromL2(MessageToL1),
     #[serde(rename = "devnet_createBlock", with = "empty_params")]
     CreateBlock,
-    #[serde(rename = "devnet_getMempool", with = "optional_params")]
-    GetMempool(Option<GetMempoolRequest>),
-    #[serde(rename = "devnet_removeFromMempool")]
-    RemoveFromMempool(RemoveFromMempoolRequest),
-    #[serde(rename = "devnet_clearMempool", with = "empty_params")]
-    ClearMempool,
-    #[serde(rename = "devnet_preconfirmTransactions", with = "optional_params")]
-    PreconfirmTransactions(Option<PreconfirmTransactionsRequest>),
-    #[serde(rename = "devnet_setMempoolConfig")]
-    SetMempoolConfig(SetMempoolConfigRequest),
-    #[serde(rename = "devnet_sealBlock", with = "empty_params")]
-    SealBlock,
-    #[serde(rename = "devnet_abortPreconfirmedBlock", with = "empty_params")]
-    AbortPreconfirmedBlock,
     #[serde(rename = "devnet_abortBlocks")]
     AbortBlocks(AbortingBlocks),
     #[serde(rename = "devnet_acceptOnL1")]
@@ -390,9 +374,6 @@ impl DevnetSpecRequest {
             Self::PostmanFlush(_)
             | Self::PostmanSendMessageToL2(_)
             | Self::CreateBlock
-            | Self::PreconfirmTransactions(_)
-            | Self::SealBlock
-            | Self::AbortPreconfirmedBlock
             | Self::AbortBlocks(_)
             | Self::AcceptOnL1(_)
             | Self::SetTime(_)
@@ -408,10 +389,6 @@ impl DevnetSpecRequest {
             | Self::Load(_)
             | Self::PostmanLoadL1MessagingContract(_)
             | Self::PostmanConsumeMessageFromL2(_)
-            | Self::GetMempool(_)
-            | Self::RemoveFromMempool(_)
-            | Self::ClearMempool
-            | Self::SetMempoolConfig(_)
             | Self::SetGasPrice(_)
             | Self::Restart(_)
             | Self::PredeployedAccounts(_)
@@ -433,12 +410,6 @@ impl DevnetSpecRequest {
             | Self::PostmanSendMessageToL2(_)
             | Self::PostmanConsumeMessageFromL2(_)
             | Self::CreateBlock
-            | Self::RemoveFromMempool(_)
-            | Self::ClearMempool
-            | Self::PreconfirmTransactions(_)
-            | Self::SetMempoolConfig(_)
-            | Self::SealBlock
-            | Self::AbortPreconfirmedBlock
             | Self::AbortBlocks(_)
             | Self::AcceptOnL1(_)
             | Self::SetGasPrice(_)
@@ -450,7 +421,6 @@ impl DevnetSpecRequest {
             | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanFlush(_)
-            | Self::GetMempool(_)
             | Self::Restart(_)
             | Self::PredeployedAccounts(_)
             | Self::AccountBalance(_)
@@ -469,8 +439,7 @@ impl JsonRpcRequest {
                 | StarknetSpecRequest::AddInvokeTransaction(_),
             ) => true,
             Self::DevnetSpecRequest(
-                DevnetSpecRequest::GetMempool(_)
-                | DevnetSpecRequest::PredeployedAccounts(_)
+                DevnetSpecRequest::PredeployedAccounts(_)
                 | DevnetSpecRequest::AccountBalance(_)
                 | DevnetSpecRequest::DevnetConfig
                 | DevnetSpecRequest::DevnetStatus,
@@ -489,12 +458,6 @@ impl JsonRpcRequest {
                 | DevnetSpecRequest::PostmanSendMessageToL2(_)
                 | DevnetSpecRequest::PostmanConsumeMessageFromL2(_)
                 | DevnetSpecRequest::CreateBlock
-                | DevnetSpecRequest::RemoveFromMempool(_)
-                | DevnetSpecRequest::ClearMempool
-                | DevnetSpecRequest::PreconfirmTransactions(_)
-                | DevnetSpecRequest::SetMempoolConfig(_)
-                | DevnetSpecRequest::SealBlock
-                | DevnetSpecRequest::AbortPreconfirmedBlock
                 | DevnetSpecRequest::AbortBlocks(_)
                 | DevnetSpecRequest::AcceptOnL1(_)
                 | DevnetSpecRequest::SetGasPrice(_)
@@ -664,66 +627,9 @@ mod requests_tests {
     use serde_json::json;
     use starknet_types::felt::felt_from_prefixed_hex;
 
-    use super::{DevnetSpecRequest, JsonRpcRequest, StarknetSpecRequest};
+    use super::{JsonRpcRequest, StarknetSpecRequest};
     use crate::rpc_core::request::RpcMethodCall;
     use crate::test_utils::{EXPECTED_INVALID_BLOCK_ID_MSG, assert_contains};
-
-    #[test]
-    fn deserialize_mempool_requests() {
-        let get = serde_json::from_str::<JsonRpcRequest>(
-            r#"{"method":"devnet_getMempool","params":{"include_transactions":true}}"#,
-        )
-        .unwrap();
-        assert!(matches!(
-            get,
-            JsonRpcRequest::DevnetSpecRequest(DevnetSpecRequest::GetMempool(Some(request)))
-                if request.include_transactions
-        ));
-
-        let preconfirm = serde_json::from_str::<JsonRpcRequest>(
-            r#"{"method":"devnet_preconfirmTransactions","params":{"transaction_hashes":["0x1","0x2"]}}"#,
-        )
-        .unwrap();
-        assert!(matches!(
-            preconfirm,
-            JsonRpcRequest::DevnetSpecRequest(DevnetSpecRequest::PreconfirmTransactions(Some(request)))
-                if request.transaction_hashes.as_ref().is_some_and(|hashes| hashes.len() == 2)
-        ));
-
-        let config = serde_json::from_str::<JsonRpcRequest>(
-            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"random","random_seed":7,"max_transactions_per_block":10}}"#,
-        )
-        .unwrap();
-        assert!(matches!(
-            config,
-            JsonRpcRequest::DevnetSpecRequest(DevnetSpecRequest::SetMempoolConfig(request))
-                if request.random_seed == Some(7)
-                    && request.max_transactions_per_block == Some(10)
-        ));
-
-        for method in ["devnet_clearMempool", "devnet_sealBlock", "devnet_abortPreconfirmedBlock"] {
-            assert_deserialization_succeeds(&format!(r#"{{"method":"{method}","params":[]}}"#));
-        }
-    }
-
-    #[test]
-    fn reject_invalid_mempool_request_shapes() {
-        assert_deserialization_fails(
-            r#"{"method":"devnet_preconfirmTransactions","params":{"unknown":1}}"#,
-            "unknown field `unknown`",
-        );
-        assert_deserialization_fails(
-            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"Invalid Policy"}}"#,
-            "policy names must contain",
-        );
-        assert_deserialization_succeeds(
-            r#"{"method":"devnet_setMempoolConfig","params":{"ordering":"custom-policy"}}"#,
-        );
-        assert_deserialization_fails(
-            r#"{"method":"devnet_removeFromMempool","params":{}}"#,
-            "missing field `transaction_hash`",
-        );
-    }
 
     #[test]
     fn deserialize_get_block_with_transaction_hashes_request() {

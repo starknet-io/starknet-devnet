@@ -43,7 +43,7 @@ The UI is organised around the same data Devnet exposes via JSON-RPC, so each sc
 - **Transactions** — transaction detail pages showing status, receipt, and execution trace where available.
 - **Accounts** — view [predeployed accounts](./predeployed.md) along with their addresses and balances.
 - **Control panel** — fire Devnet-specific actions (mint tokens, create or abort blocks, set time, set gas price, dump/load/restart state, impersonate accounts, postman flush/load, etc.) without writing JSON-RPC by hand.
-- **Config** — current Devnet configuration with the runtime status overlaid for convenience.
+- **Config** — startup configuration with runtime status and a comparison against current block gas prices.
 - **Connection settings** — point the UI at a different Devnet endpoint (handy when Devnet is running in a different container or on a remote host).
 
 :::tip
@@ -54,4 +54,4 @@ The UI is a regular HTTP client — it talks to Devnet through the standard JSON
 
 ## Disabling the Web UI
 
-By default, the UI is **not** served. Leaving `--ui` unset (or unsetting the `UI` env var) keeps the server behaviour identical to previous Devnet versions — only the JSON-RPC API is exposed.
+By default, the UI is **not** served. Leaving `--ui` unset (or unsetting the `UI` env var) disables the UI routes. JSON-RPC and the healthcheck remain available; the optional metrics server is configured separately.

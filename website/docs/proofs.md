@@ -14,11 +14,11 @@ Proof behavior is controlled by `--proof-mode` (or env var `PROOF_MODE`).
 
 ### Mode summary
 
-| Mode   | CLI value          | What `starknet_proveTransaction` does            | How `starknet_addInvokeTransaction` treats `proof` and `proof_facts`                                                     |
-| ------ | ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Full   | `full`             | Not implemented yet                              | Rejects with unsupported action                                                                                          |
-| Devnet | `devnet` (default) | Returns a deterministic mock proof + proof facts | If both fields are present, verifies them; if one is missing or verification fails, rejects; if both are absent, accepts |
-| None   | `none`             | Disabled / unsupported                           | Ignores incoming `proof` for invoke txs                                                                                  |
+| Mode   | CLI value          | What `starknet_proveTransaction` does            | How `starknet_addInvokeTransaction` treats `proof` and `proof_facts`                    |
+| ------ | ------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| Full   | `full`             | Not implemented yet                              | Rejects with unsupported action                                                         |
+| Devnet | `devnet` (default) | Returns a deterministic mock proof + proof facts | Verifies a supplied proof and its facts; without a proof, accepts absent or empty facts |
+| None   | `none`             | Disabled / unsupported                           | Ignores incoming `proof` for invoke txs                                                 |
 
 ### Why this exists
 
@@ -67,7 +67,7 @@ docker run --rm -p 5050:5050 \
 - `block_id`
 - `transaction` (a broadcasted `INVOKE v3` transaction payload)
 
-Example:
+The following illustrates the request shape. Replace the sender, calldata, resource bounds, nonce, and signature with a valid transaction for a funded, deployed account before sending it.
 
 ```json
 {
@@ -141,8 +141,9 @@ Example:
 - Invoke handling rules:
   - both `proof` + `proof_facts` present and valid → accepted
   - both present but invalid → rejected
-  - only one present → rejected
-  - both absent → accepted
+  - `proof` present without `proof_facts` → rejected
+  - `proof` absent with non-empty `proof_facts` → rejected
+  - `proof` absent with absent or empty `proof_facts` → accepted
 
 ### `none` mode
 
@@ -151,4 +152,4 @@ Example:
 ### `full` mode
 
 - Full proving/verification is not implemented yet.
-- Endpoints and transactions requiring full verification return unsupported-action errors.
+- `starknet_proveTransaction` and all invoke submissions return unsupported-action errors, including invokes without proof fields.

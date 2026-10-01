@@ -28,19 +28,19 @@ $ docker pull starknetfoundation/starknet-devnet-rs:<CRATES_IO_VERSION>
 
 :::note
 
-The `latest` docker image tag corresponds to the last published version on crates.io.
+The `latest` docker image tag corresponds to the last published non-prerelease version.
 
 :::
 
 ### Accessing Devnet fixes before release
 
-Commits to the `main` branch of this repository are mostly available as images tagged with their commit hash (the full 40-lowercase-hex-digits SHA1 digest):
+Commits to the `main` branch of this repository are mostly available as images tagged with `sha-` followed by their commit hash (the full 40-lowercase-hex-digits SHA1 digest):
 
 ```
-$ docker pull starknetfoundation/starknet-devnet-rs:<COMMIT_HASH>
+$ docker pull starknetfoundation/starknet-devnet-rs:sha-<COMMIT_HASH>
 ```
 
-If a fix has been merged into the `main` branch of Devnet's code repository, you can access it before its inclusion in an official release. Just inspect the [`main` commit list](https://github.com/starknet-io/starknet-devnet/commits/main) and copy the full SHA digest of the commit containing the fix (or preferably the latest commit) which has a green check ✔️ symbol next to the commit date (which indicates the image indeed exists). Some revisions may not have a corresponding Docker image, but these are not supposed to be bugfixes.
+If a fix has been merged into the `main` branch of Devnet's code repository, you can access it before its inclusion in an official release. Just inspect the [`main` commit list](https://github.com/starknet-io/starknet-devnet/commits/main) and copy the full SHA digest of the commit containing the fix (or preferably the latest commit) whose Build and Publish workflow completed successfully. A passing test workflow alone does not establish that the Docker image was published; some revisions may have no corresponding image.
 
 ### Zero-seeded set of accounts
 
@@ -81,11 +81,4 @@ If you don't specify the `HOST` part, the server will indeed be available on all
 
 ## Development note
 
-Due to internal needs, images with arch suffix are built and pushed to Docker Hub, but this is not mentioned in the user docs as users should NOT be needing it.
-
-This is what happens under the hood on `main`:
-
-- build `starknetfoundation/starknet-devnet-rs-<COMMIT_SHA1>-amd`
-- build `starknetfoundation/starknet-devnet-rs-<COMMIT_SHA1>-arm`
-- create and push joint docker manifest called `starknetfoundation/starknet-devnet-rs-<COMMIT_SHA1>`
-  - same for `latest`
+The publish workflow builds temporary per-architecture images tagged `sha-<COMMIT_HASH>-amd64` and `sha-<COMMIT_HASH>-arm64`, combines them into the multi-platform `sha-<COMMIT_HASH>` manifest, and removes the temporary tags. Release version tags and `latest` point to the corresponding multi-platform manifests; the seed-zero images follow the same process.

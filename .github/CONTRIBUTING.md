@@ -129,7 +129,9 @@ Run the unit-test suite with:
 $ cargo test --workspace --exclude integration --no-fail-fast
 ```
 
-Run the integration suite after production, RPC, CLI, or contract-fixture changes with:
+During development, run the affected crate or integration module, for example `cargo test -p starknet-devnet-core <test-name>` or `cargo test -p integration <test-name> -- --nocapture`. Automated contributors should use these focused checks as described in `AGENTS.md`.
+
+For a full integration run before merging or in CI, use:
 
 ```
 $ ./scripts/test_integration.sh

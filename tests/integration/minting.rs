@@ -195,10 +195,15 @@ async fn reject_invalid_unit_when_querying() {
 
 #[tokio::test]
 async fn test_overflow_behavior() {
-    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    for (mode, expected_finality_status) in
+        [("transaction", "ACCEPTED_ON_L2"), ("demand", "PRE_CONFIRMED"), ("60", "PRE_CONFIRMED")]
+    {
+        let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", mode])
+            .await
+            .unwrap();
 
-    // Sending a random too big value to a random address
-    let mint_err = devnet
+        // Sending a random too big value to a random address
+        let mint_err = devnet
         .send_custom_rpc(
             "devnet_mint",
             serde_json::from_str(r#"{
@@ -210,17 +215,33 @@ async fn test_overflow_behavior() {
         .await
         .unwrap_err();
 
-    // The complete error also contains the tx hash, which cannot be asserted in a stable way.
-    assert_eq!(
-        (
-            mint_err.code,
-            mint_err.message,
-            mint_err.data.unwrap()["revert_reason"].as_str().unwrap()
-        ),
-        (
-            -1,
-            "Minting reverted".into(),
-            "The requested minting amount overflows the token contract's total_supply."
-        )
-    );
+        let error_data = mint_err.data.unwrap();
+        let params = json!({ "transaction_hash": error_data["tx_hash"] });
+        let status =
+            devnet.send_custom_rpc("starknet_getTransactionStatus", params.clone()).await.unwrap();
+        assert_eq!(status["finality_status"], expected_finality_status);
+        assert_eq!(status["execution_status"], "REVERTED");
+        assert!(!status["failure_reason"].as_str().unwrap().is_empty());
+        let receipt =
+            devnet.send_custom_rpc("starknet_getTransactionReceipt", params.clone()).await.unwrap();
+        assert_eq!(receipt["finality_status"], expected_finality_status);
+        assert_eq!(receipt["execution_status"], "REVERTED");
+
+        devnet.create_block().await.unwrap();
+        let sealed_status =
+            devnet.send_custom_rpc("starknet_getTransactionStatus", params).await.unwrap();
+        assert_eq!(sealed_status["finality_status"], "ACCEPTED_ON_L2");
+        assert_eq!(sealed_status["execution_status"], "REVERTED");
+        assert_eq!(sealed_status["failure_reason"], status["failure_reason"]);
+
+        // The complete error also contains the tx hash, which cannot be asserted in a stable way.
+        assert_eq!(
+            (mint_err.code, mint_err.message, error_data["revert_reason"].as_str().unwrap()),
+            (
+                -1,
+                "Minting reverted".into(),
+                "The requested minting amount overflows the token contract's total_supply."
+            )
+        );
+    }
 }

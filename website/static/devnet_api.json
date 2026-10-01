@@ -3,7 +3,9 @@
   "info": {
     "version": "0.1.0",
     "title": "Devnet API",
-    "license": {}
+    "license": {
+      "name": "MIT"
+    }
   },
   "servers": [],
   "methods": [
@@ -21,7 +23,13 @@
           }
         }
       ],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Empty result",
+        "schema": {
+          "type": "object"
+        }
+      },
       "errors": [
         {
           "$ref": "#/components/errors/INVALID_REQUEST"
@@ -42,14 +50,26 @@
           }
         }
       ],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Empty result",
+        "schema": {
+          "type": "object"
+        }
+      },
       "errors": []
     },
     {
       "name": "devnet_autoImpersonate",
       "summary": "Automatic account impersonation",
       "params": [],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Empty result",
+        "schema": {
+          "type": "object"
+        }
+      },
       "errors": [
         {
           "$ref": "#/components/errors/INVALID_REQUEST"
@@ -60,7 +80,13 @@
       "name": "devnet_stopAutoImpersonate",
       "summary": "Stop automatic account impersonation",
       "params": [],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Empty result",
+        "schema": {
+          "type": "object"
+        }
+      },
       "errors": [
         {
           "$ref": "#/components/errors/INVALID_REQUEST"
@@ -69,7 +95,7 @@
     },
     {
       "name": "devnet_dump",
-      "summary": "Dump current state to a file",
+      "summary": "Export the replay journal, optionally writing it to a file",
       "params": [
         {
           "name": "path",
@@ -79,9 +105,33 @@
             "title": "Path",
             "type": "string"
           }
+        },
+        {
+          "name": "inline",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "description": "Ignore the startup dump path; an explicit request path still takes precedence"
         }
       ],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Dumped replay events",
+        "schema": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DUMP_EVENT"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "errors": [
         {
           "$ref": "#/components/errors/DUMP_ERROR"
@@ -90,24 +140,39 @@
     },
     {
       "name": "devnet_load",
-      "summary": "Load blockchain state from file",
+      "summary": "Replace Devnet state by replaying events from a file or the request",
       "params": [
         {
           "name": "path",
-          "description": "Path to a file with dumped state",
-          "required": true,
+          "required": false,
           "schema": {
-            "title": "Path",
             "type": "string"
+          }
+        },
+        {
+          "name": "events",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DUMP_EVENT"
+            }
           }
         }
       ],
-      "result": {},
+      "result": {
+        "name": "result",
+        "description": "Empty result",
+        "schema": {
+          "type": "object"
+        }
+      },
       "errors": [
         {
           "$ref": "#/components/errors/DUMP_ERROR"
         }
-      ]
+      ],
+      "description": "Exactly one of path or events is required. Restart and load invalidate snapshots and clear subscriptions."
     },
     {
       "name": "devnet_snapshot",
@@ -200,9 +265,7 @@
           "properties": {
             "messaging_contract_address": {
               "title": "The address of the messaging contract",
-              "schema": {
-                "$ref": "#/components/schemas/ETH_ADDRESS"
-              }
+              "$ref": "#/components/schemas/ETH_ADDRESS"
             }
           },
           "required": ["messaging_contract_address"]
@@ -223,7 +286,7 @@
       "params": [
         {
           "name": "dry_run",
-          "description": "See results of the flush without actually sending/receiving messages",
+          "description": "Optional when params is omitted; required if a params object is supplied",
           "required": false,
           "schema": {
             "title": "Dry run",
@@ -276,47 +339,84 @@
         {
           "$ref": "#/components/errors/MESSAGING_ERROR"
         }
-      ]
+      ],
+      "description": "Only accepted local blocks contribute L2-to-L1 messages. A dry run collects these messages without sending them and does not fetch or execute L1-to-L2 messages."
     },
     {
       "name": "devnet_postmanSendMessageToL2",
       "summary": "Send message L1 to L2",
       "params": [
         {
-          "l2_contract_address": {
+          "name": "l2_contract_address",
+          "required": true,
+          "schema": {
             "description": "The address of the L2 contract receiving the message",
             "$ref": "#/components/schemas/ADDRESS"
-          },
-          "entry_point_selector": {
+          }
+        },
+        {
+          "name": "entry_point_selector",
+          "required": true,
+          "schema": {
             "title": "Selector",
             "description": "The selector of the function in the l2 contract to invoke",
             "$ref": "#/components/schemas/FELT"
-          },
-          "l1_contract_address": {
+          }
+        },
+        {
+          "name": "l1_contract_address",
+          "required": true,
+          "schema": {
             "description": "The address of the L1 contract sending the message",
             "$ref": "#/components/schemas/ADDRESS"
-          },
-          "payload": {
+          }
+        },
+        {
+          "name": "payload",
+          "required": true,
+          "schema": {
             "description": "The payload of the message",
             "title": "Payload",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/FELT"
             }
-          },
-          "paid_fee_on_l1": {
+          }
+        },
+        {
+          "name": "paid_fee_on_l1",
+          "required": true,
+          "schema": {
             "title": "Paid fee on L1",
             "$ref": "#/components/schemas/FELT"
-          },
-          "nonce": {
+          }
+        },
+        {
+          "name": "nonce",
+          "required": true,
+          "schema": {
             "title": "Nonce",
             "$ref": "#/components/schemas/FELT"
+          }
+        },
+        {
+          "name": "l1_transaction_hash",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HASH256"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       ],
       "result": {
         "name": "result",
-        "description": "The result of L1 contract loading",
+        "description": "Hash of the executed L1-handler transaction",
         "schema": {
           "type": "object",
           "properties": {
@@ -336,19 +436,27 @@
     },
     {
       "name": "devnet_postmanConsumeMessageFromL2",
-      "summary": "Send message L2 to L1",
+      "summary": "Consume a locally emitted L2-to-L1 message without an L1 node",
       "params": [
         {
-          "from_address": {
+          "name": "from_address",
+          "required": true,
+          "schema": {
             "description": "The address of the L2 contract sending the message",
             "$ref": "#/components/schemas/FELT"
-          },
-          "to_address": {
-            "title": "To address",
-            "description": "The target L1 address the message is sent to",
-            "$ref": "#/components/schemas/FELT"
-          },
-          "payload": {
+          }
+        },
+        {
+          "name": "to_address",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ETH_ADDRESS"
+          }
+        },
+        {
+          "name": "payload",
+          "required": true,
+          "schema": {
             "description": "The payload of the message",
             "title": "Payload",
             "type": "array",
@@ -360,15 +468,12 @@
       ],
       "result": {
         "name": "result",
-        "description": "The result of L1 contract loading",
+        "description": "Hash of the consumed L2-to-L1 message",
         "schema": {
           "type": "object",
           "properties": {
             "message_hash": {
-              "description": "Transaction hash of executed message",
-              "title": "Message hash",
-              "type": "string",
-              "pattern": "^0x[a-fA-F0-9]{64}$"
+              "$ref": "#/components/schemas/HASH256"
             }
           },
           "required": ["message_hash"]
@@ -396,315 +501,6 @@
             }
           },
           "required": ["block_hash"]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_getMempool",
-      "summary": "Inspect the transaction mempool and open proposal",
-      "params": [
-        {
-          "name": "include_transactions",
-          "description": "Include full transaction objects in the response",
-          "required": false,
-          "schema": {
-            "type": "boolean",
-            "default": false
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "config": {
-              "$ref": "#/components/schemas/MEMPOOL_CONFIG"
-            },
-            "transactions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "transaction_hash": {
-                    "$ref": "#/components/schemas/FELT"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": ["RECEIVED", "CANDIDATE", "PRE_CONFIRMED"]
-                  },
-                  "arrival_id": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "sender_address": {
-                    "anyOf": [
-                      { "$ref": "#/components/schemas/ADDRESS" },
-                      { "type": "null" }
-                    ]
-                  },
-                  "nonce": {
-                    "anyOf": [
-                      { "$ref": "#/components/schemas/FELT" },
-                      { "type": "null" }
-                    ]
-                  },
-                  "tip": {
-                    "$ref": "#/components/schemas/FELT"
-                  },
-                  "transaction": {
-                    "type": ["object", "null"]
-                  }
-                },
-                "required": [
-                  "transaction_hash",
-                  "status",
-                  "arrival_id",
-                  "sender_address",
-                  "nonce",
-                  "tip",
-                  "transaction"
-                ]
-              }
-            },
-            "pre_confirmed_transaction_hashes": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/FELT"
-              }
-            },
-            "remaining_block_capacity": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "config",
-            "transactions",
-            "pre_confirmed_transaction_hashes",
-            "remaining_block_capacity"
-          ]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_removeFromMempool",
-      "summary": "Remove one received transaction from the mempool",
-      "params": [
-        {
-          "name": "transaction_hash",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/FELT"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "transaction_hash": {
-              "$ref": "#/components/schemas/FELT"
-            }
-          },
-          "required": ["transaction_hash"]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_clearMempool",
-      "summary": "Remove all received transactions from the mempool",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "removed": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/FELT"
-              }
-            }
-          },
-          "required": ["removed"]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_preconfirmTransactions",
-      "summary": "Select and execute received transactions into the open pre-confirmed proposal",
-      "params": [
-        {
-          "name": "max_transactions",
-          "required": false,
-          "schema": {
-            "type": "integer",
-            "minimum": 1
-          }
-        },
-        {
-          "name": "transaction_hashes",
-          "required": false,
-          "schema": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FELT"
-            }
-          }
-        },
-        {
-          "name": "swept_stale_hashes",
-          "description": "Optional replay metadata requiring transaction_hashes. Each hash must identify a stale RECEIVED transaction, must be unique, and must not also appear in transaction_hashes. Removals do not count as selection attempts and apply even when the proposal is full.",
-          "required": false,
-          "schema": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "$ref": "#/components/schemas/FELT"
-            }
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "pre_confirmed": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/FELT"
-              }
-            },
-            "rejected": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/MEMPOOL_PROCESSING_FAILURE"
-              }
-            },
-            "blocked": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/MEMPOOL_PROCESSING_FAILURE"
-              }
-            },
-            "block_full": {
-              "type": "boolean"
-            }
-          },
-          "required": ["pre_confirmed", "rejected", "blocked", "block_full"]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_setMempoolConfig",
-      "summary": "Update mempool ordering and block capacity",
-      "params": [
-        {
-          "name": "ordering",
-          "required": false,
-          "schema": {
-            "type": "string",
-            "description": "Registered mempool ordering policy name",
-            "examples": ["fifo", "starknet", "random"]
-          }
-        },
-        {
-          "name": "random_seed",
-          "required": false,
-          "schema": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        {
-          "name": "max_transactions_per_block",
-          "required": false,
-          "schema": {
-            "type": "integer",
-            "minimum": 1
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "$ref": "#/components/schemas/MEMPOOL_CONFIG"
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_sealBlock",
-      "summary": "Seal exactly the current pre-confirmed proposal without selecting received transactions",
-      "params": [],
-      "result": {
-        "name": "result",
-        "description": "New block hash",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "block_hash": {
-              "$ref": "#/components/schemas/FELT"
-            }
-          },
-          "required": ["block_hash"]
-        }
-      },
-      "errors": [
-        {
-          "$ref": "#/components/errors/WILDCARD_ERROR"
-        }
-      ]
-    },
-    {
-      "name": "devnet_abortPreconfirmedBlock",
-      "summary": "Abort the open proposal and requeue its transactions",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "requeued": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/FELT"
-              }
-            }
-          },
-          "required": ["requeued"]
         }
       },
       "errors": [
@@ -752,11 +548,11 @@
     },
     {
       "name": "devnet_acceptOnL1",
-      "summary": "Accept on L1 the blocks from starting_block_id to the oldest block that is accepted on L2",
+      "summary": "Simulate L1 acceptance up to and including starting_block_id",
       "params": [
         {
           "name": "starting_block_id",
-          "description": "The first block to be accepted on L1.",
+          "description": "The newest block to accept on L1; preceding accepted-on-L2 blocks are also marked accepted on L1",
           "required": true,
           "schema": {
             "title": "Block id",
@@ -783,7 +579,7 @@
       },
       "errors": [
         {
-          "$ref": "#/components/errors/MESSAGING_ERROR"
+          "$ref": "#/components/errors/WILDCARD_ERROR"
         }
       ]
     },
@@ -792,31 +588,51 @@
       "summary": "Set gas price",
       "params": [
         {
-          "gas_price_wei": {
-            "title": "L1 Gas price in WEI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "data_gas_price_wei": {
-            "title": "L1 Data gas price in WEI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "gas_price_fri": {
-            "title": "L1 Gas price in FRI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "data_gas_price_fri": {
-            "title": "L1 Data gas price in FRI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "l2_gas_price_wei": {
-            "title": "L2 Gas price in WEI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "l2_gas_price_fri": {
-            "title": "L2 Gas price in FRI",
-            "$ref": "#/components/schemas/u128"
-          },
-          "generate_block": {
+          "name": "gas_price_wei",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "data_gas_price_wei",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "gas_price_fri",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "data_gas_price_fri",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "l2_gas_price_wei",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "l2_gas_price_fri",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
+          }
+        },
+        {
+          "name": "generate_block",
+          "required": false,
+          "schema": {
             "title": "Generate block",
             "type": "boolean"
           }
@@ -824,40 +640,36 @@
       ],
       "result": {
         "name": "result",
-        "description": "The new gas prices",
+        "description": "All six configured gas prices, including unchanged values",
         "schema": {
           "type": "object",
           "properties": {
             "gas_price_wei": {
-              "title": "Gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "data_gas_price_wei": {
-              "title": "L1 Data gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "gas_price_fri": {
-              "title": "L1 Gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "data_gas_price_fri": {
-              "title": "L1 Data gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "l2_gas_price_wei": {
-              "title": "L2 Gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "l2_gas_price_fri": {
-              "title": "L2 Gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             }
           },
           "required": [
             "gas_price_wei",
             "data_gas_price_wei",
             "gas_price_fri",
-            "data_gas_price_fri"
+            "data_gas_price_fri",
+            "l2_gas_price_wei",
+            "l2_gas_price_fri"
           ]
         }
       },
@@ -870,10 +682,18 @@
     {
       "name": "devnet_restart",
       "summary": "Restarts devnet state",
-      "params": [],
+      "params": [
+        {
+          "name": "restart_l1_to_l2_messaging",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "description": "New block hash",
+        "description": "Empty result",
         "schema": {
           "type": "object"
         }
@@ -889,30 +709,38 @@
       "summary": "Sets block.timestamp",
       "params": [
         {
-          "time": {
-            "title": "New block timestamp",
-            "required": true,
+          "name": "time",
+          "required": true,
+          "schema": {
             "$ref": "#/components/schemas/u64"
-          },
-          "generate_block": {
-            "title": "Generate block",
+          }
+        },
+        {
+          "name": "generate_block",
+          "required": false,
+          "schema": {
             "type": "boolean"
           }
         }
       ],
       "result": {
         "name": "result",
-        "description": "New block timestamp",
+        "description": "Configured timestamp and the new block hash, or null if no block was generated",
         "schema": {
           "type": "object",
           "properties": {
             "block_timestamp": {
-              "title": "New block timestamp",
               "$ref": "#/components/schemas/u64"
             },
             "block_hash": {
-              "description": "Block hash",
-              "$ref": "#/components/schemas/FELT"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BLOCK_HASH"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": ["block_timestamp", "block_hash"]
@@ -929,29 +757,27 @@
       "summary": "Increases block.timestamp",
       "params": [
         {
-          "time": {
-            "title": "Timestamp shift",
-            "required": true,
+          "name": "time",
+          "required": true,
+          "schema": {
             "$ref": "#/components/schemas/u64"
           }
         }
       ],
       "result": {
         "name": "result",
-        "description": "New block timestamp",
+        "description": "Timestamp increment and new block hash",
         "schema": {
           "type": "object",
           "properties": {
-            "timestamp_increased)by": {
-              "title": "Timestamp shift",
+            "timestamp_increased_by": {
               "$ref": "#/components/schemas/u64"
             },
             "block_hash": {
-              "description": "Block hash",
-              "$ref": "#/components/schemas/FELT"
+              "$ref": "#/components/schemas/BLOCK_HASH"
             }
           },
-          "required": ["block_timestamp", "block_hash"]
+          "required": ["timestamp_increased_by", "block_hash"]
         }
       },
       "errors": [
@@ -976,37 +802,47 @@
       ],
       "result": {
         "name": "result",
-        "description": "Predeployed accounts data.",
+        "description": "Predeployed accounts with optional balance information",
         "schema": {
-          "type": "object",
-          "properties": {
-            "initial_balance": {
-              "type": "string",
-              "title": "Initial balance"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "initial_balance": {
+                "type": "string",
+                "title": "Initial balance"
+              },
+              "address": {
+                "$ref": "#/components/schemas/ADDRESS",
+                "title": "Account address"
+              },
+              "public_key": {
+                "$ref": "#/components/schemas/FELT",
+                "title": "Account public key"
+              },
+              "private_key": {
+                "$ref": "#/components/schemas/FELT",
+                "title": "Account private key"
+              },
+              "balance": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ACCOUNT_BALANCES"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
             },
-            "address": {
-              "$ref": "#/components/schemas/ADDRESS",
-              "title": "Account address"
-            },
-            "public_key": {
-              "$ref": "#/components/schemas/FELT",
-              "title": "Account public key"
-            },
-            "private_key": {
-              "$ref": "#/components/schemas/FELT",
-              "title": "Account private key"
-            },
-            "balance": {
-              "$ref": "#/components/schemas/ACCOUNT_BALANCES",
-              "title": "Account balances"
-            }
-          },
-          "required": [
-            "initial_balance",
-            "address",
-            "public_key",
-            "private_key"
-          ]
+            "required": [
+              "initial_balance",
+              "address",
+              "public_key",
+              "private_key",
+              "balance"
+            ]
+          }
         }
       },
       "errors": [
@@ -1026,28 +862,27 @@
           "schema": {
             "title": "Account address",
             "$ref": "#/components/schemas/ADDRESS"
-          },
-          "unit": {
-            "title": "Amount unit",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/PRICE_UNIT"
-            }
-          },
-          "block_id": {
-            "title": "Block ID",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/BLOCK_ID"
-            }
+          }
+        },
+        {
+          "name": "unit",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/PRICE_UNIT"
+          }
+        },
+        {
+          "name": "block_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/BLOCK_ID"
           }
         }
       ],
       "result": {
         "name": "result",
-        "description": "Predeployed accounts data.",
+        "description": "Account balance at the requested block; defaults to latest and FRI",
         "schema": {
-          "type": "object",
           "$ref": "#/components/schemas/ACCOUNT_BALANCE"
         }
       },
@@ -1063,51 +898,43 @@
       "params": [
         {
           "name": "address",
-          "description": "Account's balance to be increased.",
           "required": true,
           "schema": {
-            "title": "Account address",
             "$ref": "#/components/schemas/ADDRESS"
-          },
-          "amount": {
-            "title": "Amount",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          "unit": {
-            "title": "Amount unit",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/PRICE_UNIT"
-            }
           }
+        },
+        {
+          "name": "amount",
+          "required": true,
+          "schema": {
+            "type": "number",
+            "minimum": 0
+          },
+          "description": "Amount in WEI or FRI; nonzero fractional parts of numbers are truncated"
+        },
+        {
+          "name": "unit",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/PRICE_UNIT"
+          },
+          "description": "Defaults to FRI"
         }
       ],
       "result": {
         "name": "result",
-        "description": "Predeployed accounts data.",
+        "description": "Decimal balance after minting and the executed transaction hash",
         "schema": {
           "type": "object",
           "properties": {
             "new_balance": {
-              "title": "New balance",
-              "schema": {
-                "type": "string"
-              }
+              "type": "string"
             },
             "unit": {
-              "title": "Amount unit",
-              "schema": {
-                "$ref": "#/components/schemas/PRICE_UNIT"
-              }
+              "$ref": "#/components/schemas/PRICE_UNIT"
             },
             "tx_hash": {
-              "title": "Transaction hash",
-              "schema": {
-                "$ref": "#/components/schemas/TXN_HASH"
-              }
+              "$ref": "#/components/schemas/TXN_HASH"
             }
           },
           "required": ["new_balance", "unit", "tx_hash"]
@@ -1121,113 +948,214 @@
     },
     {
       "name": "devnet_getConfig",
-      "summary": "Returns devnet config",
+      "summary": "Return the resolved startup configuration",
       "params": [],
       "result": {
         "name": "result",
-        "description": "Devnet config",
+        "description": "Resolved startup configuration",
         "schema": {
           "type": "object",
           "properties": {
-            "server_config": {
-              "title": "Server config",
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "host": {
-                    "title": "Host",
-                    "type": "string"
-                  },
-                  "port": {
-                    "title": "Port",
-                    "type": "integer"
-                  },
-                  "timeout": {
-                    "title": "Timeout",
-                    "type": "integer"
-                  }
-                },
-                "required": ["host", "port", "timeout"]
-              }
-            },
             "seed": {
-              "title": "Seed",
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0
             },
             "total_accounts": {
-              "title": "Total accounts",
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0
             },
             "account_contract_class_hash": {
-              "title": "Account contract class hash",
               "$ref": "#/components/schemas/FELT"
             },
             "predeployed_accounts_initial_balance": {
-              "title": "Predeployed accounts initial balance",
               "type": "string"
             },
             "start_time": {
-              "title": "Start time",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/u64"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "gas_price_wei": {
-              "title": "L1 Gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "data_gas_price_wei": {
-              "title": "L1 Data gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "gas_price_fri": {
-              "title": "L1 Gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "data_gas_price_fri": {
-              "title": "L1 Data gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "l2_gas_price_wei": {
-              "title": "L2 Gas price in WEI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "l2_gas_price_fri": {
-              "title": "L2 Gas price in FRI",
-              "$ref": "#/components/schemas/u128"
+              "$ref": "#/components/schemas/POSITIVE_GAS_PRICE"
             },
             "chain_id": {
-              "title": "Chain id",
               "type": "string"
             },
             "dump_on": {
-              "title": "Dump on",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["exit", "block", "request"]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "dump_path": {
-              "title": "Dump path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "block_generation_on": {
-              "title": "Block generation on",
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": ["transaction", "demand"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "interval": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/u64"
+                        }
+                      ],
+                      "minimum": 1
+                    }
+                  },
+                  "required": ["interval"]
+                }
+              ]
             },
             "lite_mode": {
-              "title": "Lite mode",
               "type": "boolean"
             },
+            "proof_mode": {
+              "type": "string",
+              "enum": ["full", "devnet", "none"]
+            },
             "state_archive": {
-              "title": "State archive capacity mode",
-              "type": "string"
+              "type": "string",
+              "enum": ["none", "full"]
             },
             "fork_config": {
               "type": "object",
               "properties": {
                 "url": {
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "block_number": {
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/u64"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "caching_enabled": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
-              }
+              },
+              "required": ["url", "block_number", "caching_enabled"]
+            },
+            "eth_erc20_class_hash": {
+              "$ref": "#/components/schemas/FELT"
+            },
+            "strk_erc20_class_hash": {
+              "$ref": "#/components/schemas/FELT"
+            },
+            "class_size_config": {
+              "type": "object",
+              "properties": {
+                "maximum_contract_class_size": {
+                  "$ref": "#/components/schemas/u64"
+                },
+                "maximum_contract_bytecode_size": {
+                  "$ref": "#/components/schemas/u64"
+                },
+                "maximum_sierra_length": {
+                  "$ref": "#/components/schemas/u64"
+                }
+              },
+              "required": [
+                "maximum_contract_class_size",
+                "maximum_contract_bytecode_size",
+                "maximum_sierra_length"
+              ]
+            },
+            "server_config": {
+              "type": "object",
+              "properties": {
+                "host": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "timeout": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "restricted_methods": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "ui_enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "host",
+                "port",
+                "timeout",
+                "restricted_methods",
+                "ui_enabled"
+              ]
             }
           },
           "required": [
@@ -1236,15 +1164,97 @@
             "account_contract_class_hash",
             "predeployed_accounts_initial_balance",
             "start_time",
-            "gas_price_fri",
             "gas_price_wei",
-            "data_gas_price_fri",
             "data_gas_price_wei",
+            "gas_price_fri",
+            "data_gas_price_fri",
+            "l2_gas_price_wei",
+            "l2_gas_price_fri",
             "chain_id",
+            "dump_on",
+            "dump_path",
             "block_generation_on",
             "lite_mode",
+            "proof_mode",
             "state_archive",
+            "fork_config",
+            "eth_erc20_class_hash",
+            "strk_erc20_class_hash",
+            "class_size_config",
             "server_config"
+          ]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ],
+      "description": "Runtime gas, timestamp, impersonation, and snapshot changes do not update this response."
+    },
+    {
+      "name": "devnet_getStatus",
+      "summary": "Return a summary of current Devnet state",
+      "params": [],
+      "result": {
+        "name": "result",
+        "description": "Current runtime state; fork_config is omitted when not forking",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "block_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "transaction_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pre_confirmed_tx_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "chain_id": {
+              "type": "string"
+            },
+            "protocol_version": {
+              "type": "string",
+              "description": "JSON-RPC specification version"
+            },
+            "is_forked": {
+              "type": "boolean"
+            },
+            "fork_config": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "block": {
+                  "$ref": "#/components/schemas/u64"
+                }
+              },
+              "required": []
+            },
+            "impersonated_accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ADDRESS"
+              }
+            },
+            "auto_impersonate": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "block_count",
+            "transaction_count",
+            "pre_confirmed_tx_count",
+            "chain_id",
+            "protocol_version",
+            "is_forked",
+            "impersonated_accounts",
+            "auto_impersonate"
           ]
         }
       },
@@ -1285,7 +1295,8 @@
             "title": "STRK balance",
             "$ref": "#/components/schemas/ACCOUNT_BALANCE"
           }
-        }
+        },
+        "required": ["eth", "strk"]
       },
       "BLOCK_ID": {
         "title": "Block id",
@@ -1323,19 +1334,21 @@
         "title": "Block tag",
         "type": "string",
         "description": "A tag specifying a dynamic reference to a block",
-        "enum": ["latest", "pre_confirmed"]
+        "enum": ["latest", "pre_confirmed", "l1_accepted"]
       },
       "u64": {
-        "type": "string",
         "title": "u64",
-        "description": "64 bit integers, represented by hex string of length at most 16",
-        "pattern": "^0x(0|[a-fA-F1-9]{1}[a-fA-F0-9]{0,15})$"
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Unsigned 64-bit integer, represented as a JSON number"
       },
       "u128": {
-        "type": "string",
         "title": "u128",
-        "description": "64 bit integers, represented by hex string of length at most 32",
-        "pattern": "^0x(0|[a-fA-F1-9]{1}[a-fA-F0-9]{0,31})$"
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 340282366920938463463374607431768211455,
+        "description": "Unsigned 128-bit integer, represented as a JSON number"
       },
       "CHAIN_ID": {
         "title": "Chain id",
@@ -1362,8 +1375,8 @@
       "FELT": {
         "type": "string",
         "title": "Field element",
-        "description": "A field element. represented by at most 63 hex digits",
-        "pattern": "^0x(0|[a-fA-F1-9]{1}[a-fA-F0-9]{0,61})$"
+        "description": "A 0x-prefixed hexadecimal field element, smaller than the Starknet field prime; leading zeros are accepted",
+        "pattern": "^0x[a-fA-F0-9]{1,64}$"
       },
       "BLOCK_NUMBER": {
         "title": "Block number",
@@ -1384,9 +1397,7 @@
             "$ref": "#/components/schemas/FELT"
           },
           "to_address": {
-            "title": "To address",
-            "description": "The target L1 address the message is sent to",
-            "$ref": "#/components/schemas/FELT"
+            "$ref": "#/components/schemas/ETH_ADDRESS"
           },
           "payload": {
             "description": "The payload of the message",
@@ -1431,6 +1442,16 @@
           "nonce": {
             "title": "Nonce",
             "$ref": "#/components/schemas/FELT"
+          },
+          "l1_transaction_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HASH256"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1481,38 +1502,37 @@
         "type": "string",
         "enum": ["WEI", "FRI"]
       },
-      "MEMPOOL_CONFIG": {
-        "title": "Mempool configuration",
-        "type": "object",
-        "properties": {
-          "ordering": {
-            "type": "string",
-            "description": "Registered mempool ordering policy name",
-            "examples": ["fifo", "starknet", "random"]
-          },
-          "random_seed": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "max_transactions_per_block": {
-            "type": "integer",
-            "minimum": 1
+      "POSITIVE_GAS_PRICE": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/u128"
           }
-        },
-        "required": ["ordering", "random_seed", "max_transactions_per_block"]
+        ],
+        "minimum": 1
       },
-      "MEMPOOL_PROCESSING_FAILURE": {
-        "title": "Mempool processing failure",
+      "HASH256": {
+        "type": "string",
+        "pattern": "^0x[a-fA-F0-9]{64}$",
+        "description": "A 256-bit hash encoded as 64 hexadecimal digits"
+      },
+      "DUMP_EVENT": {
         "type": "object",
         "properties": {
-          "transaction_hash": {
-            "$ref": "#/components/schemas/FELT"
+          "jsonrpc": {
+            "type": "string",
+            "enum": ["1.0", "2.0"]
           },
-          "reason": {
+          "method": {
             "type": "string"
+          },
+          "params": {
+            "type": ["array", "object", "null"]
+          },
+          "id": {
+            "type": ["string", "integer", "null"]
           }
         },
-        "required": ["transaction_hash", "reason"]
+        "required": ["jsonrpc", "method", "id"]
       }
     },
     "errors": {
@@ -1537,27 +1557,27 @@
         "message": "An error occurred"
       },
       "TYPES_ERROR": {
-        "code": -2,
+        "code": -1,
         "message": "Types error: failed to parse or validate types used in the request or response."
       },
       "NO_STATE_AT_BLOCK": {
-        "code": -3,
+        "code": -1,
         "message": "No state at block: the requested state is unavailable for the provided block identifier."
       },
       "MINTING_REVERTED": {
-        "code": -4,
-        "message": "Minting reverted: the token mint operation failed and was reverted."
+        "code": -1,
+        "message": "Minting reverted"
       },
       "DUMP_ERROR": {
         "code": -5,
         "message": "Dump error: failed to access, parse, or write dump data, or dumping is not enabled."
       },
       "MESSAGING_ERROR": {
-        "code": -6,
+        "code": -1,
         "message": "Messaging error: L1/L2 messaging operation failed."
       },
       "INVALID_ADDRESS": {
-        "code": -7,
+        "code": -1,
         "message": "Invalid address: the provided address is malformed or unsupported."
       }
     }

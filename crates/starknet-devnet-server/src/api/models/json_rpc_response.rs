@@ -16,12 +16,10 @@ use starknet_types::rpc::transactions::{
 use starknet_types::starknet_api::block::BlockNumber;
 
 use crate::api::models::{
-    AbortedBlocks, AbortedPreconfirmedBlockResponse, AcceptedOnL1Blocks, AccountBalanceResponse,
-    BlockHashAndNumberOutput, ClearedMempoolResponse, CreatedBlock, DeclareTransactionOutput,
-    DeployAccountTransactionOutput, DevnetStatus, DumpResponseBody, FlushedMessages,
-    IncreaseTimeResponse, MempoolConfigResponse, MempoolResponse, MessageHash,
-    MessagingLoadAddress, MintTokensResponse, PreconfirmTransactionsResponse,
-    ProveTransactionResponse, RemovedFromMempoolResponse, SerializableAccount, SetTimeResponse,
+    AbortedBlocks, AcceptedOnL1Blocks, AccountBalanceResponse, BlockHashAndNumberOutput,
+    CreatedBlock, DeclareTransactionOutput, DeployAccountTransactionOutput, DevnetStatus,
+    DumpResponseBody, FlushedMessages, IncreaseTimeResponse, MessageHash, MessagingLoadAddress,
+    MintTokensResponse, ProveTransactionResponse, SerializableAccount, SetTimeResponse,
     StorageResult, SyncingOutput, TransactionHashOutput,
 };
 use crate::config::DevnetConfig;
@@ -106,12 +104,6 @@ pub enum DevnetResponse {
     FlushedMessages(FlushedMessages),
     MessageHash(MessageHash),
     CreatedBlock(CreatedBlock),
-    Mempool(MempoolResponse),
-    RemovedFromMempool(RemovedFromMempoolResponse),
-    ClearedMempool(ClearedMempoolResponse),
-    PreconfirmedTransactions(PreconfirmTransactionsResponse),
-    MempoolConfig(MempoolConfigResponse),
-    AbortedPreconfirmedBlock(AbortedPreconfirmedBlockResponse),
     AbortedBlocks(AbortedBlocks),
     AcceptedOnL1Blocks(AcceptedOnL1Blocks),
     GasModification(GasModification),
