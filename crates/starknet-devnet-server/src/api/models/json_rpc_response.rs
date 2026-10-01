@@ -123,6 +123,8 @@ pub enum DevnetResponse {
     MintTokens(MintTokensResponse),
     DevnetConfig(DevnetConfig),
     DevnetDump(DumpResponseBody),
+    SnapshotId(String),
+    Reverted(bool),
     DevnetStatus(DevnetStatus),
 }
 

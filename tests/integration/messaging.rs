@@ -620,6 +620,51 @@ async fn can_interact_with_l1() {
 }
 
 #[tokio::test]
+async fn snapshot_restores_l1_message_cursor_without_reverting_anvil() {
+    let anvil = BackgroundAnvil::spawn().await.unwrap();
+    let (devnet, account, l2_contract) = setup_devnet(&[]).await.unwrap();
+    devnet
+        .send_custom_rpc("devnet_postmanLoad", json!({ "network_url": anvil.url }))
+        .await
+        .unwrap();
+
+    let messaging_address = Address::from_hex(MESSAGING_L1_ADDRESS).unwrap();
+    let l1_contract = anvil.deploy_l1l2_contract(messaging_address).await.unwrap();
+    let user = U256::ONE;
+    increase_balance(account.clone(), l2_contract, Felt::ONE, Felt::ONE).await.unwrap();
+    withdraw(
+        account,
+        l2_contract,
+        Felt::ONE,
+        Felt::ONE,
+        Felt::from_hex_unchecked(&format!("{l1_contract:#x}")),
+    )
+    .await
+    .unwrap();
+    devnet.send_custom_rpc("devnet_postmanFlush", json!({})).await.unwrap();
+    anvil.withdraw_l1l2(l1_contract, felt_to_u256(l2_contract), user, U256::ONE).await.unwrap();
+
+    let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+    anvil.deposit_l1l2(l1_contract, felt_to_u256(l2_contract), user, U256::ONE).await.unwrap();
+    let first_flush = devnet.send_custom_rpc("devnet_postmanFlush", json!({})).await.unwrap();
+    assert_eq!(first_flush["generated_l2_transactions"].as_array().unwrap().len(), 1);
+    assert_eq!(get_balance(&devnet, l2_contract, Felt::ONE).await.unwrap(), [Felt::ONE]);
+
+    assert_eq!(
+        devnet.send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot })).await.unwrap(),
+        true
+    );
+    assert_eq!(get_balance(&devnet, l2_contract, Felt::ONE).await.unwrap(), [Felt::ZERO]);
+    let replayed_flush = devnet.send_custom_rpc("devnet_postmanFlush", json!({})).await.unwrap();
+    assert_eq!(
+        replayed_flush["generated_l2_transactions"],
+        first_flush["generated_l2_transactions"]
+    );
+    assert_eq!(get_balance(&devnet, l2_contract, Felt::ONE).await.unwrap(), [Felt::ONE]);
+    assert_eq!(anvil.get_balance_l1l2(l1_contract, user).await.unwrap(), U256::ZERO);
+}
+
+#[tokio::test]
 async fn assert_l1_handler_tx_can_be_dumped_and_loaded() {
     let dump_file = UniqueAutoDeletableFile::new("dump-with-l1-handler");
     let (dumping_devnet, account, l1l2_contract_address) = setup_devnet(&[

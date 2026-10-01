@@ -1,9 +1,10 @@
 pub mod serde_helpers;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use starknet_core::starknet::Starknet;
 use starknet_core::starknet::starknet_config::StarknetConfig;
+use starknet_core::starknet::{Starknet, StarknetCheckpoint};
 use tokio::sync::Mutex;
 use tracing::error;
 
@@ -16,6 +17,9 @@ mod endpoints;
 mod endpoints_ws;
 pub mod error;
 pub mod json_rpc_handler;
+pub mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 pub mod models;
 pub(crate) mod origin_forwarder;
 #[cfg(test)]
@@ -36,6 +40,20 @@ pub struct Api {
     pub starknet: Arc<Mutex<Starknet>>,
     pub dumpable_events: Arc<Mutex<Vec<DumpEvent>>>,
     pub sockets: Arc<Mutex<SocketCollection>>,
+    pub(crate) snapshots: Arc<Mutex<SnapshotStore>>,
+    pub lifecycle: Arc<lifecycle::Lifecycle>,
+}
+
+pub(crate) struct ServerCheckpoint {
+    pub core: StarknetCheckpoint,
+    pub dump_event_count: usize,
+    pub origin_accepted_on_l1_through: Option<u64>,
+}
+
+#[derive(Default)]
+pub(crate) struct SnapshotStore {
+    pub last_id: u64,
+    pub checkpoints: BTreeMap<u64, ServerCheckpoint>,
 }
 
 impl Api {
@@ -46,6 +64,8 @@ impl Api {
             starknet: Arc::new(Mutex::new(starknet)),
             dumpable_events: Default::default(),
             sockets: Arc::new(Mutex::new(SocketCollection::default())),
+            snapshots: Default::default(),
+            lifecycle: Default::default(),
         }
     }
 }

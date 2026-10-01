@@ -10,7 +10,7 @@ use futures::future::join_all;
 use serde::de::IntoDeserializer;
 use serde_json::json;
 use server::api::{Api, JsonRpcHandler, RPC_SPEC_VERSION};
-use server::dump_util::{dump_events, load_events};
+use server::dump_util::{dump_events, read_events};
 use server::server::serve_http_json_rpc;
 use starknet_core::account::Account;
 use starknet_core::constants::{
@@ -352,7 +352,7 @@ async fn main() -> Result<(), anyhow::Error> {
         // Try to load events from the path. Since the same CLI parameter is used for dump and load
         // path, it may be the case that there is no file at the path. This means that the file will
         // be created during Devnet's lifetime via dumping, so its non-existence is here ignored.
-        match load_events(starknet_config.dump_on, dump_path) {
+        match read_events(dump_path) {
             Ok(loadable_events) => json_rpc_handler
                 .re_execute(&loadable_events)
                 .await
@@ -462,6 +462,7 @@ pub async fn shutdown_signal(api: Api) {
 
     // dump on exit scenario
     if let (Some(DumpOn::Exit), Some(dump_path)) = (api.config.dump_on, &api.config.dump_path) {
+        let _lifecycle = api.lifecycle.write().await;
         let events = { api.dumpable_events.lock().await.clone() };
         dump_events(&events, dump_path).expect("Failed to dump.");
     }

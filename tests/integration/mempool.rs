@@ -549,6 +549,155 @@ async fn max_transactions_per_block_caps_selection() {
     assert_eq!(received, 2, "two txs must remain RECEIVED: {snapshot}");
 }
 
+#[tokio::test]
+async fn snapshot_revert_notifies_restored_received_status() {
+    for discard in [false, true] {
+        let devnet = spawn_mempool_devnet().await;
+        let client = json_rpc_client(&devnet);
+        let account = first_predeployed_account(&devnet, &client).await;
+        let hash = submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+        let unchanged = submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ONE).await;
+        let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+        if discard {
+            devnet
+                .send_custom_rpc("devnet_removeFromMempool", json!({"transaction_hash": hash}))
+                .await
+                .unwrap();
+        } else {
+            devnet
+                .send_custom_rpc(
+                    "devnet_preconfirmTransactions",
+                    json!({"transaction_hashes": [hash]}),
+                )
+                .await
+                .unwrap();
+            assert_phase(&devnet, hash, "PRE_CONFIRMED").await;
+        }
+
+        let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+        subscribe(
+            &mut ws,
+            "starknet_subscribeTransactionStatus",
+            json!({"transaction_hash": hash}),
+        )
+        .await
+        .unwrap();
+        if !discard {
+            let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+            assert_eq!(initial["params"]["result"]["status"]["finality_status"], "PRE_CONFIRMED");
+        }
+        subscribe(
+            &mut ws,
+            "starknet_subscribeTransactionStatus",
+            json!({"transaction_hash": unchanged}),
+        )
+        .await
+        .unwrap();
+        let initial = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(initial["params"]["result"]["status"]["finality_status"], "RECEIVED");
+        subscribe(&mut ws, "starknet_subscribeNewHeads", json!({})).await.unwrap();
+
+        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap();
+        assert_phase(&devnet, hash, "RECEIVED").await;
+        let status = devnet
+            .send_custom_rpc("starknet_getTransactionStatus", json!({"transaction_hash": hash}))
+            .await
+            .unwrap();
+        let notification = receive_rpc_via_ws(&mut ws).await.unwrap();
+        assert_eq!(notification["method"], "starknet_subscriptionTransactionStatus");
+        assert_eq!(notification["params"]["result"]["transaction_hash"], json!(hash));
+        assert_eq!(notification["params"]["result"]["status"], status);
+        assert_no_notifications(&mut ws).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn snapshot_restores_mempool_entries_config_and_selection_state() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
+        "--block-generation-on",
+        "mempool",
+        "--mempool-ordering",
+        "random",
+        "--mempool-random-seed",
+        "42",
+    ])
+    .await
+    .unwrap();
+    let client = json_rpc_client(&devnet);
+    // Multiple senders make random selection observable; one sender would have only one
+    // nonce-eligible head regardless of seed or selection counter.
+    for index in 0..3 {
+        let account = nth_predeployed_account(&devnet, &client, index).await;
+        submit_transfer_in_mempool(&account, Felt::ONE, 1, 0, Felt::ZERO).await;
+        submit_transfer_in_mempool(&account, Felt::TWO, 1, 0, Felt::ONE).await;
+    }
+    devnet
+        .send_custom_rpc(
+            "devnet_setMempoolConfig",
+            json!({
+                "max_transactions_per_block": 4
+            }),
+        )
+        .await
+        .unwrap();
+    // Capture both executed and received entries, with a nonzero selection counter.
+    devnet
+        .send_custom_rpc(
+            "devnet_preconfirmTransactions",
+            json!({
+                "max_transactions": 1
+            }),
+        )
+        .await
+        .unwrap();
+    let before = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    assert_eq!(before["pre_confirmed_transaction_hashes"].as_array().unwrap().len(), 1);
+    assert_eq!(before["remaining_block_capacity"], 3);
+    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+
+    let account = first_predeployed_account(&devnet, &client).await;
+    let extra_hash = submit_transfer_in_mempool(&account, Felt::THREE, 1, 0, Felt::TWO).await;
+    let after_admission = devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap();
+    let first_selection = devnet
+        .send_custom_rpc("devnet_preconfirmTransactions", json!({ "max_transactions": 2 }))
+        .await
+        .unwrap();
+    devnet
+        .send_custom_rpc(
+            "devnet_setMempoolConfig",
+            json!({
+                "random_seed": 999, "max_transactions_per_block": 99
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        devnet
+            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+    assert_eq!(devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap(), before);
+    assert_eq!(
+        submit_transfer_in_mempool(&account, Felt::THREE, 1, 0, Felt::TWO).await,
+        extra_hash
+    );
+    // Equality includes restored arrival IDs and admission indexes, not only transaction hashes.
+    assert_eq!(
+        devnet.send_custom_rpc("devnet_getMempool", json!({})).await.unwrap(),
+        after_admission
+    );
+    assert_eq!(
+        devnet
+            .send_custom_rpc("devnet_preconfirmTransactions", json!({ "max_transactions": 2 }))
+            .await
+            .unwrap(),
+        first_selection
+    );
+}
+
 /// Forced selection preserves the caller's order but still enforces nonce eligibility.
 #[tokio::test]
 async fn forced_hashes_respect_eligibility() {

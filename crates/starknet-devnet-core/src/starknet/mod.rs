@@ -94,6 +94,7 @@ mod add_invoke_transaction;
 mod add_l1_handler_transaction;
 pub mod block_builder;
 mod cheats;
+mod checkpoint;
 pub(crate) mod defaulter;
 mod estimations;
 pub mod events;
@@ -104,6 +105,8 @@ pub mod proofs;
 pub mod starknet_config;
 mod state_update;
 pub(crate) mod transaction_trace;
+
+pub use checkpoint::StarknetCheckpoint;
 
 pub struct Starknet {
     pub latest_state: StarknetState,
@@ -403,9 +406,7 @@ impl Starknet {
         for hash in &hashes {
             self.transactions.remove(hash);
         }
-        let transaction_count = crate::metrics::TRANSACTION_COUNT.get();
-        crate::metrics::TRANSACTION_COUNT.reset();
-        crate::metrics::TRANSACTION_COUNT.inc_by(transaction_count - hashes.len() as u64);
+        crate::metrics::TRANSACTION_COUNT.sub(hashes.len() as i64);
         let block_number = self.blocks.pre_confirmed_block.block_number().0;
         let mut classes = self.rpc_contract_classes.write();
         classes.remove_classes_at(block_number);
@@ -568,6 +569,7 @@ impl Starknet {
             this.set_next_block_timestamp(start_time);
         };
         this.create_block();
+        this.sync_metrics();
 
         Ok(this)
     }
@@ -583,9 +585,19 @@ impl Starknet {
 
         *self = Starknet::new_with_ordering_policy_registry(&self.config, ordering_policies)?;
         self.messaging.ethereum = new_messaging_ethereum;
+        self.sync_metrics();
 
         info!("Starknet Devnet restarted");
         Ok(())
+    }
+
+    pub fn accepted_block_hashes(&self) -> Vec<(u64, BlockHash)> {
+        self.blocks.num_to_hash.iter().map(|(number, hash)| (number.0, *hash)).collect()
+    }
+
+    pub fn sync_metrics(&self) {
+        crate::metrics::BLOCK_COUNT.set(self.blocks.num_to_hash.len() as i64);
+        crate::metrics::TRANSACTION_COUNT.set(self.transactions.len() as i64);
     }
 
     pub fn get_predeployed_accounts(&self) -> Vec<Account> {
@@ -1479,13 +1491,8 @@ impl Starknet {
         self.mempool.clear_all();
 
         // Reset metrics
-        let old_tx_count = crate::metrics::TRANSACTION_COUNT.get();
-        crate::metrics::TRANSACTION_COUNT.reset();
-        crate::metrics::TRANSACTION_COUNT.inc_by(old_tx_count - reverted_tx);
-
-        let old_block_count = crate::metrics::BLOCK_COUNT.get();
-        crate::metrics::BLOCK_COUNT.reset();
-        crate::metrics::BLOCK_COUNT.inc_by(old_block_count - aborted.len() as u64);
+        crate::metrics::TRANSACTION_COUNT.sub(reverted_tx as i64);
+        crate::metrics::BLOCK_COUNT.sub(aborted.len() as i64);
 
         Ok(aborted)
     }

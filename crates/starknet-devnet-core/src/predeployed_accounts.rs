@@ -9,7 +9,7 @@ use crate::error::DevnetResult;
 use crate::traits::AccountGenerator;
 use crate::utils::random_number_generator::generate_u128_random_numbers;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct PredeployedAccounts {
     seed: u32,
     initial_balance: Balance,

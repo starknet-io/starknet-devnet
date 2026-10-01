@@ -307,6 +307,7 @@ async fn dump_without_transaction() {
 async fn dump_endpoint_fail_with_no_mode_set() {
     let devnet_dump = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     let rpc_error = devnet_dump.send_custom_rpc("devnet_dump", json!({})).await.unwrap_err();
+    assert_eq!(rpc_error.code, -5);
     assert!(rpc_error.message.contains("Please provide --dump-on mode"));
 }
 
@@ -331,6 +332,7 @@ async fn dump_endpoint_fail_with_wrong_file_name() {
 
     devnet.mint(DUMMY_ADDRESS, DUMMY_AMOUNT).await;
     let err = devnet.send_custom_rpc("devnet_dump", json!({ "path": "///" })).await.unwrap_err();
+    assert_eq!(err.code, -5);
     assert!(err.message.contains("I/O error"));
 }
 
@@ -348,6 +350,7 @@ async fn load_endpoint_fail_with_wrong_path() {
         .send_custom_rpc("devnet_load", json!({ "path": "load_file_name" }))
         .await
         .unwrap_err();
+    assert_eq!(err.code, -5);
     assert!(err.message.contains("file does not exist"));
 }
 

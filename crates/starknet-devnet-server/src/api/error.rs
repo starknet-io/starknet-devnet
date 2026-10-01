@@ -307,7 +307,7 @@ impl ApiError {
                 data: Some(serde_json::json!({ "tx_hash": tx_hash, "revert_reason": reason })),
             },
             ApiError::DumpError { msg } => RpcError {
-                code: crate::rpc_core::error::ErrorCode::ServerError(WILDCARD_RPC_ERROR_CODE),
+                code: crate::rpc_core::error::ErrorCode::ServerError(-5),
                 message: msg.into(),
                 data: None,
             },

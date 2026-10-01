@@ -1,15 +1,19 @@
 use std::sync::Arc;
 
+use serde_json::json;
 use starknet_rs_accounts::{Account, ConnectedAccount};
 use starknet_rs_core::types::{
     BlockId, BlockStatus, BlockTag, Call, EmittedEvent, EventFilter, Felt, StarknetError,
 };
 use starknet_rs_core::utils::{get_selector_from_name, get_udc_deployed_address};
 use starknet_rs_providers::{Provider, ProviderError};
+use tokio_tungstenite::connect_async;
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{MAINNET_URL, STRK_ERC20_CONTRACT_ADDRESS};
-use crate::common::utils::{get_events_contract_artifacts, new_contract_factory};
+use crate::common::utils::{
+    get_events_contract_artifacts, new_contract_factory, send_text_rpc_via_ws,
+};
 
 async fn get_events_follow_continuation_token(
     devnet: &BackgroundDevnet,
@@ -33,6 +37,124 @@ async fn get_events_follow_continuation_token(
     }
 
     Ok(events)
+}
+
+#[tokio::test]
+async fn fork_events_reject_post_fork_origin_hash_bounds() {
+    let origin = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    origin.mint(Felt::ONE, 10).await;
+    let fork = origin.fork().await.unwrap();
+    fork.mint(Felt::TWO, 20).await;
+    let local_head = fork.get_latest_block_with_tx_hashes().await.unwrap();
+    origin.mint(Felt::THREE, 30).await;
+    origin.create_block().await.unwrap();
+    let origin_head = origin.get_latest_block_with_tx_hashes().await.unwrap();
+    assert_eq!(origin_head.block_number, local_head.block_number);
+    assert_ne!(origin_head.block_hash, local_head.block_hash);
+
+    let (mut ws, _) = connect_async(fork.ws_url()).await.unwrap();
+    for (from_block, to_block) in [
+        (Some(BlockId::Hash(origin_head.block_hash)), None),
+        (None, Some(BlockId::Hash(origin_head.block_hash))),
+        (Some(BlockId::Hash(local_head.block_hash)), Some(BlockId::Hash(origin_head.block_hash))),
+        (Some(BlockId::Tag(BlockTag::Latest)), Some(BlockId::Hash(origin_head.block_hash))),
+    ] {
+        let result = fork
+            .json_rpc_client
+            .get_events(EventFilter { from_block, to_block, address: None, keys: None }, None, 1)
+            .await;
+        assert!(
+            matches!(result, Err(ProviderError::StarknetError(StarknetError::BlockNotFound))),
+            "{from_block:?}..{to_block:?}: {result:?}"
+        );
+        let response = send_text_rpc_via_ws(
+            &mut ws,
+            "starknet_getEvents",
+            json!({"filter": {
+                "from_block": from_block, "to_block": to_block, "chunk_size": 1,
+            }}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["error"]["code"], 24, "{response}");
+    }
+
+    // The moving L1 tag still resolves against the fork boundary, rather than being
+    // rejected like a hash that belongs only to the origin's later branch.
+    origin.accept_on_l1(&BlockId::Hash(origin_head.block_hash)).await.unwrap();
+    for (from_block, to_block, expected_events) in [
+        (Some(BlockId::Tag(BlockTag::L1Accepted)), None, 4),
+        (None, Some(BlockId::Tag(BlockTag::L1Accepted)), 2),
+    ] {
+        let events = get_events_follow_continuation_token(
+            &fork,
+            EventFilter { from_block, to_block, address: None, keys: None },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(events.len(), expected_events);
+    }
+}
+
+#[tokio::test]
+async fn fork_pagination_preserves_origin_and_local_ranges() {
+    let origin = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let origin_tx = origin.mint(Felt::ONE, 10).await;
+    let origin_head = origin.get_latest_block_with_tx_hashes().await.unwrap();
+    origin.accept_on_l1(&BlockId::Hash(origin_head.block_hash)).await.unwrap();
+    let fork = origin.fork().await.unwrap();
+    let first_local_block = fork.get_latest_block_with_tx_hashes().await.unwrap();
+    let local_tx = fork.mint(Felt::ONE, 10).await;
+    let local_head = fork.get_latest_block_with_tx_hashes().await.unwrap();
+
+    // Both chains now contain different transactions at the same post-fork heights.
+    origin.mint(Felt::TWO, 20).await;
+    origin.mint(Felt::THREE, 30).await;
+    assert_eq!(
+        origin.get_latest_block_with_tx_hashes().await.unwrap().block_number,
+        local_head.block_number
+    );
+
+    for (from_block, to_block, expected_events) in [
+        (BlockId::Number(origin_head.block_number), None, 4),
+        (BlockId::Hash(origin_head.block_hash), None, 4),
+        (BlockId::Tag(BlockTag::L1Accepted), None, 4),
+        (
+            BlockId::Number(origin_head.block_number),
+            Some(BlockId::Number(local_head.block_number)),
+            4,
+        ),
+        (BlockId::Hash(origin_head.block_hash), Some(BlockId::Hash(local_head.block_hash)), 4),
+        (BlockId::Number(origin_head.block_number), Some(BlockId::Hash(origin_head.block_hash)), 2),
+        (BlockId::Hash(origin_head.block_hash), Some(BlockId::Number(origin_head.block_number)), 2),
+        (
+            BlockId::Hash(first_local_block.block_hash),
+            Some(BlockId::Hash(local_head.block_hash)),
+            2,
+        ),
+    ] {
+        for chunk_size in [1, 100] {
+            let events = get_events_follow_continuation_token(
+                &fork,
+                EventFilter {
+                    from_block: Some(from_block),
+                    to_block,
+                    address: Some(starknet_rs_core::types::AddressFilter::Single(
+                        STRK_ERC20_CONTRACT_ADDRESS,
+                    )),
+                    keys: Some(vec![vec![get_selector_from_name("Transfer").unwrap()]]),
+                },
+                chunk_size,
+            )
+            .await
+            .unwrap();
+            assert_eq!(events.len(), expected_events, "{from_block:?}..{to_block:?}");
+            assert!(
+                events.iter().all(|event| [origin_tx, local_tx].contains(&event.transaction_hash))
+            );
+        }
+    }
 }
 
 /// A helper function which asserts that the `starknet_getEvents` RPC method returns the correct

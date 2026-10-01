@@ -12,7 +12,7 @@ pub enum TestError {
     #[error("Invalid URI")]
     InvalidUri(#[from] axum::http::uri::InvalidUri),
 
-    #[error("Could not start Devnet. Make sure you built it with `cargo build --release`: {0}")]
+    #[error("Could not start Devnet: {0}")]
     DevnetNotStartable(String),
 
     #[error("Could not start Anvil: {0}")]

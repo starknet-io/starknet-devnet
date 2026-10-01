@@ -34,6 +34,15 @@ use crate::config::DevnetConfig;
 const DEFAULT_CONTINUATION_TOKEN: &str = "0";
 const CONTINUATION_TOKEN_ORIGIN_PREFIX: &str = "devnet-origin-";
 
+enum EventBlockRange {
+    Resolved {
+        origin: Option<(u64, u64)>,
+        local_start: Option<BlockId>,
+        local_end: Option<BlockId>,
+    },
+    OriginBlock(BlockId),
+}
+
 /// The definitions of JSON-RPC read endpoints defined in starknet_api_openrpc.json
 impl JsonRpcHandler {
     /// starknet_specVersion
@@ -511,30 +520,74 @@ impl JsonRpcHandler {
     }
 
     /// Split into origin and local block ranges (non overlapping, local continuing onto origin)
-    /// Returns: (origin_range, local_start, local_end)
-    /// All ranges inclusive
+    /// All ranges inclusive. Unknown origin bounds are returned for resolution outside locks.
     async fn split_block_range(
         &self,
         from_block: Option<BlockId>,
         to_block: Option<BlockId>,
-    ) -> Result<(Option<(u64, u64)>, Option<BlockId>, Option<BlockId>), ApiError> {
+        resolved_origin_blocks: &[(BlockId, u64)],
+    ) -> Result<EventBlockRange, ApiError> {
         let origin_caller = match &self.origin_caller {
             Some(origin_caller) => origin_caller,
-            None => return Ok((None, from_block, to_block)),
+            None => {
+                return Ok(EventBlockRange::Resolved {
+                    origin: None,
+                    local_start: from_block,
+                    local_end: to_block,
+                });
+            }
         };
 
         let fork_block_number = origin_caller.fork_block_number();
 
         let starknet = self.api.starknet.lock().await;
+        let origin_block_number = |block_id| {
+            resolved_origin_blocks
+                .iter()
+                .find_map(|(id, number)| (*id == block_id).then_some(*number))
+        };
+        // Validate both hashes before selecting a local-only range or resolving moving tags.
+        // An origin hash after the fork must never select a local block at the same height.
+        for block_id in [from_block, to_block].into_iter().flatten() {
+            if matches!(block_id, BlockId::Hash(_)) && starknet.get_block(&block_id).is_err() {
+                match origin_block_number(block_id) {
+                    Some(number) if number > fork_block_number => {
+                        // Make this a final RPC error so origin fallback cannot bypass the
+                        // boundary check and return events from the discarded origin branch.
+                        return Err(ApiError::RpcError(
+                            ApiError::BlockNotFound.api_error_to_rpc_error(),
+                        ));
+                    }
+                    Some(_) => (),
+                    None => return Ok(EventBlockRange::OriginBlock(block_id)),
+                }
+            }
+        }
+        // Consult the live overlay again after origin I/O, since a concurrent revert can change it.
+        let accepted_on_l1_through = origin_caller.acceptance_boundary().await;
+        let resolved_number = |block_id| {
+            if block_id == BlockId::Tag(BlockTag::L1Accepted) {
+                accepted_on_l1_through.or_else(|| origin_block_number(block_id))
+            } else {
+                origin_block_number(block_id)
+            }
+        };
 
         let from_block_number = match from_block {
             Some(BlockId::Tag(BlockTag::Latest | BlockTag::PreConfirmed)) => {
-                return Ok((None, from_block, to_block));
+                return Ok(EventBlockRange::Resolved {
+                    origin: None,
+                    local_start: from_block,
+                    local_end: to_block,
+                });
             }
             Some(block_id @ (BlockId::Tag(BlockTag::L1Accepted) | BlockId::Hash(_))) => {
                 match starknet.get_block(&block_id) {
                     Ok(block) => block.block_number().0,
-                    Err(_) => origin_caller.get_block_number_from_block_id(block_id).await?,
+                    Err(_) => match resolved_number(block_id) {
+                        Some(number) => number,
+                        None => return Ok(EventBlockRange::OriginBlock(block_id)),
+                    },
                 }
             }
             Some(BlockId::Number(from_block_number)) => from_block_number,
@@ -543,38 +596,48 @@ impl JsonRpcHandler {
 
         if from_block_number > fork_block_number {
             // Only local blocks need to be searched
-            return Ok((None, Some(BlockId::Number(from_block_number)), to_block));
+            return Ok(EventBlockRange::Resolved {
+                origin: None,
+                local_start: Some(BlockId::Number(from_block_number)),
+                local_end: to_block,
+            });
         }
 
         let to_block_number = match to_block {
             // If to_block is latest, pre_confirmed or undefined, all blocks after from_block are
             // queried
             Some(BlockId::Tag(BlockTag::Latest | BlockTag::PreConfirmed)) | None => {
-                return Ok((
-                    Some((from_block_number, fork_block_number)),
+                return Ok(EventBlockRange::Resolved {
+                    origin: Some((from_block_number, fork_block_number)),
                     // there is for sure at least one local block
-                    Some(BlockId::Number(fork_block_number + 1)),
-                    to_block,
-                ));
+                    local_start: Some(BlockId::Number(fork_block_number + 1)),
+                    local_end: to_block,
+                });
             }
             Some(block_id @ (BlockId::Tag(BlockTag::L1Accepted) | BlockId::Hash(_))) => {
                 match starknet.get_block(&block_id) {
                     Ok(block) => block.block_number().0,
-                    Err(_) => origin_caller.get_block_number_from_block_id(block_id).await?,
+                    Err(_) => match resolved_number(block_id) {
+                        Some(number) => number,
+                        None => return Ok(EventBlockRange::OriginBlock(block_id)),
+                    },
                 }
             }
             Some(BlockId::Number(to_block_number)) => to_block_number,
         };
 
-        let origin_range = Some((from_block_number, to_block_number));
         Ok(if to_block_number <= fork_block_number {
-            (origin_range, None, None)
+            EventBlockRange::Resolved {
+                origin: Some((from_block_number, to_block_number)),
+                local_start: None,
+                local_end: None,
+            }
         } else {
-            (
-                origin_range,
-                Some(BlockId::Number(fork_block_number + 1)),
-                Some(BlockId::Number(to_block_number)),
-            )
+            EventBlockRange::Resolved {
+                origin: Some((from_block_number, fork_block_number)),
+                local_start: Some(BlockId::Number(fork_block_number + 1)),
+                local_end: Some(BlockId::Number(to_block_number)),
+            }
         })
     }
 
@@ -636,36 +699,78 @@ impl JsonRpcHandler {
 
     /// starknet_getEvents
     pub async fn get_events(&self, filter: EventFilter) -> StrictRpcResult {
-        let (origin_range, from_local_block_id, to_local_block_id) =
-            self.split_block_range(filter.from_block, filter.to_block).await?;
+        self.get_events_with_lifecycle(filter, true).await
+    }
+
+    /// Replay already owns lifecycle write access; ordinary reads coordinate only local work.
+    pub(crate) async fn get_events_with_lifecycle(
+        &self,
+        filter: EventFilter,
+        acquire_lifecycle: bool,
+    ) -> StrictRpcResult {
+        let mut resolved_origin_blocks = Vec::new();
+        let (lifecycle, origin_range, from_local_block_id, to_local_block_id) = loop {
+            let lifecycle =
+                if acquire_lifecycle { Some(self.api.lifecycle.read().await) } else { None };
+            match self
+                .split_block_range(filter.from_block, filter.to_block, &resolved_origin_blocks)
+                .await?
+            {
+                EventBlockRange::Resolved { origin, local_start, local_end } => {
+                    break (lifecycle, origin, local_start, local_end);
+                }
+                EventBlockRange::OriginBlock(block_id) => {
+                    drop(lifecycle);
+                    let origin = self.origin_caller.as_ref().ok_or(ApiError::BlockNotFound)?;
+                    let number = origin.get_block_number_from_block_id(block_id).await?;
+                    resolved_origin_blocks.push((block_id, number));
+                }
+            }
+        };
 
         // Get events either from forking origin or locally
-        let events_chunk = if origin_range.is_some()
+        let events_chunk = if let Some((from_origin, to_origin)) = origin_range
             && filter
                 .continuation_token
-                .clone()
+                .as_ref()
                 .is_none_or(|token| token.starts_with(CONTINUATION_TOKEN_ORIGIN_PREFIX))
         {
-            #[allow(clippy::unnecessary_unwrap)]
-            #[allow(clippy::expect_used)]
-            let (from_origin, to_origin) =
-                origin_range.expect("Continuation token implies there are more origin events");
-
-            self.fetch_origin_events_chunk(
-                from_origin,
-                to_origin,
-                filter.continuation_token,
-                filter.address,
-                filter.keys,
-                filter.chunk_size,
-            )
-            .await?
+            drop(lifecycle);
+            let mut events_chunk = self
+                .fetch_origin_events_chunk(
+                    from_origin,
+                    to_origin,
+                    filter.continuation_token,
+                    filter.address,
+                    filter.keys,
+                    filter.chunk_size,
+                )
+                .await?;
+            // An origin-only range has no local page to continue into.
+            if from_local_block_id.is_none()
+                && to_local_block_id.is_none()
+                && events_chunk.continuation_token.as_deref() == Some(DEFAULT_CONTINUATION_TOKEN)
+            {
+                events_chunk.continuation_token = None;
+            }
+            events_chunk
         } else {
             let pages_read_so_far = filter
                 .continuation_token
                 .unwrap_or(DEFAULT_CONTINUATION_TOKEN.to_string())
                 .parse::<u64>()
                 .map_err(|_| ApiError::InvalidContinuationToken)?;
+
+            if origin_range.is_some()
+                && from_local_block_id.is_none()
+                && to_local_block_id.is_none()
+            {
+                return Ok(StarknetResponse::Events(EventsChunk {
+                    events: Vec::new(),
+                    continuation_token: None,
+                })
+                .into());
+            }
 
             let starknet = self.api.starknet.lock().await;
             let (events, has_more_events) = starknet

@@ -1,5 +1,58 @@
 # Dump, load, restart
 
+## In-memory snapshots
+
+Use snapshots to restore Devnet directly between tests without replaying transactions. Snapshots are process-local and remain in memory until they are reverted, invalidated, or the process exits.
+
+Create a snapshot:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "devnet_snapshot",
+  "params": []
+}
+```
+
+The result is a monotonically increasing hexadecimal identifier such as `"0x1"`. Restore it with:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "devnet_revert",
+  "params": { "snapshot_id": "0x1" }
+}
+```
+
+The result is `true` when the checkpoint was restored and `false` when it is unknown, consumed, or invalidated. Reverting consumes the target and every newer snapshot while preserving older snapshots. `devnet_restart` and `devnet_load` invalidate all snapshots without reusing their identifiers.
+
+For fixture reuse, create the fixture once, snapshot it, run one test, revert, and immediately create a replacement snapshot for the next test because a successful revert consumes its identifier.
+
+For example, assuming `rpc(method, params)` returns the JSON-RPC result, call `resetFixture()` between tests:
+
+```javascript
+await setupFixture();
+let snapshotId = await rpc('devnet_snapshot', []);
+
+async function resetFixture() {
+  const restored = await rpc('devnet_revert', { snapshot_id: snapshotId });
+  if (!restored) throw new Error('Fixture snapshot is no longer available');
+  snapshotId = await rpc('devnet_snapshot', []);
+}
+```
+
+Each live snapshot retains a full logical copy of Devnet-owned state. Creation cost and memory use grow with retained state and are highest with full state archives. Reverting can also rewrite the configured block-mode dump file and release a large discarded state graph.
+
+Capture takes O(total retained state) time and additional memory; snapshots are unlimited and v1 imposes no performance ceiling. Capture and restore exclude concurrent state operations, so large archives can pause RPCs and delay interval sealing. Snapshot IDs accept `0x`-prefixed hexadecimal digits, including uppercase digits and leading zeros, within the `u64` range. Zero and unknown IDs return `false`; malformed or overflowing IDs return invalid params. Both methods are available over HTTP and WebSocket and restricted by default in restrictive mode.
+
+Timestamp controls are restored exactly, but wall-clock time continues to advance. A read already forwarded to a fork origin may finish after revert using the acceptance boundary captured before revert. File-read and parse failures during load preserve snapshots; once destructive load/restart work begins, snapshots are invalidated even if later work fails. Request/exit journals are truncated by revert; separately exported files remain unchanged. Dump files still use the replay journal format and cannot store process-local snapshot IDs.
+
+External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced, followed by notifications for each restored block in order, including its header, accepted transactions, receipts, statuses, and events.
+
+Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Restored mempool and pre-confirmed transactions produce status updates when their status changes or they were absent before revert; unchanged statuses are not sent again. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
+
 ## Dumping
 
 To preserve your Devnet instance for future use, these are the options:

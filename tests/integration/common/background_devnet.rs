@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::LowerHex;
 use std::process::{Command, Output, Stdio};
+use std::sync::OnceLock;
 use std::time;
 
 use anyhow::anyhow;
@@ -18,7 +19,9 @@ use starknet_rs_core::utils::get_selector_from_name;
 use starknet_rs_providers::jsonrpc::HttpTransport;
 use starknet_rs_providers::{JsonRpcClient, Provider};
 use starknet_rs_signers::{LocalWallet, SigningKey};
+#[cfg(unix)]
 use tokio::io::AsyncReadExt;
+#[cfg(unix)]
 use tokio::net::UnixListener;
 use url::Url;
 
@@ -28,6 +31,7 @@ use super::constants::{
 use super::errors::{RpcError, TestError};
 use super::reqwest_client::{PostReqwestSender, ReqwestClient};
 use super::utils::{FeeUnit, ImpersonationAction, to_hex_felt};
+#[cfg(not(unix))]
 use crate::common::background_server::get_acquired_port;
 use crate::common::constants::{
     DEVNET_EXECUTABLE_BINARY_PATH, DEVNET_MANIFEST_PATH, STRK_ERC20_CONTRACT_ADDRESS,
@@ -67,26 +71,114 @@ lazy_static! {
     ]);
 }
 
+// A local integration run can spawn hundreds of Devnets; all spawns share one release build.
+static RELEASE_BUILD: OnceLock<Result<(), String>> = OnceLock::new();
+
+fn ensure_release_binary() -> Result<(), TestError> {
+    if std::env::var_os("CI").is_some() {
+        return Ok(());
+    }
+
+    RELEASE_BUILD
+        .get_or_init(|| {
+            let Output { status, stderr, .. } = Command::new("cargo")
+                .args(["build", "--release", "--manifest-path", DEVNET_MANIFEST_PATH])
+                .stdout(Stdio::null())
+                .output()
+                .map_err(|err| format!("Error spawning release build: {err}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("Release build failed: {}", String::from_utf8_lossy(&stderr)))
+            }
+        })
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| TestError::DevnetNotStartable(error.clone()))
+}
+
+#[cfg(unix)]
+async fn wait_for_reported_port(
+    listener: &UnixListener,
+    process: &mut SafeChild,
+) -> Result<u16, TestError> {
+    // Fork-origin requests happen before Devnet binds its listener and reports the port.
+    const STARTUP_TIMEOUT: time::Duration = time::Duration::from_secs(60);
+    let handshake = async {
+        loop {
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let (mut stream, _) = accepted.map_err(|error| {
+                        TestError::DevnetNotStartable(format!("Port socket accept failed: {error}"))
+                    })?;
+                    let mut buffer = [0; 2];
+                    stream.read_exact(&mut buffer).await.map_err(|error| {
+                        TestError::DevnetNotStartable(format!("Port socket read failed: {error}"))
+                    })?;
+                    return Ok(u16::from_be_bytes(buffer));
+                }
+                _ = tokio::time::sleep(time::Duration::from_millis(100)) => {
+                    if let Some(status) = process.process.try_wait().map_err(|error| {
+                        TestError::DevnetNotStartable(format!("Could not inspect Devnet process: {error}"))
+                    })? {
+                        return Err(TestError::DevnetNotStartable(format!(
+                            "Devnet exited before reporting its port: {status}"
+                        )));
+                    }
+                }
+            }
+        }
+    };
+
+    tokio::time::timeout(STARTUP_TIMEOUT, handshake).await.map_err(|_| {
+        TestError::DevnetNotStartable(format!(
+            "Devnet did not report its port within {} seconds; startup may be waiting on a fork \
+             origin",
+            STARTUP_TIMEOUT.as_secs()
+        ))
+    })?
+}
+
+#[cfg(all(test, unix))]
+#[tokio::test]
+async fn port_handshake_reports_early_process_exit() {
+    let socket = UniqueAutoDeletableFile::new("port_handshake_early_exit");
+    let listener = UnixListener::bind(&socket.path).unwrap();
+    let child = Command::new("true").spawn().unwrap();
+    let mut process = SafeChild { process: child, port: None };
+
+    let error = wait_for_reported_port(&listener, &mut process).await.unwrap_err();
+    assert!(
+        matches!(error, TestError::DevnetNotStartable(message) if message.contains("exited before reporting its port"))
+    );
+}
+
 async fn wait_for_successful_response(
     client: &Client,
     healthcheck_url: &str,
-    sleep_time: time::Duration,
-    max_retries: usize,
+    retry_interval: time::Duration,
+    startup_timeout: time::Duration,
 ) -> Result<(), anyhow::Error> {
-    for _ in 0..max_retries {
-        if let Ok(alive_resp) = client.get(healthcheck_url).send().await {
-            let status = alive_resp.status();
-            if status != StatusCode::OK {
-                return Err(anyhow!("Server responded with: {status}"));
+    let deadline = time::Instant::now() + startup_timeout;
+    let mut last_error = String::from("no response");
+    while let Some(remaining) = deadline.checked_duration_since(time::Instant::now()) {
+        let request_timeout = remaining.min(time::Duration::from_secs(2));
+        match tokio::time::timeout(request_timeout, client.get(healthcheck_url).send()).await {
+            Ok(Ok(response)) if response.status() == StatusCode::OK => return Ok(()),
+            Ok(Ok(response)) => {
+                return Err(anyhow!("Server responded with: {}", response.status()));
             }
-
-            return Ok(());
+            Ok(Err(error)) => last_error = error.to_string(),
+            Err(_) => last_error = "healthcheck request timed out".into(),
         }
 
-        tokio::time::sleep(sleep_time).await;
+        tokio::time::sleep(retry_interval.min(remaining)).await;
     }
 
-    Err(anyhow!("Not responsive: {healthcheck_url}"))
+    Err(anyhow!(
+        "Not responsive after {} seconds: {healthcheck_url}; last error: {last_error}",
+        startup_timeout.as_secs()
+    ))
 }
 
 impl BackgroundDevnet {
@@ -132,22 +224,7 @@ impl BackgroundDevnet {
     }
 
     async fn start_safe_process(args: &[&str]) -> Result<SafeChild, TestError> {
-        // If not on CI, first build the workspace with cargo. Then rely on the built binary.
-        if std::env::var("CI").is_err() {
-            let Output { status, stderr, .. } = Command::new("cargo")
-                .args(["build", "--release", "--manifest-path", DEVNET_MANIFEST_PATH])
-                .stdout(Stdio::null())
-                .output()
-                .map_err(|err| {
-                    TestError::DevnetNotStartable(format!("Error spawning build process {err:?}"))
-                })?;
-            if !status.success() {
-                let stderr_str = String::from_utf8_lossy(&stderr);
-                return Err(TestError::DevnetNotStartable(format!(
-                    "Error during build process {stderr_str}"
-                )));
-            }
-        }
+        ensure_release_binary()?;
 
         let socket = UniqueAutoDeletableFile::new("socket");
         #[cfg(unix)]
@@ -155,60 +232,51 @@ impl BackgroundDevnet {
             TestError::DevnetNotStartable(format!("Failed to bind to unix socket: {e:?}"))
         })?;
 
-        let process = Command::new(DEVNET_EXECUTABLE_BINARY_PATH)
+        let child = Command::new(DEVNET_EXECUTABLE_BINARY_PATH)
             .args(Self::add_default_args(args))
             .env("UNIX_SOCKET", &socket.path)
             .stdout(Stdio::null()) // comment this out for complete devnet stdout
             .spawn()
             .map_err(|e| TestError::DevnetNotStartable(format!("Spawning error: {e:?}")))?;
+        let process = SafeChild { process: child, port: None };
 
         #[cfg(unix)]
+        let mut process = process;
+        #[cfg(unix)]
         {
-            let port =
-                match tokio::time::timeout(tokio::time::Duration::from_secs(10), listener.accept())
-                    .await
-                {
-                    Ok(Ok((mut stream, _))) => {
-                        let mut buffer = [0; 2];
-                        stream.read_exact(&mut buffer).await.map_err(|e| {
-                            TestError::DevnetNotStartable(format!(
-                                "Failed to read from socket: {e:?}"
-                            ))
-                        })?;
-                        Some(u16::from_be_bytes(buffer))
-                    }
-                    Ok(Err(_e)) => None,
-                    Err(_) => {
-                        println!("Timeout reading from unix socket: {:?}", listener);
-                        None
-                    }
-                };
-            Ok(SafeChild { process, port })
+            let port = wait_for_reported_port(&listener, &mut process).await?;
+            process.port = Some(port);
         }
-        #[cfg(not(unix))]
-        Ok(SafeChild { process, port: None })
+        Ok(process)
     }
 
     pub(crate) async fn spawn_with_additional_args(args: &[&str]) -> Result<Self, TestError> {
-        let mut safe_process = Self::start_safe_process(args).await?;
+        let safe_process = Self::start_safe_process(args).await?;
+        #[cfg(not(unix))]
+        let mut safe_process = safe_process;
 
         let sleep_time = time::Duration::from_millis(500);
-        let max_retries = 60;
-        let port = if let Some(port) = safe_process.port {
-            port
-        } else {
-            get_acquired_port(&mut safe_process, sleep_time, max_retries).await.map_err(|e| {
-                TestError::DevnetNotStartable(format!("Cannot determine port: {e:?}"))
-            })?
-        };
+        #[cfg(unix)]
+        let port = safe_process.port.ok_or_else(|| {
+            TestError::DevnetNotStartable("Devnet did not complete its port handshake".into())
+        })?;
+        #[cfg(not(unix))]
+        let port = get_acquired_port(&mut safe_process, sleep_time, 60).await.map_err(|error| {
+            TestError::DevnetNotStartable(format!("Cannot determine port: {error}"))
+        })?;
 
         // now we know the port; check if it can be used to poll Devnet's endpoint
         let client = Client::new();
         let devnet_url = format!("http://{HOST}:{port}");
         let healthcheck_url = format!("{devnet_url}{HEALTHCHECK_PATH}").to_string();
-        wait_for_successful_response(&client, &healthcheck_url, sleep_time, max_retries)
-            .await
-            .map_err(|e| TestError::DevnetNotStartable(format!("Server unresponsive: {e:?}")))?;
+        wait_for_successful_response(
+            &client,
+            &healthcheck_url,
+            sleep_time,
+            time::Duration::from_secs(30),
+        )
+        .await
+        .map_err(|e| TestError::DevnetNotStartable(format!("Server unresponsive: {e:?}")))?;
         println!("Spawned background devnet at {devnet_url}");
 
         let devnet_rpc_url = Url::parse(format!("{devnet_url}{RPC_PATH}").as_str())?;

@@ -22,7 +22,7 @@ pub use ordering::{
 
 /// Transactions already appended to the live pre-confirmed block and deterministic selection
 /// state associated with that proposal.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct OpenProposal {
     transaction_hashes: Vec<TransactionHash>,
     selection_counter: u64,
@@ -103,7 +103,7 @@ impl BuildOutcome {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Mempool {
     entries: IndexMap<TransactionHash, MempoolEntry>,
     account_nonce_index: HashMap<(ContractAddress, Nonce), TransactionHash>,

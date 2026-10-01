@@ -18,6 +18,7 @@ use crate::state::StarknetState;
 use crate::state::state_diff::StateDiff;
 use crate::traits::HashIdentified;
 
+#[derive(Clone)]
 pub(crate) struct StarknetBlocks {
     pub(crate) num_to_hash: IndexMap<BlockNumber, BlockHash>,
     pub(crate) hash_to_block: HashMap<BlockHash, StarknetBlock>,
@@ -58,6 +59,17 @@ impl Default for StarknetBlocks {
 }
 
 impl StarknetBlocks {
+    pub(crate) fn relink_rpc_contract_classes(
+        &mut self,
+        rpc_contract_classes: std::sync::Arc<
+            parking_lot::RwLock<crate::state::CommittedClassStorage>,
+        >,
+    ) {
+        for state in self.hash_to_state.values_mut() {
+            state.relink_rpc_contract_classes(rpc_contract_classes.clone());
+        }
+    }
+
     pub fn new(starting_block_number: u64, last_block_hash: Option<Felt>) -> Self {
         let mut blocks = Self { starting_block_number, ..Default::default() };
         blocks.pre_confirmed_block.set_block_number(starting_block_number);

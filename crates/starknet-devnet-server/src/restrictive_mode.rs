@@ -1,6 +1,8 @@
 pub static DEFAULT_RESTRICTED_JSON_RPC_METHODS: &[&str] = &[
     "devnet_mint",
     "devnet_load",
+    "devnet_snapshot",
+    "devnet_revert",
     "devnet_restart",
     "devnet_createBlock",
     "devnet_removeFromMempool",

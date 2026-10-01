@@ -178,6 +178,9 @@ impl TransactionOrderingPolicy for RandomOrderingPolicy {
 }
 
 /// Name-to-policy lookup used by block building.
+///
+/// Checkpoints share policy implementations. Custom policies must derive selection exclusively
+/// from the supplied eligible transactions and selection context, not mutable internal state.
 #[derive(Clone)]
 pub struct OrderingPolicyRegistry {
     policies: HashMap<MempoolOrdering, Arc<dyn TransactionOrderingPolicy>>,

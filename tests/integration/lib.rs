@@ -36,6 +36,7 @@ mod prove_transaction;
 mod restart;
 mod restrictive_mode;
 mod simulate_transactions;
+mod snapshot;
 mod subscription_to_blocks;
 mod subscription_to_events;
 mod subscription_to_new_tx_receipts;

@@ -45,7 +45,7 @@ use crate::traits::HashIdentified;
 pub mod ethereum;
 pub use ethereum::EthereumMessaging;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MessagingBroker {
     /// The ethereum broker to send transaction / call contracts using alloy.
     pub(crate) ethereum: Option<EthereumMessaging>,

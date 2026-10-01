@@ -8,6 +8,7 @@ pub mod rpc_core;
 /// handlers for axum server
 pub mod rpc_handler;
 pub mod server;
+mod socket_writer;
 pub mod subscribe;
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;

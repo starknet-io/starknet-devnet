@@ -18,7 +18,7 @@ use crate::api::models::{
     FlushParameters, GetMempoolRequest, GetStorageInput, GetStorageProofInput, IncreaseTime,
     JsonRpcResponse, L1TransactionHashInput, LoadRequest, MintTokensRequest,
     PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest, ProveTransactionInput,
-    RemoveFromMempoolRequest, RestartParameters, SetMempoolConfigRequest, SetTime,
+    RemoveFromMempoolRequest, RestartParameters, RevertRequest, SetMempoolConfigRequest, SetTime,
     SimulateTransactionsInput, StateUpdateInput, SubscriptionBlockIdInput, SubscriptionIdInput,
     TransactionHashAndFlagsInput, TransactionHashInput, TransactionReceiptSubscriptionInput,
     TransactionSubscriptionInput,
@@ -151,6 +151,10 @@ pub enum DevnetSpecRequest {
     StopAutoImpersonate,
     #[serde(rename = "devnet_dump", with = "optional_params")]
     Dump(Option<DumpRequest>),
+    #[serde(rename = "devnet_snapshot", with = "empty_params")]
+    Snapshot,
+    #[serde(rename = "devnet_revert")]
+    Revert(RevertRequest),
     #[serde(rename = "devnet_load")]
     Load(LoadRequest),
     #[serde(rename = "devnet_postmanLoad")]
@@ -399,6 +403,8 @@ impl DevnetSpecRequest {
             | Self::AutoImpersonate
             | Self::StopAutoImpersonate
             | Self::Dump(_)
+            | Self::Snapshot
+            | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanLoadL1MessagingContract(_)
             | Self::PostmanConsumeMessageFromL2(_)
@@ -440,6 +446,8 @@ impl DevnetSpecRequest {
             | Self::IncreaseTime(_)
             | Self::Mint(_) => true,
             Self::Dump(_)
+            | Self::Snapshot
+            | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanFlush(_)
             | Self::GetMempool(_)
@@ -453,6 +461,83 @@ impl DevnetSpecRequest {
 }
 
 impl JsonRpcRequest {
+    pub fn is_mutating(&self) -> bool {
+        match self {
+            Self::StarknetSpecRequest(
+                StarknetSpecRequest::AddDeclareTransaction(_)
+                | StarknetSpecRequest::AddDeployAccountTransaction(_)
+                | StarknetSpecRequest::AddInvokeTransaction(_),
+            ) => true,
+            Self::DevnetSpecRequest(
+                DevnetSpecRequest::GetMempool(_)
+                | DevnetSpecRequest::PredeployedAccounts(_)
+                | DevnetSpecRequest::AccountBalance(_)
+                | DevnetSpecRequest::DevnetConfig
+                | DevnetSpecRequest::DevnetStatus,
+            ) => false,
+            Self::DevnetSpecRequest(
+                DevnetSpecRequest::ImpersonateAccount(_)
+                | DevnetSpecRequest::StopImpersonateAccount(_)
+                | DevnetSpecRequest::AutoImpersonate
+                | DevnetSpecRequest::StopAutoImpersonate
+                | DevnetSpecRequest::Dump(_)
+                | DevnetSpecRequest::Snapshot
+                | DevnetSpecRequest::Revert(_)
+                | DevnetSpecRequest::Load(_)
+                | DevnetSpecRequest::PostmanLoadL1MessagingContract(_)
+                | DevnetSpecRequest::PostmanFlush(_)
+                | DevnetSpecRequest::PostmanSendMessageToL2(_)
+                | DevnetSpecRequest::PostmanConsumeMessageFromL2(_)
+                | DevnetSpecRequest::CreateBlock
+                | DevnetSpecRequest::RemoveFromMempool(_)
+                | DevnetSpecRequest::ClearMempool
+                | DevnetSpecRequest::PreconfirmTransactions(_)
+                | DevnetSpecRequest::SetMempoolConfig(_)
+                | DevnetSpecRequest::SealBlock
+                | DevnetSpecRequest::AbortPreconfirmedBlock
+                | DevnetSpecRequest::AbortBlocks(_)
+                | DevnetSpecRequest::AcceptOnL1(_)
+                | DevnetSpecRequest::SetGasPrice(_)
+                | DevnetSpecRequest::Restart(_)
+                | DevnetSpecRequest::SetTime(_)
+                | DevnetSpecRequest::IncreaseTime(_)
+                | DevnetSpecRequest::Mint(_),
+            ) => true,
+            Self::StarknetSpecRequest(
+                StarknetSpecRequest::SpecVersion
+                | StarknetSpecRequest::BlockWithTransactionHashes(_)
+                | StarknetSpecRequest::BlockWithFullTransactions(_)
+                | StarknetSpecRequest::BlockWithReceipts(_)
+                | StarknetSpecRequest::StateUpdate(_)
+                | StarknetSpecRequest::StorageAt(_)
+                | StarknetSpecRequest::StorageProof(_)
+                | StarknetSpecRequest::TransactionByHash(_)
+                | StarknetSpecRequest::TransactionByBlockAndIndex(_)
+                | StarknetSpecRequest::TransactionReceiptByTransactionHash(_)
+                | StarknetSpecRequest::TransactionStatusByHash(_)
+                | StarknetSpecRequest::MessagesStatusByL1Hash(_)
+                | StarknetSpecRequest::ClassByHash(_)
+                | StarknetSpecRequest::CompiledCasmByClassHash(_)
+                | StarknetSpecRequest::ClassHashAtContractAddress(_)
+                | StarknetSpecRequest::ClassAtContractAddress(_)
+                | StarknetSpecRequest::BlockTransactionCount(_)
+                | StarknetSpecRequest::Call(_)
+                | StarknetSpecRequest::EstimateFee(_)
+                | StarknetSpecRequest::BlockNumber
+                | StarknetSpecRequest::BlockHashAndNumber
+                | StarknetSpecRequest::ChainId
+                | StarknetSpecRequest::Syncing
+                | StarknetSpecRequest::Events(_)
+                | StarknetSpecRequest::ContractNonce(_)
+                | StarknetSpecRequest::EstimateMessageFee(_)
+                | StarknetSpecRequest::SimulateTransactions(_)
+                | StarknetSpecRequest::TraceTransaction(_)
+                | StarknetSpecRequest::BlockTransactionTraces(_),
+            )
+            | Self::StarknetSpecExtRequest(StarknetSpecExtRequest::ProveTransaction(_)) => false,
+        }
+    }
+
     pub fn requires_notifying(&self) -> bool {
         #![warn(clippy::wildcard_enum_match_arm)]
         match self {
