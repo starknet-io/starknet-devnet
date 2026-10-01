@@ -47,8 +47,10 @@ $ anvil
 
 ### Deploy
 
+Load the messaging contract and configure `ACCOUNT_PRIVATE_KEY` and `STARKNET_MESSAGING_ADDRESS` as described in the [parent guide](../README.md). The deployment script reads these environment variables.
+
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+$ forge script script/L1L2.s.sol:Deploy --broadcast --rpc-url <your_rpc_url>
 ```
 
 ### Cast

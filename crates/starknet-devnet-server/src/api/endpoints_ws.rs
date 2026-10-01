@@ -495,20 +495,6 @@ impl JsonRpcHandler {
                 status,
             });
             socket_context.notify(subscription_id, &subscription, notification);
-        } else if let Some(phase) = starknet.get_queued_transaction_phase(&transaction_hash) {
-            use starknet_core::starknet::mempool::MempoolPhase;
-            use starknet_types::rpc::transactions::{TransactionFinalityStatus, TransactionStatus};
-
-            let finality_status = match phase {
-                MempoolPhase::Received => TransactionFinalityStatus::Received,
-                MempoolPhase::Candidate => TransactionFinalityStatus::Candidate,
-                MempoolPhase::PreConfirmed => TransactionFinalityStatus::PreConfirmed,
-            };
-            let notification = NotificationData::TransactionStatus(NewTransactionStatus {
-                transaction_hash,
-                status: TransactionStatus::pre_execution(finality_status),
-            });
-            socket_context.notify(subscription_id, &subscription, notification);
         } else {
             tracing::debug!("Tx status subscription: tx not yet received")
         }

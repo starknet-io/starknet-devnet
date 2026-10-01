@@ -11,7 +11,7 @@ use starknet_types::rpc::transactions::{
 use super::starknet_config::ClassSizeConfig;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
 use crate::starknet::Starknet;
-use crate::starknet::mempool::{PendingDeclaration, PreparedTransaction};
+use crate::starknet::transaction_execution::{PendingDeclaration, PreparedTransaction};
 
 fn check_class_size(
     executable_tx: &starknet_api::executable_transaction::DeclareTransaction,

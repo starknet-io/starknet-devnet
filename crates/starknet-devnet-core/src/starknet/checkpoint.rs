@@ -31,7 +31,6 @@ impl StarknetCheckpoint {
             block_context,
             blocks,
             transactions,
-            mempool,
             config,
             pre_confirmed_block_timestamp_shift,
             next_block_timestamp,
@@ -57,7 +56,6 @@ impl StarknetCheckpoint {
             block_context: block_context.clone(),
             blocks,
             transactions: transactions.clone(),
-            mempool: mempool.clone(),
             config: config.clone(),
             pre_confirmed_block_timestamp_shift: *pre_confirmed_block_timestamp_shift,
             next_block_timestamp: *next_block_timestamp,
@@ -169,7 +167,7 @@ mod tests {
         assert_eq!(starknet.messaging.last_local_block, 11);
         assert_eq!(starknet.messaging.l2_to_l1_messages_hashes.get(&message_hash), Some(&2));
 
-        starknet.create_block_strict().unwrap();
+        starknet.create_block();
         let header = &starknet.get_latest_block().unwrap().header.block_header_without_hash;
         assert_eq!(header.timestamp.0, 42);
         assert_eq!(header.l1_gas_price.price_in_fri.0, 123);

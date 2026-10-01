@@ -24,8 +24,7 @@ or if using dockerized Devnet:
 $ docker run -e RUST_LOG=<LEVEL> starknetfoundation/starknet-devnet-rs
 ```
 
-By default, logging of request and response data is turned off.
-To see the request and/or response body, additional levels can be specified via the `RUST_LOG` environment variable: `REQUEST` for request body, `RESPONSE` for response body.
+By default, logging of request and response data is turned off. To see the request and/or response body, additional levels can be specified via the `RUST_LOG` environment variable: `REQUEST` for request body, `RESPONSE` for response body.
 
 :::note
 

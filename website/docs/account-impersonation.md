@@ -29,7 +29,7 @@ A transaction sent from an impersonated account will not fail with an invalid si
 
 ## API
 
-Account impersonation follows JSON-RPC method specification. Each method returns an empty response:
+Account impersonation follows JSON-RPC method specification. Each method returns an empty result object. Replace the example address `0x1234` with an account that exists on your fork origin and is absent from Devnet's local state:
 
 ### devnet_impersonateAccount
 
@@ -41,7 +41,7 @@ Impersonates a specific account address nonexistent in the local state.
     "id": "1",
     "method": "devnet_impersonateAccount",
     "params": {
-        "account_address": "0x49D36570D4E46F48E99674BD3FCC84644DDD6B96F7C741B1562B82F9E004DC7"
+        "account_address": "0x1234"
     }
 }
 ```
@@ -56,7 +56,7 @@ Stops the impersonation of an account previously marked for impersonation.
     "id": "1",
     "method": "devnet_stopImpersonateAccount",
     "params": {
-        "account_address": "0x49D36570D4E46F48E99674BD3FCC84644DDD6B96F7C741B1562B82F9E004DC7"
+        "account_address": "0x1234"
     }
 }
 ```

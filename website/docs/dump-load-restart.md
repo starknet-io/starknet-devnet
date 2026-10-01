@@ -45,13 +45,13 @@ async function resetFixture() {
 
 Each live snapshot retains a full logical copy of Devnet-owned state. Creation cost and memory use grow with retained state and are highest with full state archives. Reverting can also rewrite the configured block-mode dump file and release a large discarded state graph.
 
-Capture takes O(total retained state) time and additional memory; snapshots are unlimited and v1 imposes no performance ceiling. Capture and restore exclude concurrent state operations, so large archives can pause RPCs and delay interval sealing. Snapshot IDs accept `0x`-prefixed hexadecimal digits, including uppercase digits and leading zeros, within the `u64` range. Zero and unknown IDs return `false`; malformed or overflowing IDs return invalid params. Both methods are available over HTTP and WebSocket and restricted by default in restrictive mode.
+Capture takes O(total retained state) time and additional memory; there is no configured snapshot-count limit. Capture and restore exclude concurrent state operations, so large archives can pause RPCs and delay interval sealing. Snapshot IDs accept `0x`-prefixed hexadecimal digits, including uppercase digits and leading zeros, within the `u64` range. Zero and unknown IDs return `false`; malformed or overflowing IDs return invalid params. Both methods are available over HTTP and WebSocket and restricted by default in restrictive mode.
 
 Timestamp controls are restored exactly, but wall-clock time continues to advance. A read already forwarded to a fork origin may finish after revert using the acceptance boundary captured before revert. File-read and parse failures during load preserve snapshots; once destructive load/restart work begins, snapshots are invalidated even if later work fails. Request/exit journals are truncated by revert; separately exported files remain unchanged. Dump files still use the replay journal format and cannot store process-local snapshot IDs.
 
 External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced, followed by notifications for each restored block in order, including its header, accepted transactions, receipts, statuses, and events.
 
-Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Restored mempool and pre-confirmed transactions produce status updates when their status changes or they were absent before revert; unchanged statuses are not sent again. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
+Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Restored pre-confirmed transactions produce status updates when their status changes or they were absent before revert; unchanged statuses are not sent again. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
 
 ## Dumping
 
@@ -169,17 +169,15 @@ The `path` and `events` parameters are mutually exclusive. Passing both, or neit
 
 Currently, dumping produces a list of reproducible Devnet actions (state-changing requests and transactions). Conversely, loading is implemented as the re-execution of transactions from a dump. This means that timestamps of `StarknetBlock` will be different on each load. This is due to the nature of Devnet's dependencies, which prevent Devnet's state from being serialized.
 
-In [mempool mode](./mempool), a policy-driven processing action is dumped as the exact ordered transaction hashes that were selected. Mempool configuration changes, removal, clearing, strict sealing, and proposal abortion are also recorded. This makes loading deterministic even for seeded-random ordering and avoids depending on wall-clock timing or policy defaults.
-
 Dumping and loading are not guaranteed to work across versions. I.e. if you dumped one version of Devnet, do not expect it to be loadable with a different version.
 
-If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. The same applies to the block-generation and mempool configuration used by the dumped Devnet.
+If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. Use the same block-generation mode when loading as when dumping.
 
 Loading does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 
 ## Restarting
 
-Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup. Restarting also clears all received and candidate transactions and the open pre-confirmed proposal.
+Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup.
 
 Restarting does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 

@@ -1,7 +1,6 @@
 # Devnet contracts for development
 
-This folder contains Cairo and Solidity contracts for Devnet development.
-If you wish to check specifically one of the two chains README, please refer to the corresponding README:
+This folder contains Cairo and Solidity contracts for Devnet development. If you wish to check specifically one of the two chains README, please refer to the corresponding README:
 
 1. `solidity` folder for Ethereum related contracts with the [README](./solidity/README.md).
 2. `cairo` folder for Starknet related contracts, and example of how to work with starknet without running an L1 node in the [README](./cairo/README.md).
@@ -9,6 +8,8 @@ If you wish to check specifically one of the two chains README, please refer to 
 ## E2E testing with Anvil and Devnet
 
 ### Setup of the nodes
+
+The response examples below show result objects without the JSON-RPC envelope. Deployment addresses and hashes are illustrative; use the addresses returned by your own deployment commands.
 
 You will need two terminals to run each node:
 
@@ -18,14 +19,14 @@ First, please ensure that you have [anvil](https://book.getfoundry.sh/getting-st
 anvil
 ```
 
-For Starknet, ensure you have Devnet compiled and running with the following params:
+For Starknet, run the following from the repository root to compile the artifacts and start Devnet:
 
 ```bash
 # First, ensure you have compiled the artifacts required for abigen:
-cd contracts && bash generate_artifacts.sh
+(cd contracts && forge install --root ./l1-l2-messaging/solidity && bash generate_artifacts.sh)
 
 # Then run Devnet with known seed.
-cargo run -- --seed 42
+cargo run -- --seed 42 --account-class cairo0
 ```
 
 Now both nodes are running, Devnet for Starknet and Anvil for Ethereum.
@@ -124,8 +125,8 @@ curl http://127.0.0.1:5050 --json '{
 {
   "messages_to_l1": [
     {
-      "l2_contract_address": "0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba",
-      "l1_contract_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "from_address": "0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba",
+      "to_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
       "payload": ["0x0", "0x1", "0x1"]
     }
   ],
@@ -142,17 +143,17 @@ curl http://127.0.0.1:5050 --json '{
 curl http://127.0.0.1:5050/ --json '{
   "jsonrpc": "2.0",
   "method": "devnet_postmanFlush",
-  "params": {},
+  "params": { "dry_run": false },
   "id": 1
 }'
 ```
 
 ```json
 {
-  "messagesToL1": [
+  "messages_to_l1": [
     {
-      "l2_contract_address": "0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba",
-      "l1_contract_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "from_address": "0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba",
+      "to_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
       "payload": ["0x0", "0x1", "0x1"]
     }
   ],
@@ -164,12 +165,11 @@ curl http://127.0.0.1:5050/ --json '{
 
 ### Ethereum receive message and send message to L2
 
-1. Now the message is received, we can consume it. You can try to run this command several times,
-   you'll see the transaction reverting with `INVALID_MESSAGE_TO_CONSUME` once the message is consumed once. To consume the message, we have to provide its content (balance of 1 to user 1).
+1. Now the message is received, we can consume it. You can try to run this command several times, and you'll see the transaction reverting with `INVALID_MESSAGE_TO_CONSUME` once the message is consumed once. To consume the message, we have to provide its content (balance of 1 to user 1).
 
 ```bash
 cast send 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 "withdraw(uint256, uint256, uint256)" \
-     0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba 0x1 0x1 \
+     "$CONTRACT_L2" 0x1 0x1 \
      --rpc-url $ETH_RPC_URL --private-key $ACCOUNT_PRIVATE_KEY \
      --gas-limit 999999
 
@@ -207,17 +207,18 @@ cast call 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 "get_balance(uint256)(uint2
 curl http://127.0.0.1:5050/ --json '{
   "jsonrpc": "2.0",
   "method": "devnet_postmanFlush",
-  "params": {},
+  "params": { "dry_run": false },
   "id": 1
 }'
 ```
 
 ```json
 {
-  "messagesToL1": [],
-  "messagesToL2": [
+  "messages_to_l1": [],
+  "messages_to_l2": [
     {
-      "l2_contract_address": "...",
+      "l1_transaction_hash": "<L1_DEPOSIT_TRANSACTION_HASH>",
+      "l2_contract_address": "<DEPLOYED_L2_CONTRACT_ADDRESS>",
       "entry_point_selector": "0xc73f681176fc7b3f9693986fd7b14581e8d540519e27400e88b8713932be01",
       "l1_contract_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
       "payload": ["0x1", "0x1"],
@@ -244,7 +245,7 @@ starkli call "$CONTRACT_L2" get_balance 0x1
 
 ### Mocking messages without running L1 node
 
-1. Now, let's say we want to increase the balance of the user on L2 as if a message was sent from L1. Devnet has an endpoint `postman/send_message_to_l2` to mock a message coming from L1, without actually running an L1 node. Let's mock a message that sends the amount 2 to the user 1.
+1. Now, let's say we want to increase the balance of the user on L2 as if a message was sent from L1. Devnet has a JSON-RPC method `devnet_postmanSendMessageToL2` to mock a message coming from L1, without actually running an L1 node. Let's mock a message that sends the amount 2 to the user 1.
 
 ```bash
 curl http://127.0.0.1:5050/ --json '{
@@ -252,7 +253,7 @@ curl http://127.0.0.1:5050/ --json '{
   "method": "devnet_postmanSendMessageToL2",
   "params": {
     "paid_fee_on_l1": "0x123",
-    "l2_contract_address": '"$CONTRACT_L2"',
+    "l2_contract_address": "'"$CONTRACT_L2"'",
     "l1_contract_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
     "entry_point_selector": "0x00c73f681176fc7b3f9693986fd7b14581e8d540519e27400e88b8713932be01",
     "payload": ["0x1", "0x2"],
@@ -260,6 +261,8 @@ curl http://127.0.0.1:5050/ --json '{
   },
   "id": 1
 }'
+
+```
 
 ```json
 {
@@ -291,7 +294,7 @@ curl http://127.0.0.1:5050/ --json '{
   "jsonrpc": "2.0",
   "method": "devnet_postmanConsumeMessageFromL2",
   "params": {
-    "from_address": "0x34ba56f92265f0868c57d3fe72ecab144fc96f97954bbbc4252cef8e8a979ba",
+    "from_address": "'"$CONTRACT_L2"'",
     "to_address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
     "payload": ["0x0", "0x1", "0x2"]
   },
@@ -320,10 +323,10 @@ starkli call "$CONTRACT_L2" get_balance 0x1
 
 ### Re-run with a script
 
-To quickly setup the nodes for testing and re-run this exact sequence after restarting your nodes, you can use the following bash script:
+With fresh Anvil and Devnet instances already running as described above, the following script compiles and deploys the contracts and runs the messaging sequence:
 
 ```bash
 bash run_e2e.sh
 ```
 
-It's important to note that those operations must be done in this exact order to ensure that hard-coded addresses used in this guide are still valid.
+The order matters for the Anvil deployment addresses used by `.env`. Use the returned L2 deployment address throughout; the seed and Cairo 0 account class match the bundled Starkli account file.

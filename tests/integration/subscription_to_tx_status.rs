@@ -144,10 +144,19 @@ async fn should_notify_if_subscribed_before_and_after_tx(
     let (address, mint_amount, expected_tx_hash) = first_mint_data();
 
     // should work if subscribing before sending the tx
+    let missing_status = devnet
+        .send_custom_rpc(
+            "starknet_getTransactionStatus",
+            json!({ "transaction_hash": expected_tx_hash }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing_status.code, 29);
     let subscription_id_before = subscribe_tx_status(ws_before_tx, &expected_tx_hash).await?;
 
     let tx_hash = devnet.mint(address, mint_amount).await;
     assert_eq_prop!(tx_hash, expected_tx_hash)?;
+    assert_executed_status(devnet, tx_hash, expected_finality_status).await;
 
     {
         let notification = receive_rpc_via_ws(ws_before_tx).await.unwrap();
@@ -176,39 +185,63 @@ async fn should_notify_if_subscribed_before_and_after_tx(
     Ok((tx_hash, subscription_id_before, subscription_id_after))
 }
 
+async fn assert_executed_status(
+    devnet: &BackgroundDevnet,
+    tx_hash: Felt,
+    expected_finality_status: &str,
+) {
+    let params = json!({ "transaction_hash": tx_hash });
+    let status =
+        devnet.send_custom_rpc("starknet_getTransactionStatus", params.clone()).await.unwrap();
+    assert_eq!(
+        status,
+        json!({
+            "finality_status": expected_finality_status,
+            "execution_status": "SUCCEEDED",
+            "failure_reason": null,
+        })
+    );
+    let receipt = devnet.send_custom_rpc("starknet_getTransactionReceipt", params).await.unwrap();
+    assert_eq!(receipt["finality_status"], expected_finality_status);
+    assert_eq!(receipt["execution_status"], "SUCCEEDED");
+}
+
 #[tokio::test]
-async fn should_notify_in_on_demand_mode() {
-    let devnet_args = ["--block-generation-on", "demand"];
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
+async fn should_notify_in_demand_and_interval_modes() {
+    for mode in ["demand", "60"] {
+        let devnet_args = ["--block-generation-on", mode];
+        let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
 
-    let (mut ws_before_tx, _) = connect_async(devnet.ws_url()).await.unwrap();
-    let (mut ws_after_tx, _) = connect_async(devnet.ws_url()).await.unwrap();
+        let (mut ws_before_tx, _) = connect_async(devnet.ws_url()).await.unwrap();
+        let (mut ws_after_tx, _) = connect_async(devnet.ws_url()).await.unwrap();
 
-    let (mint_tx_hash, subscription_id_before, subscription_id_after) =
-        should_notify_if_subscribed_before_and_after_tx(
-            &devnet,
-            &mut ws_before_tx,
-            &mut ws_after_tx,
-            "PRE_CONFIRMED",
-        )
-        .await
-        .unwrap();
+        let (mint_tx_hash, subscription_id_before, subscription_id_after) =
+            should_notify_if_subscribed_before_and_after_tx(
+                &devnet,
+                &mut ws_before_tx,
+                &mut ws_after_tx,
+                "PRE_CONFIRMED",
+            )
+            .await
+            .unwrap();
 
-    // Creating a new block should make txs go: PRE_CONFIRMED->ACCEPTED_ON_L2
-    devnet.create_block().await.unwrap();
+        // Creating a new block should make txs go: PRE_CONFIRMED->ACCEPTED_ON_L2
+        devnet.create_block().await.unwrap();
+        assert_executed_status(&devnet, mint_tx_hash, "ACCEPTED_ON_L2").await;
 
-    for (mut ws, subscription_id) in
-        [(ws_before_tx, subscription_id_before), (ws_after_tx, subscription_id_after)]
-    {
-        let notification = receive_rpc_via_ws(&mut ws).await.unwrap();
-        assert_mint_notification_succeeded(
-            notification,
-            mint_tx_hash,
-            subscription_id,
-            "ACCEPTED_ON_L2",
-        )
-        .unwrap();
-        assert_no_notifications(&mut ws).await.unwrap();
+        for (mut ws, subscription_id) in
+            [(ws_before_tx, subscription_id_before), (ws_after_tx, subscription_id_after)]
+        {
+            let notification = receive_rpc_via_ws(&mut ws).await.unwrap();
+            assert_mint_notification_succeeded(
+                notification,
+                mint_tx_hash,
+                subscription_id,
+                "ACCEPTED_ON_L2",
+            )
+            .unwrap();
+            assert_no_notifications(&mut ws).await.unwrap();
+        }
     }
 }
 
@@ -319,6 +352,11 @@ async fn should_not_notify_of_status_change_when_block_aborted() {
         .unwrap();
 
     devnet.abort_blocks(&BlockId::Number(1)).await.unwrap();
+    let removed_status = devnet
+        .send_custom_rpc("starknet_getTransactionStatus", json!({ "transaction_hash": tx_hash }))
+        .await
+        .unwrap_err();
+    assert_eq!(removed_status.code, 29);
 
     // only expect reorg subscription
     let notification = receive_rpc_via_ws(&mut ws).await.unwrap();

@@ -2,7 +2,7 @@
 
 ## State commitment
 
-Block states are not committed in a Merke-Patricia trie or a similar tree-like structure. Block roots are therefore set to 0.
+Block states are not committed in a Merkle-Patricia trie or a similar tree-like structure. Block roots are therefore set to 0.
 
 ## Genesis block
 
@@ -18,9 +18,9 @@ If you start Devnet with `--block-generation-on transaction`, a new block is gen
 
 ## Creating blocks on demand
 
-If you start Devnet with the `--block-generation-on demand` CLI option, you will enable the possibility to store more than one transaction in the pre-confirmed block (targetable via block tag `"pre_confirmed"`).
+If you start Devnet with `--block-generation-on demand`, transactions execute immediately and accumulate in the pre-confirmed block (targetable via block tag `"pre_confirmed"`). State updates, receipts, and traces are available before sealing, and transactions have finality status `PRE_CONFIRMED`.
 
-Once you've added the desired transactions into the pre-confirmed block, you can [request new block creation](#request-new-block-creation). This will convert the pre-confirmed block to the latest block (targetable via block tag `"latest"`), giving it a block hash and a block number. All subsequent transactions will be stored in a new pre-confirmed block.
+Once you've added the desired transactions into the pre-confirmed block, you can [request new block creation](#request-new-block-creation). This will convert the pre-confirmed block to the latest block (targetable via block tag `"latest"`), giving it a block hash and finality status `ACCEPTED_ON_L2`. Its block number was already assigned while pre-confirmed. All subsequent transactions execute in a new pre-confirmed block.
 
 In case of demanding block creation with no pre-confirmed transactions, a new empty block will be generated.
 
@@ -28,27 +28,9 @@ The creation of the genesis block is not affected by this feature.
 
 The specifications of a block-creating request can be found [below](#request-new-block-creation).
 
-## Building blocks from the mempool
-
-Start Devnet with `--block-generation-on mempool` to keep submitted transactions in `RECEIVED` status until they are explicitly selected and executed. The live pre-confirmed block grows as selected transactions execute successfully; transactions that have not been selected do not affect state, block contents, receipts, or traces.
-
-```bash
-$ starknet-devnet --block-generation-on mempool
-```
-
-Use `--mempool-ordering fifo|starknet|random` to choose the ordering policy. Random ordering is deterministic and can be configured with `--mempool-random-seed`; otherwise it uses the Devnet seed. `--mempool-max-transactions-per-block` sets the positive block capacity and defaults to 500. These options and their equivalent `MEMPOOL_*` environment variables are accepted in every block-generation mode, but affect selection only in mempool mode.
-
-Eligible system-lane transactions are always selected FIFO before a user ordering policy is consulted. User selection proceeds in transient rounds of up to 100 transactions: each round snapshots the currently nonce-eligible account heads, so a successor exposed by execution enters the next round instead of overtaking heads already in the snapshot. The `fifo` policy selects the oldest head in the round. The `starknet` policy considers only heads whose maximum L2 gas price meets the active proposal's L2 gas price, ordering them by descending tip and then descending transaction hash; underpriced transactions remain received. The `random` policy chooses deterministically from the round. A transaction with a nonce gap stays received until an earlier transaction for its account executes.
-
-The mempool can be inspected and manipulated through [Devnet's mempool methods](./mempool). `devnet_preconfirmTransactions` selects and executes without sealing. In mempool mode, `devnet_createBlock` fills the current proposal according to policy and then seals it, while `devnet_sealBlock` strictly seals only transactions that are already pre-confirmed.
-
 ## Automatic periodic block creation
 
-The bare numeric `--block-generation-on <INTERVAL>` form enables periodic sealing. Transactions are executed and pre-confirmed immediately, exactly as in [`demand` mode](#creating-blocks-on-demand); the timer seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer.
-
-Use [`mempool` mode](#building-blocks-from-the-mempool) when transaction selection and ordering must be explicit. Use interval mode when transactions should execute immediately while blocks are sealed on a fixed cadence.
-
-Consider this example of spawning Devnet at moment `t`:
+The bare numeric `--block-generation-on <INTERVAL>` form enables periodic sealing. Transactions execute and become pre-confirmed immediately, as in [`demand` mode](#creating-blocks-on-demand); the timer seals the current pre-confirmed block every `<INTERVAL>` seconds, including when it is empty. Manual block creation does not restart the timer. Consider this example of spawning Devnet at moment `t`:
 
 ```bash
 # t
@@ -93,26 +75,7 @@ Result:
 {"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
 ```
 
-In `transaction`, `demand`, and interval modes, the newly created block contains all pre-confirmed transactions, if any, since the last block creation. In mempool mode, this method first selects and pre-confirms transactions until the block is full or no eligible transaction remains, and then seals it. It creates an empty block if there are no transactions to include.
-
-## Strictly seal the pre-confirmed block
-
-`devnet_sealBlock` converts exactly the current pre-confirmed block to `ACCEPTED_ON_L2` without selecting any received mempool transactions. It can create an empty block.
-
-```
-JSON-RPC
-{
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_sealBlock"
-}
-```
-
-The result has the same shape as `devnet_createBlock`:
-
-```
-{"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
-```
+The newly created block will contain all pre-confirmed transactions, if any, since the last block creation.
 
 ## Timestamp manipulation
 
@@ -138,7 +101,7 @@ Assume there are 3 accepted blocks numbered 1, 2 and 3. Upon receiving a request
 
 ### Limitations
 
-Aborted blocks can only be queried by block hash. Devnet does not support the abortion of:
+Aborted local blocks and their transactions are no longer available through block, receipt, or transaction-status queries. Devnet does not support the abortion of:
 
 - blocks in the forking origin (i.e. blocks mined before the forked block)
 - already aborted blocks
@@ -146,7 +109,7 @@ Aborted blocks can only be queried by block hash. Devnet does not support the ab
 
 ### Websocket subscription notifications
 
-On block abortion, a `starknet_subscriptionReorg` notification will be sent to all websocket subscribers requiring so according to [JSON-RPC websocket API specification](https://github.com/starkware-libs/starknet-specs/blob/v0.8.0/api/starknet_ws_api.json#L236). The `starting_block` of the orphaned chain is the successor of the new latest block and the `ending_block` of the orphaned chain is the block that was latest before aborting. One reorg notification is sent per subscription, not per websocket, meaning that if a websocket has n subscriptions, it will receive n reorg notifications, each with its own subscription ID.
+On block abortion, a `starknet_subscriptionReorg` notification will be sent to all websocket subscribers requiring so according to [JSON-RPC websocket API specification](https://github.com/starkware-libs/starknet-specs/blob/v0.10.2/api/starknet_ws_api.json). The `starting_block` of the orphaned chain is the successor of the new latest block and the `ending_block` of the orphaned chain is the block that was latest before aborting. One reorg notification is sent per subscription, not per websocket, meaning that if a websocket has n subscriptions, it will receive n reorg notifications, each with its own subscription ID.
 
 If a socket has subscribed to transaction status changes of a transaction `tx1` using `starknet_subscribeTransactionStatus` and the block holding `tx1` gets aborted, a `starknet_subscriptionTransactionStatus` notification shall NOT be sent. The socket shall have to rely on handling `starknet_subscriptionReorg`.
 

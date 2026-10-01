@@ -21,7 +21,7 @@ If in the past you installed [Pythonic Devnet](https://github.com/starknet-io/st
 ### Install from crates.io
 
 ```
-$ cargo install starknet-devnet
+$ cargo install starknet-devnet --locked
 ```
 
 ### Install from GitHub
@@ -44,7 +44,7 @@ $ asdf plugin add starknet-devnet
 - Show all installable versions:
 
 ```
-$ asdf list-all starknet-devnet
+$ asdf list all starknet-devnet
 ```
 
 - Install latest version:
@@ -59,7 +59,9 @@ $ asdf install starknet-devnet latest
 $ asdf install starknet-devnet 0.2.0
 ```
 
-Check [asdf guide](https://asdf-vm.com/guide/getting-started.html) for more instructions on how to install & manage versions.
+Select an installed version for the current directory with `asdf set starknet-devnet <VERSION>`, or add `--home` to select it in your home configuration.
+
+Check the [asdf installation guide](https://asdf-vm.com/guide/getting-started.html) and [version guide](https://asdf-vm.com/manage/versions.html) for more instructions.
 
 ### Install with starkup
 
@@ -92,7 +94,7 @@ $ <TARGET_DIR>/starknet-devnet
 
 ## Run from source
 
-To install the project from source, after [git-cloning](https://github.com/git-guides/git-clone) the [Devnet repository](https://github.com/starknet-io/starknet-devnet), running the following command will install, build and start Devnet:
+After [git-cloning](https://github.com/git-guides/git-clone) the [Devnet repository](https://github.com/starknet-io/starknet-devnet), run the following command from its root to build and start Devnet. `cargo run` does not install the executable into `~/.cargo/bin/`:
 
 ```
 $ cargo run

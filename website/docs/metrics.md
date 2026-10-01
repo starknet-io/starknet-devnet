@@ -93,7 +93,7 @@ histogram_quantile(0.95, sum by (le) (rate(devnet_lifecycle_lock_hold_seconds_bu
 
 **Description:** Current number of retained transactions in Starknet
 
-This gauge reports transactions currently retained by Devnet, including pre-confirmed transactions and excluding received-only mempool entries. It is updated when state is restarted, aborted, or restored from a snapshot.
+This gauge reports transactions currently retained by Devnet, including pre-confirmed transactions. It is updated when state is restarted, aborted, or restored from a snapshot.
 
 #### `starknet_block_count`
 
@@ -141,6 +141,10 @@ These metrics are only relevant when running Devnet in [forking mode](./forking.
 - `method`: The RPC method called on the upstream network
 - `status`: Either `success` or `error`
 
+#### Fork cache metrics
+
+`starknet_upstream_cache_hit_count` and `starknet_upstream_cache_miss_count` are counters labelled by `method`. `starknet_upstream_cache_size` is a gauge reporting the number of entries in the global fork cache. These metrics are not reset by snapshot restoration.
+
 These metrics help monitor the performance and reliability of interactions with the forked network.
 
 ## Integrating with Prometheus
@@ -175,7 +179,7 @@ rate(rpc_call_count[5m])
 ### RPC error rate
 
 ```promql
-rate(rpc_call_count{status="error"}[5m]) / rate(rpc_call_count[5m])
+sum by (method) (rate(rpc_call_count{status="error"}[5m])) / sum by (method) (rate(rpc_call_count[5m]))
 ```
 
 ### Current block count
@@ -193,7 +197,7 @@ starknet_transaction_count
 ### Upstream call error rate (forking mode)
 
 ```promql
-rate(starknet_upstream_call_count{status="error"}[5m]) / rate(starknet_upstream_call_count[5m])
+sum by (method) (rate(starknet_upstream_call_count{status="error"}[5m])) / sum by (method) (rate(starknet_upstream_call_count[5m]))
 ```
 
 ### 95th percentile block creation time

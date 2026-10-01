@@ -1,7 +1,3 @@
-use starknet_core::starknet::mempool::{
-    BuildFailure, ForcedHashSelection, MempoolConfig, MempoolConfigUpdate, MempoolPhase,
-    MempoolSelection,
-};
 use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_rs_core::types::TransactionExecutionStatus;
 use starknet_types::contract_address::ContractAddress;
@@ -24,14 +20,10 @@ use super::models::{
 use crate::api::JsonRpcHandler;
 use crate::api::account_helpers::{get_balance, get_erc20_fee_unit_address};
 use crate::api::models::{
-    AbortedBlocks, AbortedPreconfirmedBlockResponse, AbortingBlocks, AcceptOnL1Request,
-    AcceptedOnL1Blocks, ClearedMempoolResponse, CreatedBlock, DumpRequest, FlushParameters,
-    FlushedMessages, GetMempoolRequest, IncreaseTime, IncreaseTimeResponse, LoadRequest,
-    MempoolConfigResponse, MempoolProcessingFailure, MempoolResponse, MempoolTransactionPhase,
-    MempoolTransactionResponse, MessageHash, MessagingLoadAddress, MintTokensRequest,
-    MintTokensResponse, PostmanLoadL1MessagingContract, PreconfirmTransactionsRequest,
-    PreconfirmTransactionsResponse, RemovedFromMempoolResponse, RestartParameters, RevertRequest,
-    SetMempoolConfigRequest, SetTime, SetTimeResponse,
+    AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock,
+    DumpRequest, FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, LoadRequest,
+    MessageHash, MessagingLoadAddress, MintTokensRequest, MintTokensResponse,
+    PostmanLoadL1MessagingContract, RestartParameters, RevertRequest, SetTime, SetTimeResponse,
 };
 use crate::dump_util::{clear_dump_file, dump_events, read_events, replace_dump_events};
 use crate::rpc_core::error::RpcError;
@@ -341,97 +333,10 @@ impl JsonRpcHandler {
     pub async fn create_block(&self) -> StrictRpcResult {
         let mut starknet = self.api.starknet.lock().await;
 
-        let block_hash = starknet.create_block_strict()?;
+        starknet.create_block();
+        let block = starknet.get_latest_block()?;
 
-        Ok(DevnetResponse::CreatedBlock(CreatedBlock { block_hash }).into())
-    }
-
-    /// devnet_getMempool
-    pub async fn get_mempool(&self, request: GetMempoolRequest) -> StrictRpcResult {
-        let starknet = self.api.starknet.lock().await;
-        let mempool = starknet.mempool();
-        let transactions = mempool
-            .entries()
-            .map(|(transaction_hash, entry)| MempoolTransactionResponse {
-                transaction_hash: *transaction_hash,
-                status: entry.phase.into(),
-                arrival_id: entry.arrival_id,
-                sender_address: entry.account_address,
-                nonce: entry.nonce.map(|nonce| nonce.0),
-                tip: entry.tip.into(),
-                transaction: request.include_transactions.then(|| entry.transaction.clone()),
-            })
-            .collect();
-
-        Ok(DevnetResponse::Mempool(MempoolResponse {
-            config: mempool.config().into(),
-            transactions,
-            pre_confirmed_transaction_hashes: mempool.proposal_hashes().to_vec(),
-            remaining_block_capacity: mempool.remaining_capacity(),
-        })
-        .into())
-    }
-
-    /// devnet_removeFromMempool
-    pub async fn remove_from_mempool(&self, transaction_hash: TransactionHash) -> StrictRpcResult {
-        self.api.starknet.lock().await.remove_from_mempool(transaction_hash)?;
-        Ok(DevnetResponse::RemovedFromMempool(RemovedFromMempoolResponse { transaction_hash })
-            .into())
-    }
-
-    /// devnet_clearMempool
-    pub async fn clear_mempool(&self) -> StrictRpcResult {
-        let removed = self.api.starknet.lock().await.clear_mempool();
-        Ok(DevnetResponse::ClearedMempool(ClearedMempoolResponse { removed }).into())
-    }
-
-    /// devnet_preconfirmTransactions
-    pub async fn preconfirm_transactions(
-        &self,
-        request: PreconfirmTransactionsRequest,
-    ) -> StrictRpcResult {
-        request.validate().map_err(|msg| ApiError::UnsupportedAction { msg: msg.into() })?;
-
-        let selection = match request.transaction_hashes {
-            Some(hashes) => MempoolSelection::Hashes(ForcedHashSelection {
-                transaction_hashes: hashes,
-                swept_stale_hashes: request.swept_stale_hashes.unwrap_or_default(),
-            }),
-            None => MempoolSelection::Policy { max_transactions: request.max_transactions },
-        };
-        let outcome = self.api.starknet.lock().await.preconfirm_transactions(selection)?;
-        Ok(DevnetResponse::PreconfirmedTransactions(PreconfirmTransactionsResponse {
-            selected: outcome.selected,
-            pre_confirmed: outcome.pre_confirmed,
-            rejected: outcome.rejected.into_iter().map(Into::into).collect(),
-            blocked: outcome.blocked.into_iter().map(Into::into).collect(),
-            block_full: outcome.block_full,
-            swept_stale_hashes: outcome.swept_stale_hashes,
-        })
-        .into())
-    }
-
-    /// devnet_setMempoolConfig
-    pub async fn set_mempool_config(&self, request: SetMempoolConfigRequest) -> StrictRpcResult {
-        let config = self.api.starknet.lock().await.set_mempool_config(MempoolConfigUpdate {
-            ordering: request.ordering,
-            random_seed: request.random_seed,
-            max_transactions_per_block: request.max_transactions_per_block,
-        })?;
-        Ok(DevnetResponse::MempoolConfig((&config).into()).into())
-    }
-
-    /// devnet_sealBlock
-    pub async fn seal_block(&self) -> StrictRpcResult {
-        let block_hash = self.api.starknet.lock().await.seal_block();
-        Ok(DevnetResponse::CreatedBlock(CreatedBlock { block_hash }).into())
-    }
-
-    /// devnet_abortPreconfirmedBlock
-    pub async fn abort_preconfirmed_block(&self) -> StrictRpcResult {
-        let requeued = self.api.starknet.lock().await.abort_preconfirmed_block()?;
-        Ok(DevnetResponse::AbortedPreconfirmedBlock(AbortedPreconfirmedBlockResponse { requeued })
-            .into())
+        Ok(DevnetResponse::CreatedBlock(CreatedBlock { block_hash: block.block_hash() }).into())
     }
 
     /// devnet_abortBlocks
@@ -537,8 +442,8 @@ impl JsonRpcHandler {
         let tx_hash = starknet.mint(request.address, request.amount, erc20_address).await?;
 
         let tx = starknet.get_transaction_execution_and_finality_status(tx_hash)?;
-        match tx.execution_status() {
-            Some(TransactionExecutionStatus::Succeeded) => {
+        match tx.execution_status {
+            TransactionExecutionStatus::Succeeded => {
                 let new_balance = get_balance(
                     &mut starknet,
                     request.address,
@@ -550,9 +455,9 @@ impl JsonRpcHandler {
                 Ok(DevnetResponse::MintTokens(MintTokensResponse { new_balance, unit, tx_hash })
                     .into())
             }
-            Some(TransactionExecutionStatus::Reverted) => Err(ApiError::MintingReverted {
+            TransactionExecutionStatus::Reverted => Err(ApiError::MintingReverted {
                 tx_hash,
-                revert_reason: tx.failure_reason().map(|reason| {
+                revert_reason: tx.failure_reason.as_deref().map(|reason| {
                     if reason.contains("u256_add Overflow") {
                         "The requested minting amount overflows the token contract's total_supply."
                             .into()
@@ -560,9 +465,6 @@ impl JsonRpcHandler {
                         reason.to_string()
                     }
                 }),
-            }),
-            None => Err(ApiError::UnsupportedAction {
-                msg: "Mint transaction has not been executed".into(),
             }),
         }
     }
@@ -580,32 +482,6 @@ fn parse_snapshot_id(value: &str) -> Result<u64, ApiError> {
     u64::from_str_radix(digits, 16).map_err(|_| {
         ApiError::RpcError(RpcError::invalid_params("snapshot_id is outside the u64 range"))
     })
-}
-
-impl From<&MempoolConfig> for MempoolConfigResponse {
-    fn from(config: &MempoolConfig) -> Self {
-        Self {
-            ordering: config.ordering.clone(),
-            random_seed: config.random_seed,
-            max_transactions_per_block: config.max_transactions_per_block,
-        }
-    }
-}
-
-impl From<MempoolPhase> for MempoolTransactionPhase {
-    fn from(value: MempoolPhase) -> Self {
-        match value {
-            MempoolPhase::Received => Self::Received,
-            MempoolPhase::Candidate => Self::Candidate,
-            MempoolPhase::PreConfirmed => Self::PreConfirmed,
-        }
-    }
-}
-
-impl From<BuildFailure> for MempoolProcessingFailure {
-    fn from(failure: BuildFailure) -> Self {
-        Self { transaction_hash: failure.transaction_hash, reason: failure.reason }
-    }
 }
 
 async fn execute_rpc_tx(

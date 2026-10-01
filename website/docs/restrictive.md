@@ -1,10 +1,10 @@
 # Restrictive mode
 
-The `--restrictive-mode` argument enables a restrictive mode for Devnet, allowing you to specify methods that are forbidden during execution. This option ensures that certain operations are restricted, enhancing control over Devnet's behavior. When a user sends a request to one of the restricted methods, Devnet will return either a JSON-RPC error with code -32604 or, if the method was targeted directly via the HTTP endpoint, a response with status 403.
+The `--restrictive-mode` argument enables a restrictive mode for Devnet, allowing you to specify methods that are forbidden during execution. This option ensures that certain operations are restricted, enhancing control over Devnet's behavior. When a user sends a request to one of the restricted methods, Devnet returns a JSON-RPC error with code `-32604` over both HTTP and WebSocket.
 
 ## Default restricted methods
 
-When no methods are specified, the following default methods will be restricted, together with their HTTP endpoint counterparts (if any):
+When no methods are specified, the following JSON-RPC methods are restricted:
 
 - devnet_mint
 - devnet_load
@@ -12,18 +12,10 @@ When no methods are specified, the following default methods will be restricted,
 - devnet_revert
 - devnet_restart
 - devnet_createBlock
-- devnet_sealBlock
-- devnet_removeFromMempool
-- devnet_clearMempool
-- devnet_preconfirmTransactions
-- devnet_setMempoolConfig
-- devnet_abortPreconfirmedBlock
 - devnet_abortBlocks
 - devnet_impersonateAccount
 - devnet_autoImpersonate
 - devnet_getPredeployedAccounts
-
-`devnet_getMempool` is read-only and is not restricted by default.
 
 ## Usage
 
@@ -37,10 +29,10 @@ $ starknet-devnet --restrictive-mode
 
 :::note
 
-Devnet will fail to start if any of the methods/routes are misspelled.
+Devnet will fail to start if any of the methods are misspelled.
 
 :::
 
 ```
-$ starknet-devnet --restrictive-mode devnet_dump devnet_config
+$ starknet-devnet --restrictive-mode devnet_dump devnet_getConfig
 ```
