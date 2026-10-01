@@ -256,6 +256,13 @@ impl JsonRpcHandler {
                 Ok(block) => Ok((block.block_number.0, None)),
                 Err(ApiError::BlockNotFound) if self.origin_caller.is_some() => {
                     let origin_header = self.get_origin_block_header_by_id(block_id).await?;
+                    if matches!(block_id, BlockId::Hash(_))
+                        && self.origin_caller.as_ref().is_some_and(|origin| {
+                            origin_header.block_number.0 > origin.fork_block_number()
+                        })
+                    {
+                        return Err(ApiError::BlockNotFound);
+                    }
                     Ok((origin_header.block_number.0, Some(origin_header)))
                 }
                 Err(other) => Err(other),

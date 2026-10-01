@@ -546,6 +546,23 @@ impl JsonRpcHandler {
                 .iter()
                 .find_map(|(id, number)| (*id == block_id).then_some(*number))
         };
+        // Validate both hashes before selecting a local-only range or resolving moving tags.
+        // An origin hash after the fork must never select a local block at the same height.
+        for block_id in [from_block, to_block].into_iter().flatten() {
+            if matches!(block_id, BlockId::Hash(_)) && starknet.get_block(&block_id).is_err() {
+                match origin_block_number(block_id) {
+                    Some(number) if number > fork_block_number => {
+                        // Make this a final RPC error so origin fallback cannot bypass the
+                        // boundary check and return events from the discarded origin branch.
+                        return Err(ApiError::RpcError(
+                            ApiError::BlockNotFound.api_error_to_rpc_error(),
+                        ));
+                    }
+                    Some(_) => (),
+                    None => return Ok(EventBlockRange::OriginBlock(block_id)),
+                }
+            }
+        }
         // Consult the live overlay again after origin I/O, since a concurrent revert can change it.
         let accepted_on_l1_through = origin_caller.acceptance_boundary().await;
         let resolved_number = |block_id| {
