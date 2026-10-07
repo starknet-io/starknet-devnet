@@ -60,11 +60,6 @@ async fn test_config() {
             "ui_enabled": false,
         },
         "block_generation_on": "demand",
-        "mempool_config": {
-            "ordering": "random",
-            "random_seed": 11,
-            "max_transactions_per_block": 12,
-        },
         "lite_mode": false,
         "proof_mode": "devnet",
         "eth_erc20_class_hash": to_hex_felt(&ETH_ERC20_CONTRACT_CLASS_HASH),
@@ -105,12 +100,6 @@ async fn test_config() {
         expected_config["dump_path"].as_str().unwrap(),
         "--block-generation-on",
         "demand",
-        "--mempool-ordering",
-        expected_config["mempool_config"]["ordering"].as_str().unwrap(),
-        "--mempool-random-seed",
-        &expected_config["mempool_config"]["random_seed"].to_string(),
-        "--mempool-max-transactions-per-block",
-        &expected_config["mempool_config"]["max_transactions_per_block"].to_string(),
         "--state-archive-capacity",
         expected_config["state_archive"].as_str().unwrap(),
         "--host",
@@ -180,4 +169,49 @@ async fn predeployed_erc20_tokens_return_expected_values_from_property_getters()
         assert_eq!(actual_felts.len(), 3);
         assert_eq!(parse_cairo_short_string(&actual_felts[1]).unwrap(), expected_value);
     }
+}
+
+#[tokio::test]
+async fn mempool_methods_are_unavailable() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    for method in [
+        "devnet_getMempool",
+        "devnet_removeFromMempool",
+        "devnet_clearMempool",
+        "devnet_setMempoolConfig",
+        "devnet_preconfirmTransactions",
+        "devnet_sealBlock",
+        "devnet_abortPreconfirmedBlock",
+    ] {
+        let error = devnet.send_custom_rpc(method, json!([])).await.unwrap_err();
+        assert_eq!(error.code, -32601, "unexpected error for {method}: {error:?}");
+    }
+    assert!(devnet.get_config().await.get("mempool_config").is_none());
+}
+
+#[tokio::test]
+async fn interval_mode_seals_periodically() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "1"])
+        .await
+        .unwrap();
+    assert_eq!(
+        devnet.get_config().await["block_generation_on"],
+        serde_json::json!({"interval": 1})
+    );
+    let transaction_hash = devnet.mint(Felt::ONE, 1).await;
+    for _ in 0..30 {
+        let status = devnet
+            .send_custom_rpc(
+                "starknet_getTransactionStatus",
+                json!({ "transaction_hash": transaction_hash }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["execution_status"], "SUCCEEDED");
+        if status["finality_status"] == "ACCEPTED_ON_L2" {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    panic!("Interval(1) did not seal the submitted transaction");
 }

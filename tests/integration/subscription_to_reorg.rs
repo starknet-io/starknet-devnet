@@ -12,7 +12,7 @@ use crate::common::utils::{
 
 #[tokio::test]
 async fn snapshot_revert_reports_restored_preconfirmed_status_after_reorg() {
-    for mode in ["demand", "mempool"] {
+    for mode in ["demand", "60"] {
         let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", mode])
             .await
             .unwrap();

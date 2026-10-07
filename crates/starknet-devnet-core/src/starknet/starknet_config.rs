@@ -49,7 +49,6 @@ pub enum BlockGenerationOn {
     Transaction,
     Demand,
     Interval(u64),
-    Mempool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -76,7 +75,6 @@ impl std::str::FromStr for BlockGenerationOn {
         match s {
             "transaction" => Ok(BlockGenerationOn::Transaction),
             "demand" => Ok(BlockGenerationOn::Demand),
-            "mempool" => Ok(BlockGenerationOn::Mempool),
             value => {
                 let interval_value = value
                     .parse::<u64>()
@@ -149,7 +147,6 @@ pub struct StarknetConfig {
     pub dump_on: Option<DumpOn>,
     pub dump_path: Option<String>,
     pub block_generation_on: BlockGenerationOn,
-    pub mempool_config: super::mempool::MempoolConfig,
     pub lite_mode: bool,
     pub proof_mode: ProofMode,
     pub state_archive: StateArchiveCapacity,
@@ -167,30 +164,10 @@ pub struct StarknetConfig {
 
 impl StarknetConfig {
     pub fn uses_pre_confirmed_block(&self) -> bool {
-        !self.seals_on_submission()
-    }
-
-    pub fn executes_on_submission(&self) -> bool {
-        !matches!(self.block_generation_on, BlockGenerationOn::Mempool)
-    }
-
-    pub fn seals_on_submission(&self) -> bool {
-        matches!(self.block_generation_on, BlockGenerationOn::Transaction)
-    }
-
-    pub fn requires_strict_nonce_check(&self) -> bool {
-        !matches!(self.block_generation_on, BlockGenerationOn::Transaction)
-    }
-
-    pub fn block_sealing_interval_seconds(&self) -> Option<u64> {
         match self.block_generation_on {
-            BlockGenerationOn::Interval(seconds) => Some(seconds),
-            _ => None,
+            BlockGenerationOn::Transaction => false,
+            BlockGenerationOn::Demand | BlockGenerationOn::Interval(_) => true,
         }
-    }
-
-    pub fn uses_manual_mempool(&self) -> bool {
-        matches!(self.block_generation_on, BlockGenerationOn::Mempool)
     }
 }
 
@@ -220,10 +197,6 @@ impl Default for StarknetConfig {
             dump_on: None,
             dump_path: None,
             block_generation_on: BlockGenerationOn::Transaction,
-            mempool_config: super::mempool::MempoolConfig {
-                random_seed: DEVNET_DEFAULT_TEST_SEED.into(),
-                ..Default::default()
-            },
             lite_mode: false,
             proof_mode: ProofMode::Devnet,
             state_archive: StateArchiveCapacity::default(),

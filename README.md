@@ -27,7 +27,7 @@ A local testnet for Starknet... in Rust!
 - [Predeployed contracts](https://starknet-io.github.io/starknet-devnet/docs/predeployed) - accounts, tokens etc.
 - [Block manipulations](https://starknet-io.github.io/starknet-devnet/docs/blocks) - creation, abortion etc.
 - [Time manipulations](https://starknet-io.github.io/starknet-devnet/docs/starknet-time/)
-- [Dump, load, restart state](https://starknet-io.github.io/starknet-devnet/docs/dump-load-restart)
+- [Snapshots, dump, load, restart state](https://starknet-io.github.io/starknet-devnet/docs/dump-load-restart)
 - [Configurable according to your needs](https://starknet-io.github.io/starknet-devnet/docs/running/cli)
 
 ## 🌐 Documentation
@@ -51,4 +51,4 @@ Simplify the installation, spawning and usage of Devnet in your tests by relying
 
 We ❤️ and encourage all contributions and thank all the [contributors](https://github.com/starknet-io/starknet-devnet/graphs/contributors)!
 
-Start with the [contribution guide](.github/CONTRIBUTING.md). Contributors using coding agents should also follow the repository [agent guide](AGENTS.md), which describes the toolchain, generated assets, and validation commands. Run `./scripts/verify.sh` for the standard local validation workflow.
+Start with the [contribution guide](.github/CONTRIBUTING.md). Contributors using coding agents should also follow the repository [agent guide](AGENTS.md), which describes the toolchain, generated assets, and validation commands. Run focused checks and affected test modules while developing. `./scripts/verify.sh` provides broader local validation; automated contributors should follow the focused-check guidance in `AGENTS.md`.

@@ -13,36 +13,37 @@ By sending a `JSON-RPC` request with method name `devnet_mint` for a token, you 
 
 The value of `amount` is in WEI or FRI. The precision is preserved if specifying an integer or a float whose fractional part is zero (e.g. `1000.0`, `1e21`). If the fractional part is non-zero, the amount is truncated to the nearest integer (e.g. `3.9` becomes `3` and `1.23e1` becomes `12`).
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_mint",
-    "params": {
-        "address": "0x6e3205f...",
-        "amount": 500000,
-        "unit": "WEI" | "FRI"
-    }
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_mint",
+  "params": {
+    "address": "0x123",
+    "amount": 500000,
+    "unit": "FRI"
+  }
 }
 ```
 
 Result:
 
-```
+```json
 {
-    "new_balance": 500000,
-    "unit": "WEI" | "FRI",
-    "tx_hash": "0xa24f23..."
+  "new_balance": "500000",
+  "unit": "FRI",
+  "tx_hash": "0x17b29c2e28926d8020e865a5002cca46d194f3af99e0b75973acd52c43e0514"
 }
 ```
 
-In case of a reverted minting request, an error is returned containing the stringified revert reason and the hex string of the hash of the reverted transaction for further inspection:
+Set `unit` to `WEI` to mint ETH instead. In demand and interval modes, minting executes immediately in the pre-confirmed block; query the balance at `"pre_confirmed"` to see the update before sealing. A balance query at `"latest"` sees it after block creation. `new_balance` is a decimal string. The example result assumes the address started with zero STRK balance.
 
-```
+In case of a reverted minting request, the error response contains `error.data` with the stringified revert reason and the hex string of the hash of the reverted transaction for further inspection:
+
+```json
 {
-    "tx_hash": "0x123..."
-    "revert_reason": "Something happened"
+  "tx_hash": "0x123",
+  "revert_reason": "Something happened"
 }
 ```
 
@@ -50,16 +51,15 @@ In case of a reverted minting request, an error is returned containing the strin
 
 Check the balance of an address by sending a `JSON-RPC` request. The address should be a 0x-prefixed hex string; `unit` defaults to `FRI` (the unit of `STRK`) and `block_id` to `latest`.
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_getAccountBalance",
-    "params": {
-        "address": "0x6e3205f...",
-        "unit": "WEI" | "FRI",
-        "block_id": <BLOCK_ID>
-    }
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_getAccountBalance",
+  "params": {
+    "address": "0x123",
+    "unit": "FRI",
+    "block_id": "pre_confirmed"
+  }
 }
 ```

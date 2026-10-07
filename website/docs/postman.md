@@ -17,15 +17,12 @@ You can use [**`starknet-devnet-js`**](https://github.com/starknet-io/starknet-d
 ## Load
 
 ```json
-// JSON-RPC
 {
   "jsonrpc": "2.0",
   "id": "1",
   "method": "devnet_postmanLoad",
   "params": {
-    "network_url": "http://localhost:8545",
-    "messaging_contract_address": "0x123...def", // optional
-    "deployer_account_private_key": "0xe2ac...583f" // optional
+    "network_url": "http://localhost:8545"
   }
 }
 ```
@@ -48,7 +45,7 @@ Here's how the rest of the parameters should be used, depending on your L1 netwo
 
 - If your L1 network already has a messaging contract deployed that you wish to use, populate `messaging_contract_address` with its address.
   - The provided address shall be checked by asserting that there indeed is contract code deployed at that address, without any ABI assertions.
-- If your L1 network does not have such a contract, or you simplify wish to deploy a new instance, leave out the `messaging_contract_address` property.
+- If your L1 network does not have such a contract, or you simply wish to deploy a new instance, leave out the `messaging_contract_address` property.
   - If your L1 network is a local testnet (e.g. Anvil) with the default mnemonic seed and a default set of predeployed accounts, you don't have to specify anything else—a new messaging contract shall be deployed using a predeployed account.
   - Otherwise (e.g. on the Sepolia testnet or an Anvil with a custom mnemonic seed) you are expected to populate `deployer_account_private_key` with the private key of a funded account. This property is not applicable if `messaging_contract_address` is specified.
 
@@ -69,24 +66,22 @@ Loading a messaging contract is a dumpable event, meaning that, if you've enable
 
 ## Flush
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_postmanFlush"
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_postmanFlush"
 }
 ```
 
-Goes through the newly enqueued messages since the last flush, consuming and sending them from L1 to L2 and from L2 to L1. Use it for end-to-end testing. Requires no body. Optionally, set the `dry_run` boolean flag to just see the result of flushing, without actually triggering it:
+Goes through the newly enqueued messages since the last flush, consuming and sending them from L1 to L2 and from L2 to L1. Use it for end-to-end testing. It accepts no parameters by default. With `dry_run: true`, it collects pending L2->L1 messages without sending them to L1; it does not fetch or execute L1->L2 messages. The result has empty `messages_to_l2` and `generated_l2_transactions` arrays, and `l1_provider` is `"dry run"`:
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_postmanFlush",
-    "params": { "dry_run": true }
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_postmanFlush",
+  "params": { "dry_run": true }
 }
 ```
 
@@ -132,62 +127,64 @@ The L2 target entrypoint must be an `l1_handler`.
 
 :::
 
-Sends a mock transactions to L2, as if coming from L1, without the need for running L1. The target L2 contract's address must be provided to `l2_contract_address` and the `entry_point_selector` must refer to a public method of the target contract. The method must be annotated with `l1_handler`, otherwise an `ENTRYPOINT_NOT_FOUND` error may be returned. The `l1_transaction_hash` property is optional and, if provided, enables future `starknet_getMessagesStatus` requests with that hash value provided.
+Sends a mock transaction to L2, as if coming from L1, without the need for running L1. The target L2 contract's address must be provided to `l2_contract_address` and the `entry_point_selector` must refer to a public method of the target contract. The method must be annotated with `l1_handler`, otherwise an `ENTRYPOINT_NOT_FOUND` error may be returned. The `l1_transaction_hash` property is optional and, if provided, enables future `starknet_getMessagesStatus` requests with that hash value provided.
 
 In regular (non-mocking) L1-L2 interaction, `nonce` is determined by the L1 Starknet contract. In this mock case, it is up to the developer to set it.
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_postmanSendMessageToL2",
-    "params": {
-      "l2_contract_address": "0x00285ddb7e5c777b310d806b9b2a0f7c7ba0a41f12b420219209d97a3b7f25b2",
-      "entry_point_selector": "0xC73F681176FC7B3F9693986FD7B14581E8D540519E27400E88B8713932BE01",
-      "l1_contract_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-      "payload": [ "0x1", "0x2" ],
-      "paid_fee_on_l1": "0x123456abcdef",
-      "nonce": "0x0",
-      "l1_transaction_hash": "0x000abc123", // optional
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_postmanSendMessageToL2",
+  "params": {
+    "l2_contract_address": "0x00285ddb7e5c777b310d806b9b2a0f7c7ba0a41f12b420219209d97a3b7f25b2",
+    "entry_point_selector": "0xC73F681176FC7B3F9693986FD7B14581E8D540519E27400E88B8713932BE01",
+    "l1_contract_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "payload": ["0x1", "0x2"],
+    "paid_fee_on_l1": "0x123456abcdef",
+    "nonce": "0x0",
+    "l1_transaction_hash": "0x0000000000000000000000000000000000000000000000000000000000abc123"
   }
 }
 ```
 
 Result:
 
-```js
-{ "transaction_hash": "0x0548c761a9fd5512782998b2da6f44c42bf78fb88c3794eea330a91c9abb10bb" }
+```json
+{
+  "transaction_hash": "0x0548c761a9fd5512782998b2da6f44c42bf78fb88c3794eea330a91c9abb10bb"
+}
 ```
 
 ### L2->L1
 
-Sends a mock transaction from L2 to L1. The deployed L2 contract address `from_address` and `to_address` must be valid.
+Consumes a message emitted by a local L2 transaction, without sending it to L1. `from_address`, `to_address`, and `payload` must match that emitted message. This lets you verify L2->L1 messaging without running an L1 node.
 
-It is a mock message, but only in the sense that you are mocking an L2 contract's action, which would normally be triggered by invoking the contract via a transaction. So keep in mind the following:
+The message must already exist in an accepted local block. In demand or interval modes, create a block before flushing or consuming messages from pre-confirmed transactions.
 
 :::note
 
-A running L1 node is required for this operation.
+A running L1 node is **not** required for this operation. Each matching emitted message can be consumed once; consuming it again returns an error unless another identical message was emitted.
 
 :::
 
-```
-JSON-RPC
+```json
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_postmanConsumeMessageFromL2",
-    "params": {
-      "from_address": "0x00285ddb7e5c777b310d806b9b2a0f7c7ba0a41f12b420219209d97a3b7f25b2",
-      "to_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-      "payload": ["0x0", "0x1", "0x3e8"],
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_postmanConsumeMessageFromL2",
+  "params": {
+    "from_address": "0x00285ddb7e5c777b310d806b9b2a0f7c7ba0a41f12b420219209d97a3b7f25b2",
+    "to_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "payload": ["0x0", "0x1", "0x3e8"]
   }
 }
 ```
 
 Result:
 
-```js
-{"message_hash": "0xae14f241131b524ac8d043d9cb4934253ac5c5589afef19f0d761816a9c7e26d"}
+```json
+{
+  "message_hash": "0xae14f241131b524ac8d043d9cb4934253ac5c5589afef19f0d761816a9c7e26d"
+}
 ```

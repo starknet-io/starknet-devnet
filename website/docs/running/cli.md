@@ -30,20 +30,6 @@ $ <VAR1>=<VALUE> <VAR2>=<VALUE> starknet-devnet
 
 To see the exact variable names, use [`--help`](#help).
 
-## Block building and mempool configuration
-
-`--block-generation-on transaction` executes and seals every submitted transaction immediately and remains the default. `demand` executes transactions into a live pre-confirmed block and seals only on request. `mempool` admits transactions as `RECEIVED` and waits for explicit [mempool and block-building requests](../mempool). A bare positive integer enables periodic sealing while transactions continue to execute and become pre-confirmed immediately.
-
-Configure manual mempool ordering and block capacity with:
-
-```bash
-$ starknet-devnet --block-generation-on mempool --mempool-ordering starknet --mempool-max-transactions-per-block 500
-```
-
-The available policies are `fifo`, `starknet`, and `random`. Use `--mempool-random-seed <SEED>` for reproducible random selection; it defaults to the Devnet account seed. Equivalent environment variables are `MEMPOOL_ORDERING`, `MEMPOOL_RANDOM_SEED`, and `MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK`.
-
-A bare positive integer `N` enables interval mode: transactions are pre-confirmed immediately and the current block is sealed every N seconds. Use `--block-generation-on mempool` instead when transaction selection and ordering should happen explicitly through mempool methods.
-
 ### Precedence
 
 If both a CLI argument and an environment variable are passed for a parameter, the CLI argument takes precedence. If none are provided, the default value is used. E.g. if running Devnet with the following command, seed value 42 will be used:
@@ -102,6 +88,16 @@ Then run:
 $ docker run --env-file .my-env-file starknetfoundation/starknet-devnet-rs
 ```
 
+## Block generation
+
+`--block-generation-on` (environment variable `BLOCK_GENERATION_ON`) controls when executed transactions are sealed into accepted blocks:
+
+- `transaction` (default): execute and seal a block with each transaction.
+- `demand`: execute transactions immediately in the pre-confirmed block; seal with `devnet_createBlock`.
+- A positive integer: execute immediately and seal the pre-confirmed block every specified number of seconds, including empty blocks.
+
+See [Blocks](../blocks) for status transitions and manual block creation.
+
 ## Proof-related configuration
 
 Devnet exposes a dedicated proof-mode switch:
@@ -119,7 +115,7 @@ PROOF_MODE=<full|devnet|none>
 Mode behavior summary:
 
 - `devnet` (default): mock proof generation + verification flow is enabled.
-- `none`: proof fields are ignored on invoke transactions.
+- `none`: the `proof` field is ignored on invoke transactions; `proof_facts` still undergo transaction validation.
 - `full`: reserved for fully verified proofs (currently not implemented).
 
 For complete examples and RPC payloads, see [Transaction proofs and proof modes](../proofs).

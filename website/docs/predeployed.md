@@ -21,7 +21,7 @@ The set of accounts can be controlled via [CLI options](./running/cli): `--accou
 
 Once you shut down your Devnet, the predeployed account you used ceases to exist. This may be a problem with tools such as `starkli` which hardcode your account details in a local file. One option then is to delete your account entry from `starkli`'s account file. Another option is to spawn the same account on next Devnet startup. To do this, you can use:
 
-- the `--seed <VALUE>` CLI option which always predeploys the same set of accounts if using the same `<VALUE>` (the seed is logged on startup)
+- the `--seed <VALUE>` CLI option which predeploys the same set of accounts when using the same `<VALUE>`, account class, and Devnet version (the seed is logged on startup)
 - the [dump and load feature](./dump-load-restart)
 
 :::
@@ -42,7 +42,7 @@ Alternatively, provide a path to the [Sierra artifact](https://github.com/starkw
 
 ## Predeclared account classes
 
-Both Cairo 0 and Cairo 1 versions of OpenZeppelin account are always predeclared, regardless of the chosen predeployment variant. If you specify `--predeclare-argent` on startup, the latest regular and multisig Argent account variants will also be predeclared. All predeclared classes can be used in DEPLOY_ACCOUNT transactions.
+Both Cairo 0 and Cairo 1 versions of OpenZeppelin account are always predeclared, regardless of the chosen predeployment variant. If you specify `--predeclare-argent` on startup, the bundled Argent account v0.4.0 and multisig v0.2.0 classes will also be predeclared. All predeclared classes can be used in DEPLOY_ACCOUNT transactions.
 
 ## Deploying an undeclared account
 

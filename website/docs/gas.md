@@ -10,7 +10,7 @@ The `devnet_setGasPrice` RPC method allows users to modify the current gas price
 
 ### Explanation
 
-The modified gas prices take effect starting with the next block that is generated.
+Gas-price parameters must be positive JSON integers. The modified prices take effect starting with the next block that is generated. `devnet_getConfig` continues to report the startup values.
 
 ### generate_block
 
@@ -22,26 +22,25 @@ The modified gas prices take effect starting with the next block that is generat
 The following JSON-RPC request can be used to set gas prices (all properties optional):
 
 ```json
-JSON-RPC
 {
-    "jsonrpc": "2.0",
-    "id": "1",
-    "method": "devnet_setGasPrice",
-    "params": {
-        "gas_price_wei": 1000000,
-        "data_gas_price_wei": 10000,
-        "gas_price_fri": 10000,
-        "data_gas_price_fri": 10000,
-        "l2_gas_price_wei": 1000000,
-        "l2_gas_price_fri": 10000,
-        "generate_block": false,
-    }
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "devnet_setGasPrice",
+  "params": {
+    "gas_price_wei": 1000000,
+    "data_gas_price_wei": 10000,
+    "gas_price_fri": 10000,
+    "data_gas_price_fri": 10000,
+    "l2_gas_price_wei": 1000000,
+    "l2_gas_price_fri": 10000,
+    "generate_block": false
+  }
 }
 ```
 
 ## Response
 
-The expected response from the server will mirror the request gas parameters, confirming the modification of gas prices:
+The result contains all six configured gas prices, including unchanged values when the request only sets some prices:
 
 ```json
 {
@@ -49,7 +48,7 @@ The expected response from the server will mirror the request gas parameters, co
   "data_gas_price_wei": 10000,
   "gas_price_fri": 10000,
   "data_gas_price_fri": 10000,
-  "l2_gas_price_wei": 10000,
+  "l2_gas_price_wei": 1000000,
   "l2_gas_price_fri": 10000
 }
 ```

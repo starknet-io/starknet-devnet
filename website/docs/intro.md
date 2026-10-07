@@ -6,19 +6,19 @@ sidebar_position: 1
 
 :::danger Difference disclaimer
 
-- Devnet should not be used as a replacement for the official testnet. After testing on Devnet, be sure to test on testnet (alpha-sepolia)!
+- Devnet should not be used as a replacement for the official testnet. After testing on Devnet, be sure to test on Sepolia testnet!
 - Devnet does not organize state data into Merkle-Patricia tries or similar tree-like structures, so:
   - Calling the `starknet_getStorageProof` RPC method shall always result in `STORAGE_PROOF_NOT_SUPPORTED`.
   - Block roots are set to 0.
 - The pre-confirmed block is equivalent to the old pending block, except that its transactions are not `ACCEPTED_ON_L2` but `PRE_CONFIRMED`.
 - By default, a new block is mined for each new transaction.
   - This can be modified by directing all new transactions into a pre-confirmed block, and at some point triggering block creation.
-  - Transactions in a pre-confirmed block cannot be replaced by sending a transaction with a higher free from the same account.
+  - Transactions in a pre-confirmed block cannot be replaced by sending a transaction with a higher fee from the same account.
   - Read more about transitioning a transaction [from `PRE_CONFIRMED` to `ACCEPTED_ON_L2`](./blocks#creating-blocks-on-demand).
 - Block hashes on devnet differ from mainnet because some mainnet block fields are unavailable to devnet, resulting in different hash outputs despite using the same hashing algorithm.
 - Transactions are never automatically `ACCEPTED_ON_L1`, unless the user performs an action.
   - Read more about transitioning a transaction [from `ACCEPTED_ON_L2` to `ACCEPTED_ON_L1`](./blocks#accepting-blocks-on-l1).
-- In [manual mempool mode](./mempool), admitted transactions remain `RECEIVED` until they are selected for processing. `CANDIDATE` is an internal transition during synchronous processing and is generally not observable through concurrent RPC calls.
+- Locally submitted transactions never enter `RECEIVED` or `CANDIDATE`; they execute immediately and are [`PRE_CONFIRMED` or `ACCEPTED_ON_L2`](./api#local-transaction-statuses) depending on block-generation mode.
 - In Starknet 0.14.1, field `migrated_compiled_classes` was introduced to the `state_diff`. In devnet, this field will always be empty:
   - When starting devnet without forking there is nothing to migrate
   - In forking mode, there is no RPC support to fetch compiled class hashes from origin, so it is impossible for devnet to determine which classes have to be migrated

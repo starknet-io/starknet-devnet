@@ -8,7 +8,7 @@ use starknet_types::rpc::transactions::{
 
 use super::Starknet;
 use crate::error::{DevnetResult, Error, TransactionValidationError};
-use crate::starknet::mempool::PreparedTransaction;
+use crate::starknet::transaction_execution::PreparedTransaction;
 
 pub fn add_deploy_account_transaction(
     starknet: &mut Starknet,
@@ -39,7 +39,7 @@ pub fn add_deploy_account_transaction(
     let transaction = TransactionWithHash::new(transaction_hash, deploy_account_transaction);
 
     let strict_nonce_check = broadcasted_deploy_account_transaction
-        .requires_strict_nonce_check(starknet.config.requires_strict_nonce_check());
+        .requires_strict_nonce_check(starknet.config.uses_pre_confirmed_block());
 
     let executable = blockifier::transaction::account_transaction::AccountTransaction {
         tx: starknet_api::executable_transaction::AccountTransaction::DeployAccount(

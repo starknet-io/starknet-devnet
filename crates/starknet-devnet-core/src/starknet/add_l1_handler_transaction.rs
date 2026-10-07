@@ -6,7 +6,7 @@ use tracing::trace;
 
 use super::Starknet;
 use crate::error::DevnetResult;
-use crate::starknet::mempool::PreparedTransaction;
+use crate::starknet::transaction_execution::PreparedTransaction;
 
 pub fn add_l1_handler_transaction(
     starknet: &mut Starknet,
@@ -17,11 +17,11 @@ pub fn add_l1_handler_transaction(
     let transaction_hash = executable_tx.tx_hash.0;
     trace!("Executing L1 handler transaction [{:#064x}]", transaction_hash);
 
-    let prepared = PreparedTransaction::system(
+    let prepared = PreparedTransaction::l1_handler(
         TransactionWithHash::new(transaction_hash, Transaction::L1Handler(transaction.clone())),
         executable_tx,
     );
-    starknet.submit_system_prepared_transaction(prepared)?;
+    starknet.submit_prepared_transaction(prepared)?;
 
     // If L1 tx hash present, store the generated L2 tx hash in its messaging entry.
     // Not done as part of `handle_transaction_result` as it is specific to this tx type.
