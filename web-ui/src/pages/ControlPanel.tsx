@@ -412,12 +412,12 @@ export default function ControlPanel() {
             );
           }}>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs text-gray-500">Gas (Gwei)</label><input className="input w-full text-xs" value={gasWei} onChange={(e) => setGasWei(e.target.value)} /></div>
-            <div><label className="text-xs text-gray-500">Gas (Gfri)</label><input className="input w-full text-xs" value={gasFri} onChange={(e) => setGasFri(e.target.value)} /></div>
-            <div><label className="text-xs text-gray-500">Data Gas (Gwei)</label><input className="input w-full text-xs" value={dataGasWei} onChange={(e) => setDataGasWei(e.target.value)} /></div>
-            <div><label className="text-xs text-gray-500">Data Gas (Gfri)</label><input className="input w-full text-xs" value={dataGasFri} onChange={(e) => setDataGasFri(e.target.value)} /></div>
-            <div><label className="text-xs text-gray-500">L2 Gas (Gwei, optional)</label><input className="input w-full text-xs" value={l2GasWei} onChange={(e) => setL2GasWei(e.target.value)} /></div>
-            <div><label className="text-xs text-gray-500">L2 Gas (Gfri, optional)</label><input className="input w-full text-xs" value={l2GasFri} onChange={(e) => setL2GasFri(e.target.value)} /></div>
+            <div><label htmlFor="gas-price-wei" className="text-xs text-gray-500">Gas (Gwei)</label><input id="gas-price-wei" className="input w-full text-xs" value={gasWei} onChange={(e) => setGasWei(e.target.value)} /></div>
+            <div><label htmlFor="gas-price-fri" className="text-xs text-gray-500">Gas (Gfri)</label><input id="gas-price-fri" className="input w-full text-xs" value={gasFri} onChange={(e) => setGasFri(e.target.value)} /></div>
+            <div><label htmlFor="data-gas-price-wei" className="text-xs text-gray-500">Data Gas (Gwei)</label><input id="data-gas-price-wei" className="input w-full text-xs" value={dataGasWei} onChange={(e) => setDataGasWei(e.target.value)} /></div>
+            <div><label htmlFor="data-gas-price-fri" className="text-xs text-gray-500">Data Gas (Gfri)</label><input id="data-gas-price-fri" className="input w-full text-xs" value={dataGasFri} onChange={(e) => setDataGasFri(e.target.value)} /></div>
+            <div><label htmlFor="l2-gas-price-wei" className="text-xs text-gray-500">L2 Gas (Gwei, optional)</label><input id="l2-gas-price-wei" className="input w-full text-xs" value={l2GasWei} onChange={(e) => setL2GasWei(e.target.value)} /></div>
+            <div><label htmlFor="l2-gas-price-fri" className="text-xs text-gray-500">L2 Gas (Gfri, optional)</label><input id="l2-gas-price-fri" className="input w-full text-xs" value={l2GasFri} onChange={(e) => setL2GasFri(e.target.value)} /></div>
           </div>
           <p className="mt-2 text-xs text-gray-500">Leave a price blank to keep its current value.</p>
           <label className="mt-2 flex items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={gasGenerateBlock} onChange={(e) => setGasGenerateBlock(e.target.checked)} className="rounded-sm" />Generate new block</label>
