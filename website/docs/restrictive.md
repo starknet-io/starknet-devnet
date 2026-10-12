@@ -12,6 +12,12 @@ When no methods are specified, the following JSON-RPC methods are restricted:
 - devnet_revert
 - devnet_restart
 - devnet_createBlock
+- devnet_removeFromMempool
+- devnet_clearMempool
+- devnet_setMempoolConfig
+- devnet_preconfirmTransactions
+- devnet_sealBlock
+- devnet_abortPreconfirmedBlock
 - devnet_abortBlocks
 - devnet_impersonateAccount
 - devnet_autoImpersonate

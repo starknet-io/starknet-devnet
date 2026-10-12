@@ -93,7 +93,7 @@ histogram_quantile(0.95, sum by (le) (rate(devnet_lifecycle_lock_hold_seconds_bu
 
 **Description:** Current number of retained transactions in Starknet
 
-This gauge reports transactions currently retained by Devnet, including pre-confirmed transactions. It is updated when state is restarted, aborted, or restored from a snapshot.
+This gauge reports executed transactions currently retained by Devnet, including pre-confirmed transactions and excluding received-only mempool entries. It is updated when state is restarted, aborted, or restored from a snapshot.
 
 #### `starknet_block_count`
 

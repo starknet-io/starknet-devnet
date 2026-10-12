@@ -60,6 +60,11 @@ async fn test_config() {
             "ui_enabled": false,
         },
         "block_generation_on": "demand",
+        "mempool_config": {
+            "ordering": "fifo",
+            "random_seed": 1,
+            "max_transactions_per_block": 500
+        },
         "lite_mode": false,
         "proof_mode": "devnet",
         "eth_erc20_class_hash": to_hex_felt(&ETH_ERC20_CONTRACT_CLASS_HASH),
@@ -169,24 +174,6 @@ async fn predeployed_erc20_tokens_return_expected_values_from_property_getters()
         assert_eq!(actual_felts.len(), 3);
         assert_eq!(parse_cairo_short_string(&actual_felts[1]).unwrap(), expected_value);
     }
-}
-
-#[tokio::test]
-async fn mempool_methods_are_unavailable() {
-    let devnet = BackgroundDevnet::spawn().await.unwrap();
-    for method in [
-        "devnet_getMempool",
-        "devnet_removeFromMempool",
-        "devnet_clearMempool",
-        "devnet_setMempoolConfig",
-        "devnet_preconfirmTransactions",
-        "devnet_sealBlock",
-        "devnet_abortPreconfirmedBlock",
-    ] {
-        let error = devnet.send_custom_rpc(method, json!([])).await.unwrap_err();
-        assert_eq!(error.code, -32601, "unexpected error for {method}: {error:?}");
-    }
-    assert!(devnet.get_config().await.get("mempool_config").is_none());
 }
 
 #[tokio::test]
