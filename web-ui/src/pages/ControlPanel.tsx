@@ -340,7 +340,7 @@ export default function ControlPanel() {
           <div className="space-y-2">
             <InputField placeholder="Unix timestamp" value={setTimeVal} onChange={setSetTimeVal} />
             <label className="flex items-center gap-2 text-xs text-gray-400">
-              <input type="checkbox" checked={setTimeGen} onChange={(e) => setSetTimeGen(e.target.checked)} className="rounded" />Generate new block</label>
+              <input type="checkbox" checked={setTimeGen} onChange={(e) => setSetTimeGen(e.target.checked)} className="rounded-sm" />Generate new block</label>
           </div>
         </ActionCard>
 
@@ -420,7 +420,7 @@ export default function ControlPanel() {
             <div><label className="text-xs text-gray-500">L2 Gas (Gfri, optional)</label><input className="input w-full text-xs" value={l2GasFri} onChange={(e) => setL2GasFri(e.target.value)} /></div>
           </div>
           <p className="mt-2 text-xs text-gray-500">Leave a price blank to keep its current value.</p>
-          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={gasGenerateBlock} onChange={(e) => setGasGenerateBlock(e.target.checked)} className="rounded" />Generate new block</label>
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={gasGenerateBlock} onChange={(e) => setGasGenerateBlock(e.target.checked)} className="rounded-sm" />Generate new block</label>
         </ActionCard>
         </ControlGroup>
 
@@ -467,7 +467,7 @@ export default function ControlPanel() {
         >
           <InputField placeholder="Server file path (optional)" value={dumpPath} onChange={setDumpPath} />
           <label className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-            <input type="checkbox" checked={dumpInline} onChange={(e) => setDumpInline(e.target.checked)} className="rounded" />Ignore startup dump path</label>
+            <input type="checkbox" checked={dumpInline} onChange={(e) => setDumpInline(e.target.checked)} className="rounded-sm" />Ignore startup dump path</label>
           <p className="mt-2 text-xs text-gray-500">Requires --dump-on at startup. Events are always returned and can be copied as JSON. An explicit path is still written.</p>
         </ActionCard>
 
@@ -495,7 +495,7 @@ export default function ControlPanel() {
           renderResult={() => <div className="text-xs text-green-400">Devnet restarted</div>}
         >
           <label className="flex items-center gap-2 text-xs text-gray-400">
-            <input type="checkbox" checked={restartMessaging} onChange={(e) => setRestartMessaging(e.target.checked)} className="rounded" />Restart L1-L2 messaging</label>
+            <input type="checkbox" checked={restartMessaging} onChange={(e) => setRestartMessaging(e.target.checked)} className="rounded-sm" />Restart L1-L2 messaging</label>
         </ActionCard>
         </ControlGroup>
 

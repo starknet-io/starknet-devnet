@@ -186,7 +186,7 @@ function TransactionCard({ entry }: { entry: BlockTransactionEntry }) {
       onClick={openTransaction}
       onKeyDown={handleKeyDown}
       aria-label={`Open transaction ${entry.hash}`}
-      className="group grid cursor-pointer gap-3 border-b border-white/[0.07] bg-starknet-card/35 px-4 py-4 transition-colors last:border-b-0 hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-starknet-accent/35 md:grid-cols-[minmax(150px,0.45fr)_minmax(260px,1.45fr)_minmax(180px,0.75fr)_minmax(190px,0.75fr)] md:items-center md:gap-4"
+      className="group grid cursor-pointer gap-3 border-b border-white/[0.07] bg-starknet-card/35 px-4 py-4 transition-colors last:border-b-0 hover:bg-white/[0.035] focus:outline-hidden focus:ring-2 focus:ring-starknet-accent/35 md:grid-cols-[minmax(150px,0.45fr)_minmax(260px,1.45fr)_minmax(180px,0.75fr)_minmax(190px,0.75fr)] md:items-center md:gap-4"
     >
       <MetaBlock label="Tx">
         <div className="flex items-center gap-2">

@@ -18,7 +18,7 @@ export function CopyableHash({ value, short, className = '' }: { value: string; 
 
   return (
     <span className={`group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-1.5 py-0.5 text-starknet-mint ${className}`}>
-      <span className="font-mono text-[inherit] leading-relaxed break-all" title={value}>
+      <span className="font-mono text-inherit leading-relaxed break-all" title={value}>
         {display}
       </span>
       <button

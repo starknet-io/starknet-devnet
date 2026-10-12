@@ -95,7 +95,7 @@ export default function ConnectionSettings({ standalone = false, onDone }: Conne
   return (
     <button
       onClick={() => setEditing(true)}
-      className="flex min-w-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-400 hover:text-white text-xs transition-colors"
+      className="flex min-w-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-slate-400 hover:text-white text-xs transition-colors"
       title="Change RPC URL"
     >
       <Settings size={14} />

@@ -12,7 +12,7 @@ export function StatusBadge({ status }: { status: string }) {
             : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
 
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${color}`}>
+    <span className={`px-2 py-0.5 rounded-sm text-xs font-medium border ${color}`}>
       {status.replace(/_/g, ' ')}
     </span>
   );

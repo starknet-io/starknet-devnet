@@ -57,8 +57,8 @@ function NavItem({
           compact ? 'px-3 py-2 shrink-0' : 'px-4 py-2.5'
         } ${
           isActive
-            ? 'bg-starknet-accent/[0.15] text-white shadow-glow border border-starknet-accent/25'
-            : 'text-slate-400 hover:text-white hover:bg-white/[0.06] border border-transparent'
+            ? 'bg-starknet-accent/15 text-white shadow-glow border border-starknet-accent/25'
+            : 'text-slate-400 hover:text-white hover:bg-white/6 border border-transparent'
         }`
       }
     >
@@ -99,7 +99,7 @@ export default function App() {
           </nav>
 
           <div className="px-4 py-4 border-t border-white/10">
-            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-xs text-slate-400">
+            <div className="rounded-lg border border-white/10 bg-white/4 px-3 py-3 text-xs text-slate-400">
               <DevnetVersion />
               <span className="block mt-1">Local Starknet workspace</span>
             </div>

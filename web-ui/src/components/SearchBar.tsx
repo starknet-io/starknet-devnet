@@ -31,7 +31,7 @@ export default function SearchBar() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Block # or Tx Hash..."
-        className="input pl-9 w-full sm:w-80 xl:w-[28rem] text-sm"
+        className="input pl-9 w-full sm:w-80 xl:w-md text-sm"
       />
     </form>
   );

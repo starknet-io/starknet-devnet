@@ -471,7 +471,7 @@ function EventRow({
       {decoded?.selectorNames.length ? (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {decoded.selectorNames.map((selectorName, selectorIndex) => (
-            <span key={`${selectorName}-${selectorIndex}`} className="text-[10px] px-1.5 py-0.5 rounded bg-starknet-card text-gray-400 border border-starknet-border">
+            <span key={`${selectorName}-${selectorIndex}`} className="text-[10px] px-1.5 py-0.5 rounded-sm bg-starknet-card text-gray-400 border border-starknet-border">
               {selectorName}
             </span>
           ))}
@@ -517,7 +517,7 @@ function DecodedFieldRow({ field, compact }: { field: DecodedField; compact: boo
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="rounded border border-starknet-border/70 bg-starknet-card/40 px-2 py-1.5">
+    <div className="rounded-sm border border-starknet-border/70 bg-starknet-card/40 px-2 py-1.5">
       <div className="grid grid-cols-[minmax(96px,180px)_1fr] gap-3 items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-1 min-w-0 text-gray-400">
@@ -530,7 +530,7 @@ function DecodedFieldRow({ field, compact }: { field: DecodedField; compact: boo
                 {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               </button>
             )}
-            <span className="break-words">{field.name}</span>
+            <span className="wrap-break-word">{field.name}</span>
           </div>
           {field.type && <div className="text-[10px] text-gray-600 break-all">{lastSegment(field.type)}</div>}
         </div>
@@ -682,7 +682,7 @@ function Arr({ items, dense = false, copyAll = false }: { items: string[]; dense
         <div className="mb-2">
           <button
             onClick={handleCopyAll}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded border border-starknet-border hover:bg-starknet-surface"
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded-sm border border-starknet-border hover:bg-starknet-surface"
           >
             {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
             Copy all
@@ -732,7 +732,7 @@ function DecodeBadge({ source }: { source: 'abi' | 'entrypoint' | 'raw' }) {
         : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   const label = source === 'abi' ? 'ABI' : source === 'entrypoint' ? 'ENTRYPOINT' : 'RAW';
 
-  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${className}`}>{label}</span>;
+  return <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-medium border ${className}`}>{label}</span>;
 }
 
 function Count({ label, value }: { label: string; value: number }) {

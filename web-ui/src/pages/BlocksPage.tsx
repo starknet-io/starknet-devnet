@@ -39,7 +39,7 @@ function BlockRow({ bn, isOrigin }: { bn: number; isOrigin: boolean }) {
   }
 
   return (
-    <tr className={`transition-colors ${isOrigin ? 'bg-starknet-gold/10 hover:bg-starknet-gold/15' : 'hover:bg-white/[0.045]'}`}>
+    <tr className={`transition-colors ${isOrigin ? 'bg-starknet-gold/10 hover:bg-starknet-gold/15' : 'hover:bg-white/4.5'}`}>
       <td className="px-4 py-3">
         <Link to={`/blocks/${block.block_number}`} className="flex items-center gap-2 text-starknet-purple hover:underline">
           <Box size={14} />
@@ -61,7 +61,7 @@ function BlockRow({ bn, isOrigin }: { bn: number; isOrigin: boolean }) {
       <td className="px-4 py-3"><StatusBadge status={block.status} /></td>
       <td className="px-4 py-3 text-right text-gray-400 text-xs">{formatTimestamp(block.timestamp)}</td>
       <td className="px-4 py-3 text-right">
-        <span className="px-2 py-0.5 rounded bg-starknet-purple/20 text-starknet-purple text-xs">{block.transactions.length}</span>
+        <span className="px-2 py-0.5 rounded-sm bg-starknet-purple/20 text-starknet-purple text-xs">{block.transactions.length}</span>
       </td>
     </tr>
   );

@@ -139,7 +139,7 @@ function GasRow({ label, initial, live }: { label: string; initial: string; live
       <td className="py-2 text-right font-mono text-gray-500 text-xs">{initial}</td>
       <td className={`py-2 text-right font-mono text-xs ${changed ? 'text-yellow-400 font-semibold' : 'text-gray-300'}`}>
         {live ?? '—'}
-        {changed && <span className="ml-2 px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 text-[10px]">modified</span>}
+        {changed && <span className="ml-2 px-1.5 py-0.5 rounded-sm bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 text-[10px]">modified</span>}
       </td>
     </tr>
   );
