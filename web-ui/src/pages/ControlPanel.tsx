@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Gamepad2, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { callRpc } from '@/lib/rpc-client';
 import { formatTokenAmount } from '@/lib/formatters';
-import { asNumber, asString, asStringArray, isHex, isRecord, parseInt10 } from '@/lib/utils';
+import { asNumber, asString, asStringArray, isHex, isRecord, isSnapshotId, parseGasPrice, parseInt10 } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
 
 type Unit = 'ETH' | 'STRK';
@@ -39,8 +39,9 @@ function ActionCard({
   renderResult?: (data: unknown) => React.ReactNode;
   /** Optional client-side validation. Return a string error message, or undefined if valid. */
   validate?: () => string | undefined;
-  onSuccess?: () => void;
+  onSuccess?: (data: unknown) => void;
 }) {
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActionResult>(null);
   const [copied, setCopied] = useState(false);
@@ -63,7 +64,11 @@ function ActionCard({
     try {
       const data = await callRpc(method, params);
       setResult({ type: 'success', data });
-      onSuccess?.();
+      onSuccess?.(data);
+      if (!['devnet_snapshot', 'devnet_dump', 'devnet_getAccountBalance', 'devnet_getPredeployedAccounts'].includes(method)
+        && !(method === 'devnet_revert' && data !== true)) {
+        void queryClient.resetQueries();
+      }
     } catch (e: unknown) {
       setResult({ type: 'error', message: errorMessage(e) });
     }
@@ -98,8 +103,8 @@ function ActionCard({
             <span className={result.type === 'success' ? 'text-green-400' : 'text-red-400'}>
               {result.type === 'success' ? 'Response' : 'Error'}
             </span>
-            {result.type === 'success' && !renderResult && (
-              <button onClick={handleCopy} className="text-gray-400 hover:text-gray-200 transition-colors">
+            {result.type === 'success' && (
+              <button onClick={handleCopy} aria-label="Copy response JSON" className="text-gray-400 hover:text-gray-200 transition-colors">
                 {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
               </button>
             )}
@@ -149,7 +154,6 @@ function ControlGroup({
 }
 
 export default function ControlPanel() {
-  const queryClient = useQueryClient();
   // Local state for each form
   const [mintAddr, setMintAddr] = useState('');
   const [mintAmount, setMintAmount] = useState('1');
@@ -164,8 +168,15 @@ export default function ControlPanel() {
   const [gasFri, setGasFri] = useState('100');
   const [dataGasWei, setDataGasWei] = useState('100');
   const [dataGasFri, setDataGasFri] = useState('100');
+  const [l2GasWei, setL2GasWei] = useState('');
+  const [l2GasFri, setL2GasFri] = useState('');
+  const [gasGenerateBlock, setGasGenerateBlock] = useState(false);
   const [dumpPath, setDumpPath] = useState('');
+  const [dumpInline, setDumpInline] = useState(false);
   const [loadPath, setLoadPath] = useState('');
+  const [loadSource, setLoadSource] = useState<'path' | 'events'>('path');
+  const [loadEvents, setLoadEvents] = useState('[]');
+  const [snapshotId, setSnapshotId] = useState('');
   const [restartMessaging, setRestartMessaging] = useState(false);
   const [stateDiffParams, setStateDiffParams] = useState('{\n  "state_diff": {},\n  "classes": []\n}');
   const [impersonateAddr, setImpersonateAddr] = useState('');
@@ -257,7 +268,7 @@ export default function ControlPanel() {
               : null;
           }}
         >
-          <p className="text-xs text-gray-400">Generate a new block from pre-confirmed transactions.</p>
+          <p className="text-xs text-gray-400">Seal pre-confirmed transactions and state changes in a new block.</p>
         </ActionCard>
 
         <ActionCard title="Abort Blocks" method="devnet_abortBlocks"
@@ -292,8 +303,8 @@ export default function ControlPanel() {
           }}
           renderResult={(data) => {
             const accepted = isRecord(data) ? asStringArray(data.accepted) : undefined;
-            if (!accepted || accepted.length === 0) return null;
-            return <div className="text-xs text-gray-200">Accepted {accepted.length} block(s)</div>;
+            if (!accepted) return null;
+            return <div className="text-xs text-gray-200">{accepted.length ? `Accepted ${accepted.length} local block(s)` : 'L1 acceptance updated'}</div>;
           }}
         >
           <InputField placeholder="Starting block number" value={acceptBlock} onChange={setAcceptBlock} />
@@ -367,36 +378,36 @@ export default function ControlPanel() {
               ['Gas (Gfri)', gasFri],
               ['Data Gas (Gwei)', dataGasWei],
               ['Data Gas (Gfri)', dataGasFri],
+              ['L2 Gas (Gwei)', l2GasWei],
+              ['L2 Gas (Gfri)', l2GasFri],
             ];
             for (const [name, value] of fields) {
-              const n = Number.parseFloat(value);
-              if (!Number.isFinite(n) || n < 0) return `${name} must be a non-negative number`;
+              if (!value.trim()) continue;
+              if (parseGasPrice(value) === undefined) return `${name} must be positive, have at most 9 decimal places, and convert to a safe integer`;
             }
             return undefined;
           }}
           getParams={() => {
-            const toGwei = (s: string) => (Number.parseFloat(s) || 0) * 1e9;
             return {
-              gas_price_wei: toGwei(gasWei),
-              gas_price_fri: toGwei(gasFri),
-              data_gas_price_wei: toGwei(dataGasWei),
-              data_gas_price_fri: toGwei(dataGasFri),
+              gas_price_wei: parseGasPrice(gasWei),
+              gas_price_fri: parseGasPrice(gasFri),
+              data_gas_price_wei: parseGasPrice(dataGasWei),
+              data_gas_price_fri: parseGasPrice(dataGasFri),
+              l2_gas_price_wei: parseGasPrice(l2GasWei),
+              l2_gas_price_fri: parseGasPrice(l2GasFri),
+              generate_block: gasGenerateBlock,
             };
           }}
           renderResult={(data) => {
             if (!isRecord(data)) return null;
-            const wei = Number(asString(data.gas_price_wei) ?? data.gas_price_wei ?? 0);
-            const fri = Number(asString(data.gas_price_fri) ?? data.gas_price_fri ?? 0);
+            const fields = [
+              ['L1 Gas (wei)', 'gas_price_wei'], ['L1 Gas (fri)', 'gas_price_fri'],
+              ['Data Gas (wei)', 'data_gas_price_wei'], ['Data Gas (fri)', 'data_gas_price_fri'],
+              ['L2 Gas (wei)', 'l2_gas_price_wei'], ['L2 Gas (fri)', 'l2_gas_price_fri'],
+            ];
             return (
               <div className="text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Gas (wei)</span>
-                  <span className="font-mono text-gray-200">{wei.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Gas (fri)</span>
-                  <span className="font-mono text-gray-200">{fri.toLocaleString()}</span>
-                </div>
+                {fields.map(([label, field]) => <div key={field} className="flex justify-between"><span className="text-gray-400">{label}</span><span className="font-mono text-gray-200">{asString(data[field]) ?? '—'}</span></div>)}
               </div>
             );
           }}>
@@ -405,7 +416,11 @@ export default function ControlPanel() {
             <div><label className="text-xs text-gray-500">Gas (Gfri)</label><input className="input w-full text-xs" value={gasFri} onChange={(e) => setGasFri(e.target.value)} /></div>
             <div><label className="text-xs text-gray-500">Data Gas (Gwei)</label><input className="input w-full text-xs" value={dataGasWei} onChange={(e) => setDataGasWei(e.target.value)} /></div>
             <div><label className="text-xs text-gray-500">Data Gas (Gfri)</label><input className="input w-full text-xs" value={dataGasFri} onChange={(e) => setDataGasFri(e.target.value)} /></div>
+            <div><label className="text-xs text-gray-500">L2 Gas (Gwei, optional)</label><input className="input w-full text-xs" value={l2GasWei} onChange={(e) => setL2GasWei(e.target.value)} /></div>
+            <div><label className="text-xs text-gray-500">L2 Gas (Gfri, optional)</label><input className="input w-full text-xs" value={l2GasFri} onChange={(e) => setL2GasFri(e.target.value)} /></div>
           </div>
+          <p className="mt-2 text-xs text-gray-500">Leave a price blank to keep its current value.</p>
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={gasGenerateBlock} onChange={(e) => setGasGenerateBlock(e.target.checked)} className="rounded" />Generate new block</label>
         </ActionCard>
         </ControlGroup>
 
@@ -421,8 +436,7 @@ export default function ControlPanel() {
               return 'Enter valid JSON';
             }
           }}
-          getParams={() => JSON.parse(stateDiffParams)}
-          onSuccess={() => { void queryClient.invalidateQueries(); }}>
+          getParams={() => JSON.parse(stateDiffParams)}>
           <label htmlFor="state-diff-params" className="block text-xs text-gray-500 mb-1">Request parameters (JSON)</label>
           <textarea id="state-diff-params" className="input w-full text-xs font-mono min-h-40 resize-y"
             value={stateDiffParams} onChange={(e) => setStateDiffParams(e.target.value)} spellCheck={false} />
@@ -430,21 +444,51 @@ export default function ControlPanel() {
           <p className="mt-1 text-xs text-gray-500">Supply class definitions in classes to declare them automatically. The response lists their computed hashes. Restricted by default in restrictive mode.</p>
         </ActionCard>
 
-        <ActionCard title="Dump State" method="devnet_dump" getParams={() => dumpPath ? { path: dumpPath } : {}} label="Dump"
+        <ActionCard title="Create Snapshot" method="devnet_snapshot" getParams={() => ({})} label="Snapshot"
+          onSuccess={(data) => { if (typeof data === 'string') setSnapshotId(data); }}
+          renderResult={(data) => <div className="text-xs text-gray-200">Snapshot ID: <span className="font-mono">{asString(data)}</span></div>}>
+          <p className="text-xs text-gray-400">Capture the current state in memory. Snapshots belong to this process and are invalidated by load or restart. Restricted by default in restrictive mode.</p>
+        </ActionCard>
+
+        <ActionCard title="Revert Snapshot" method="devnet_revert" label="Revert"
+          validate={() => !isSnapshotId(snapshotId.trim()) ? 'Snapshot ID must be 0x-prefixed hexadecimal within the u64 range' : undefined}
+          getParams={() => ({ snapshot_id: snapshotId.trim() })}
+          renderResult={(data) => <div className={`text-xs ${data === true ? 'text-green-400' : 'text-yellow-400'}`}>{data === true ? 'Snapshot restored' : 'Snapshot is unknown, consumed, or invalidated'}</div>}>
+          <InputField placeholder="Snapshot ID (0x...)" value={snapshotId} onChange={setSnapshotId} />
+          <p className="mt-2 text-xs text-gray-400">A successful revert consumes this snapshot and all newer snapshots. External L1 state is not restored. Restricted by default in restrictive mode.</p>
+        </ActionCard>
+
+        <ActionCard title="Dump State" method="devnet_dump" getParams={() => ({ ...(dumpPath.trim() ? { path: dumpPath.trim() } : {}), inline: dumpInline })} label="Dump"
           renderResult={(data) => {
             if (data === null || data === undefined) return <div className="text-xs text-gray-400">Saved to file</div>;
-            if (Array.isArray(data)) return <div className="text-xs text-gray-200">{data.length} event(s) in dump</div>;
+            if (Array.isArray(data)) return <div className="text-xs text-gray-200"><p className="mb-2">{data.length} event(s) in dump</p><pre className="whitespace-pre-wrap break-all font-mono">{JSON.stringify(data, null, 2)}</pre></div>;
             return null;
           }}
         >
-          <InputField placeholder="Path (optional, returns in response if empty)" value={dumpPath} onChange={setDumpPath} />
+          <InputField placeholder="Server file path (optional)" value={dumpPath} onChange={setDumpPath} />
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+            <input type="checkbox" checked={dumpInline} onChange={(e) => setDumpInline(e.target.checked)} className="rounded" />Ignore startup dump path</label>
+          <p className="mt-2 text-xs text-gray-500">Requires --dump-on at startup. Events are always returned and can be copied as JSON. An explicit path is still written.</p>
         </ActionCard>
 
         <ActionCard title="Load State" method="devnet_load"
-          validate={() => !loadPath.trim() ? 'Path is required' : undefined}
-          getParams={() => loadPath.trim() ? { path: loadPath.trim() } : null}
+          validate={() => {
+            if (loadSource === 'path') return !loadPath.trim() ? 'Path is required' : undefined;
+            try {
+              if (!Array.isArray(JSON.parse(loadEvents))) return 'Events must be a JSON array';
+            } catch { return 'Enter valid JSON'; }
+          }}
+          getParams={() => loadSource === 'path' ? { path: loadPath.trim() } : { events: JSON.parse(loadEvents) }}
           label="Load">
-          <InputField placeholder="File path to load" value={loadPath} onChange={setLoadPath} />
+          <label htmlFor="load-source" className="block text-xs text-gray-500 mb-1">Load from</label>
+          <select id="load-source" className="input w-full text-xs mb-2" value={loadSource} onChange={(e) => setLoadSource(e.target.value as 'path' | 'events')}>
+            <option value="path">Server file</option><option value="events">Inline events</option>
+          </select>
+          {loadSource === 'path' ? <InputField placeholder="Server file path to load" value={loadPath} onChange={setLoadPath} /> : <>
+            <label htmlFor="load-events" className="block text-xs text-gray-500 mb-1">Events (JSON array)</label>
+            <textarea id="load-events" className="input w-full text-xs font-mono min-h-40 resize-y" value={loadEvents} onChange={(e) => setLoadEvents(e.target.value)} spellCheck={false} />
+          </>}
+          <p className="mt-2 text-xs text-gray-400">Replaces the current state by replaying the dump and invalidates all snapshots. Use the same block-generation mode as the original instance.</p>
         </ActionCard>
 
         <ActionCard title="Restart Devnet" method="devnet_restart" getParams={() => ({ restart_l1_to_l2_messaging: restartMessaging })} label="Restart"

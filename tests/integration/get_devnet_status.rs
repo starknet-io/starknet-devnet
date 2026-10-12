@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::common::background_devnet::BackgroundDevnet;
+use crate::common::constants::DEVNET_EXECUTABLE_BINARY_PATH;
 
 #[tokio::test]
 async fn devnet_get_status_initial_state() {
@@ -14,6 +15,14 @@ async fn devnet_get_status_initial_state() {
     assert_eq!(status["pre_confirmed_tx_count"].as_u64().unwrap(), 0);
     assert!(status["chain_id"].as_str().unwrap().contains("SEPOLIA"));
     assert_eq!(status["protocol_version"].as_str().unwrap(), "0.10.2");
+    let version = std::process::Command::new(DEVNET_EXECUTABLE_BINARY_PATH)
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(version.stdout).unwrap().trim(),
+        format!("starknet-devnet {}", status["devnet_version"].as_str().unwrap())
+    );
     assert!(!status["is_forked"].as_bool().unwrap());
     // fork_config is only present when forking
     assert!(

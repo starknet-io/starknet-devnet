@@ -54,10 +54,27 @@ export function asStringArray(v: unknown): string[] | undefined {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined;
 }
 
-/** Parses a string as an integer in base 10, returning undefined for empty / non-numeric / NaN input. */
+/** Parses a non-negative safe integer in base 10 without truncating invalid input. */
 export function parseInt10(value: string): number | undefined {
   const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const n = Number.parseInt(trimmed, 10);
-  return Number.isNaN(n) ? undefined : n;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const n = Number(trimmed);
+  return Number.isSafeInteger(n) ? n : undefined;
+}
+
+export function isSnapshotId(value: string): boolean {
+  return isHex(value) && BigInt(value) <= 0xffffffffffffffffn;
+}
+
+/** Converts decimal Gwei/Gfri exactly to a positive integer safe to send as JSON. */
+export function parseGasPrice(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!/^\d+(?:\.\d{1,9})?$/.test(trimmed)) return undefined;
+  const [whole, fraction = ''] = trimmed.split('.');
+  const amount = BigInt(whole) * 1000000000n + BigInt(fraction.padEnd(9, '0'));
+  return amount > 0n && amount <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(amount) : undefined;
+}
+
+export function formatBlockGeneration(mode: 'transaction' | 'demand' | { interval: number }): string {
+  return typeof mode === 'object' && mode !== null ? `Every ${mode.interval}s` : mode === 'demand' ? 'On demand' : 'On transaction';
 }

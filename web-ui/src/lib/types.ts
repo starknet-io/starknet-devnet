@@ -4,6 +4,7 @@ export interface DevnetStatus {
   pre_confirmed_tx_count: number;
   chain_id: string;
   protocol_version: string;
+  devnet_version?: string;
   is_forked: boolean;
   fork_config?: {
     url: string;
@@ -28,7 +29,7 @@ export interface DevnetConfig {
   chain_id: string;
   dump_on: string | null;
   dump_path: string | null;
-  block_generation_on: string | null;
+  block_generation_on: 'transaction' | 'demand' | { interval: number };
   lite_mode: boolean;
   proof_mode: string;
   state_archive: string;
@@ -177,5 +178,6 @@ export interface JsonRpcResponse<T = unknown> {
   error?: {
     code: number;
     message: string;
+    data?: unknown;
   };
 }

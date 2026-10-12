@@ -6,7 +6,7 @@ import {
   Box,
   Loader2,
 } from 'lucide-react';
-import { getBlockWithReceipts, getBlockWithTxs } from '@/lib/rpc-client';
+import { callRpc, getBlockWithReceipts, getBlockWithTxs } from '@/lib/rpc-client';
 import { formatTimestamp, isRecord, stringifyValue } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -27,11 +27,12 @@ interface BlockTransactionEntry {
 export default function BlockDetail() {
   const { blockNumber } = useParams<{ blockNumber: string }>();
   const navigate = useNavigate();
+  const isPreConfirmed = blockNumber === 'pre_confirmed';
 
   const { data: block, isLoading, error } = useQuery<FullBlock>({
     queryKey: ['block', blockNumber, 'full-with-receipts'],
     queryFn: async () => {
-      const id = Number(blockNumber);
+      const id = isPreConfirmed ? 'pre_confirmed' : Number(blockNumber);
       try {
         return await getBlockWithReceipts(id);
       } catch {
@@ -39,6 +40,17 @@ export default function BlockDetail() {
       }
     },
     enabled: !!blockNumber,
+    refetchInterval: isPreConfirmed ? 2000 : false,
+  });
+
+  const { data: stateUpdate, error: stateUpdateError } = useQuery({
+    queryKey: ['state-update', blockNumber],
+    queryFn: () => callRpc<{ state_diff: unknown }>('starknet_getStateUpdate', {
+      block_id: isPreConfirmed ? 'pre_confirmed' : { block_number: Number(blockNumber) },
+    }),
+    enabled: !!block,
+    retry: false,
+    refetchInterval: isPreConfirmed ? 2000 : false,
   });
 
   const txEntries = useMemo(
@@ -73,11 +85,11 @@ export default function BlockDetail() {
         <div>
           <h1 className="page-title flex items-center gap-2">
             <Box size={24} className="text-starknet-purple" />
-            Block <span className="font-mono">#{blockNumber}</span>
+            {isPreConfirmed ? 'Pre-confirmed Block' : <>Block <span className="font-mono">#{blockNumber}</span></>}
           </h1>
           <p className="page-subtitle">Block header, gas prices, commitments, and transactions</p>
         </div>
-        {block.status && <BlockStatusBadge status={block.status} />}
+        {(block.status || isPreConfirmed) && <BlockStatusBadge status={block.status || 'PRE_CONFIRMED'} />}
       </div>
 
       <div className="card">
@@ -120,6 +132,13 @@ export default function BlockDetail() {
           </dl>
         </div>
       )}
+
+      <details className="card">
+        <summary className="font-semibold cursor-pointer">State Diff</summary>
+        <p className="mt-3 text-xs text-gray-400">Includes transaction effects and changes applied directly to state.</p>
+        {stateUpdate ? <pre className="mt-3 text-xs font-mono whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{JSON.stringify(stateUpdate.state_diff, null, 2)}</pre>
+          : <p className="mt-3 text-xs text-gray-500">{stateUpdateError ? 'State diff unavailable' : 'Loading state diff…'}</p>}
+      </details>
 
       <div className="card p-0 overflow-hidden">
         <div className="border-b border-white/10 px-5 py-4">

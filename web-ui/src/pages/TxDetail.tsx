@@ -61,12 +61,14 @@ export default function TxDetail() {
     queryKey: ['receipt', txHash],
     queryFn: () => getTransactionReceipt(txHash!),
     enabled: !!txHash,
+    refetchInterval: (query) => query.state.data?.finality_status === 'PRE_CONFIRMED' ? 2000 : false,
   });
 
   const { data: status } = useQuery({
     queryKey: ['txstatus', txHash],
     queryFn: () => getTransactionStatus(txHash!),
     enabled: !!txHash,
+    refetchInterval: (query) => query.state.data?.finality_status === 'PRE_CONFIRMED' ? 2000 : false,
   });
 
   const { data: trace, isLoading: traceLoading } = useQuery({
@@ -180,7 +182,7 @@ export default function TxDetail() {
         <Section title="Block Info">
           <Grid>
             {rawReceipt.block_number != null && (
-              <F label="Block" value={`#${rawReceipt.block_number}`} link={`/blocks/${rawReceipt.block_number}`} />
+              <F label="Block" value={`#${rawReceipt.block_number}`} link={rawReceipt.finality_status === 'PRE_CONFIRMED' ? '/blocks/pre_confirmed' : `/blocks/${rawReceipt.block_number}`} />
             )}
             {rawReceipt.block_hash && <F label="Block Hash" value={rawReceipt.block_hash} hash />}
             {rawReceipt.transaction_hash && <F label="Receipt Hash" value={rawReceipt.transaction_hash} hash />}
@@ -745,7 +747,8 @@ function getReceiptBlockId(receipt: unknown): RpcBlockId | undefined {
   // `receipt` is typed as `unknown` at the API boundary; we narrow with a
   // shape check rather than casting to `any`.
   if (!receipt || typeof receipt !== 'object') return undefined;
-  const raw = receipt as { block_hash?: unknown; block_number?: unknown };
+  const raw = receipt as { block_hash?: unknown; block_number?: unknown; finality_status?: unknown };
+  if (raw.finality_status === 'PRE_CONFIRMED') return 'pre_confirmed';
   if (typeof raw.block_hash === 'string') return { block_hash: raw.block_hash };
   if (raw.block_number != null) return { block_number: Number(raw.block_number) };
   return undefined;

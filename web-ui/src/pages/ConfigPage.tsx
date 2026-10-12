@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Settings, GitFork, Server, Loader2, Users, Flame, ArrowRight } from 'lucide-react';
 import { devnetGetConfig, devnetGetStatus, getBlockWithTxHashes } from '@/lib/rpc-client';
 import { CopyableHash } from '@/components/CopyableHash';
+import { formatBlockGeneration } from '@/lib/utils';
 
 function fmtGwei(n: number) { return `${(n / 1e9).toFixed(1)} Gwei`; }
 function fmtGfri(n: number) { return `${(n / 1e9).toFixed(1)} Gfri`; }
@@ -48,7 +49,7 @@ export default function ConfigPage() {
           <IR label="Host" value={config.server_config.host} />
           <IR label="Port" value={config.server_config.port.toString()} />
           <IR label="Timeout" value={`${config.server_config.timeout}s`} />
-          <IR label="Block Generation" value={config.block_generation_on ?? 'on transaction'} />
+          <IR label="Block Generation" value={formatBlockGeneration(config.block_generation_on)} />
           <IR label="Lite Mode" value={config.lite_mode ? 'Yes' : 'No'} />
           <IR label="State Archive" value={config.state_archive} />
           <IR label="Dump On" value={config.dump_on ?? 'none'} />
@@ -62,7 +63,7 @@ export default function ConfigPage() {
 
       <div className="card">
         <h2 className="font-semibold mb-4 flex items-center gap-2"><Flame size={18} />Gas Prices</h2>
-        <p className="text-xs text-gray-500 mb-3">Initial vs current block. Yellow = modified via devnet_setGasPrice.</p>
+        <p className="text-xs text-gray-500 mb-3">Initial vs latest accepted block. Queued gas prices appear after sealing. Yellow = modified via devnet_setGasPrice.</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

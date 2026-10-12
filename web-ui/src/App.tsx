@@ -1,4 +1,6 @@
 import { Routes, Route, NavLink } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { devnetGetStatus } from './lib/rpc-client';
 import {
   LayoutDashboard,
   Blocks,
@@ -98,7 +100,7 @@ export default function App() {
 
           <div className="px-4 py-4 border-t border-white/10">
             <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-xs text-slate-400">
-              <span className="block font-mono text-starknet-mint">v0.9.0</span>
+              <DevnetVersion />
               <span className="block mt-1">Local Starknet workspace</span>
             </div>
           </div>
@@ -135,4 +137,14 @@ export default function App() {
       </div>
     </DevnetProvider>
   );
+}
+
+function DevnetVersion() {
+  const { data: status } = useQuery({
+    queryKey: ['status'],
+    queryFn: devnetGetStatus,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  return <span className="block font-mono text-starknet-mint">{status?.devnet_version ? `v${status.devnet_version}` : 'Version unavailable'}</span>;
 }

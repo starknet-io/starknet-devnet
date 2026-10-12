@@ -983,6 +983,7 @@ impl JsonRpcHandler {
             pre_confirmed_tx_count: starknet.get_pre_confirmed_tx_count(),
             chain_id: starknet.chain_id().to_string(),
             protocol_version: RPC_SPEC_VERSION.to_string(),
+            devnet_version: env!("CARGO_PKG_VERSION").to_string(),
             is_forked,
             fork_config,
             impersonated_accounts: starknet.get_impersonated_accounts(),

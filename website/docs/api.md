@@ -122,7 +122,7 @@ To retrieve a summary of the current Devnet state (block count, transaction coun
 }
 ```
 
-The `protocol_version` field reports the JSON-RPC specification version. `block_count` counts retained local accepted blocks, including genesis; `transaction_count` also includes pre-confirmed transactions. `fork_config` is present only when forking and uses the fields `url` and `block`.
+The `protocol_version` field reports the JSON-RPC specification version, while `devnet_version` reports the version of the running Devnet package. `block_count` counts retained local accepted blocks, including genesis; `transaction_count` also includes pre-confirmed transactions. `fork_config` is present only when forking and uses the fields `url` and `block`.
 
 For the startup command shown above, the initial result is:
 
@@ -133,6 +133,7 @@ For the startup command shown above, the initial result is:
   "pre_confirmed_tx_count": 0,
   "chain_id": "SN_SEPOLIA",
   "protocol_version": "0.10.2",
+  "devnet_version": "0.10.0",
   "is_forked": false,
   "impersonated_accounts": [],
   "auto_impersonate": false

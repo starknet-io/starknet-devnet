@@ -1221,6 +1221,10 @@
               "type": "string",
               "description": "JSON-RPC specification version"
             },
+            "devnet_version": {
+              "type": "string",
+              "description": "Version of the running Devnet package"
+            },
             "is_forked": {
               "type": "boolean"
             },
@@ -1252,6 +1256,7 @@
             "pre_confirmed_tx_count",
             "chain_id",
             "protocol_version",
+            "devnet_version",
             "is_forked",
             "impersonated_accounts",
             "auto_impersonate"

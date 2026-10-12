@@ -27,10 +27,10 @@ export default function ConnectionSettings({ standalone = false, onDone }: Conne
     setRpcUrl(url);
 
     const result = await verifyDevnet();
+    void queryClient.resetQueries();
     if (result.ok) {
       setConnected(true);
       setVerified(true);
-      queryClient.invalidateQueries();
       setEditing(false);
       onDone?.();
     } else {

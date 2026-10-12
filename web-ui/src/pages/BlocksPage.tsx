@@ -138,7 +138,10 @@ export default function BlocksPage() {
           <h1 className="page-title">Blocks</h1>
           <p className="page-subtitle">{allBlockNums.length.toLocaleString()} blocks</p>
         </div>
-        <SearchBar />
+        <div className="flex flex-wrap items-center gap-3">
+          <Link to="/blocks/pre_confirmed" className="text-sm text-starknet-purple hover:underline">Pre-confirmed block</Link>
+          <SearchBar />
+        </div>
       </div>
 
       {allBlockNums.length > 0 && (

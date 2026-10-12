@@ -525,6 +525,7 @@ pub struct DevnetStatus {
     pub pre_confirmed_tx_count: usize,
     pub chain_id: String,
     pub protocol_version: String,
+    pub devnet_version: String,
     pub is_forked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fork_config: Option<ForkStatus>,

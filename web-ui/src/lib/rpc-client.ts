@@ -12,7 +12,7 @@ import type {
   JsonRpcResponse,
 } from './types';
 
-const DEFAULT_RPC_URL = 'http://127.0.0.1:5050/rpc';
+const DEFAULT_RPC_URL = import.meta.env.DEV ? 'http://127.0.0.1:5050/rpc' : `${window.location.origin}/rpc`;
 const RPC_URL_STORAGE_KEY = 'devnet-rpc-url';
 
 let rpcUrl: string;
@@ -85,7 +85,8 @@ export async function callRpc<T = unknown>(
   const data: JsonRpcResponse<T> = await response.json();
 
   if (data.error) {
-    throw new Error(`RPC Error ${data.error.code}: ${data.error.message}`);
+    const details = data.error.data === undefined ? '' : ` — ${typeof data.error.data === 'string' ? data.error.data : JSON.stringify(data.error.data)}`;
+    throw new Error(`RPC Error ${data.error.code}: ${data.error.message}${details}`);
   }
 
   return data.result as T;
