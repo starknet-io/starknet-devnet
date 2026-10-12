@@ -7,6 +7,7 @@ The `--restrictive-mode` argument enables a restrictive mode for Devnet, allowin
 When no methods are specified, the following JSON-RPC methods are restricted:
 
 - devnet_mint
+- devnet_applyStateDiff
 - devnet_load
 - devnet_snapshot
 - devnet_revert

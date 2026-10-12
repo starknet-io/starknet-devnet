@@ -10,5 +10,6 @@ mod macro_utils;
 pub mod messaging;
 pub mod proof;
 pub mod state;
+pub mod state_mutation;
 pub mod transaction_receipt;
 pub mod transactions;

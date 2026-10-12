@@ -31,6 +31,27 @@ use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
 
 impl JsonRpcHandler {
+    /// devnet_applyStateDiff
+    pub async fn apply_state_diff(
+        &self,
+        request: starknet_types::rpc::state_mutation::ApplyStateDiffRequest,
+    ) -> StrictRpcResult {
+        let response = self.api.starknet.lock().await.apply_state_diff(request).map_err(
+            |error| match error {
+                starknet_core::error::Error::InvalidStateDiff(message) => {
+                    ApiError::RpcError(RpcError::invalid_params(message))
+                }
+                starknet_core::error::Error::ContractNotFound => ApiError::ContractNotFound,
+                starknet_core::error::Error::StateError(
+                    starknet_core::error::StateError::NoneClassHash(_),
+                ) => ApiError::ClassHashNotFound,
+                starknet_core::error::Error::TypesError(_) => ApiError::InvalidContractClass,
+                other => ApiError::StarknetDevnetError(other),
+            },
+        )?;
+        Ok(DevnetResponse::AppliedStateDiff(response).into())
+    }
+
     /// devnet_snapshot
     pub async fn snapshot(&self) -> StrictRpcResult {
         let mut snapshots = self.api.snapshots.lock().await;

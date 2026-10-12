@@ -19,6 +19,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Invalid state diff: {0}")]
+    InvalidStateDiff(String),
     #[error(transparent)]
     StarknetApiError(#[from] starknet_api::StarknetApiError),
     #[error(transparent)]

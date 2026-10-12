@@ -35,6 +35,8 @@ Local transactions never enter `RECEIVED` or `CANDIDATE`. A validation failure r
 
 Devnet has many additional features available via JSON-RPC. The RPC methods are documented throughout the documentation in their corresponding pages, but are also aggregated [here](https://github.com/starknet-io/starknet-devnet/blob/main/website/static/devnet_api.json).
 
+Use [`devnet_applyStateDiff`](./state-mutation) to prepare chain state directly, including storage, nonces, declarations, deployments, and class replacements.
+
 #### Healthcheck
 
 To check if a Devnet instance is alive, send an HTTP request `GET /is_alive`. If alive, Devnet will reply with a `200 OK` and an appropriate message. The optional [embedded UI](./web-ui) and [metrics server](./metrics) also use HTTP endpoints outside the JSON-RPC API.

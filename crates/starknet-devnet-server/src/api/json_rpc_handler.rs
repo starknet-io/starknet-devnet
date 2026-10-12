@@ -725,6 +725,7 @@ impl JsonRpcHandler {
             DevnetSpecRequest::AutoImpersonate => self.set_auto_impersonate(true).await,
             DevnetSpecRequest::StopAutoImpersonate => self.set_auto_impersonate(false).await,
             DevnetSpecRequest::Dump(request) => self.dump(request.unwrap_or_default()).await,
+            DevnetSpecRequest::ApplyStateDiff(request) => self.apply_state_diff(request).await,
             DevnetSpecRequest::Snapshot => self.snapshot().await,
             DevnetSpecRequest::Revert(request) => self.revert(request).await,
             DevnetSpecRequest::Load(request) => self.load(request).await,

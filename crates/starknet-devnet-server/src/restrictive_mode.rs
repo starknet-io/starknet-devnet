@@ -1,4 +1,5 @@
 pub static DEFAULT_RESTRICTED_JSON_RPC_METHODS: &[&str] = &[
+    "devnet_applyStateDiff",
     "devnet_mint",
     "devnet_load",
     "devnet_snapshot",

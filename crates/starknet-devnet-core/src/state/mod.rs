@@ -172,6 +172,19 @@ impl Default for StarknetState {
 }
 
 impl StarknetState {
+    /// Writes an absolute nonce while preserving the initial read for diff generation.
+    pub(crate) fn set_nonce(&mut self, address: ContractAddress, nonce: Felt) -> DevnetResult<()> {
+        self.get_nonce_at(address.into())?;
+        self.state.update_cache(
+            &blockifier::state::cached_state::StateMaps {
+                nonces: [(address.into(), starknet_api::core::Nonce(nonce))].into(),
+                ..Default::default()
+            },
+            Default::default(),
+        );
+        Ok(())
+    }
+
     pub fn new(
         defaulter: StarknetDefaulter,
         rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,

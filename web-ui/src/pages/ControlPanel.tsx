@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Gamepad2, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { callRpc } from '@/lib/rpc-client';
 import { formatTokenAmount } from '@/lib/formatters';
@@ -27,6 +28,7 @@ function ActionCard({
   label,
   renderResult,
   validate,
+  onSuccess,
 }: {
   title: string;
   method: string;
@@ -37,6 +39,7 @@ function ActionCard({
   renderResult?: (data: unknown) => React.ReactNode;
   /** Optional client-side validation. Return a string error message, or undefined if valid. */
   validate?: () => string | undefined;
+  onSuccess?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActionResult>(null);
@@ -60,6 +63,7 @@ function ActionCard({
     try {
       const data = await callRpc(method, params);
       setResult({ type: 'success', data });
+      onSuccess?.();
     } catch (e: unknown) {
       setResult({ type: 'error', message: errorMessage(e) });
     }
@@ -145,6 +149,7 @@ function ControlGroup({
 }
 
 export default function ControlPanel() {
+  const queryClient = useQueryClient();
   // Local state for each form
   const [mintAddr, setMintAddr] = useState('');
   const [mintAmount, setMintAmount] = useState('1');
@@ -162,6 +167,7 @@ export default function ControlPanel() {
   const [dumpPath, setDumpPath] = useState('');
   const [loadPath, setLoadPath] = useState('');
   const [restartMessaging, setRestartMessaging] = useState(false);
+  const [stateDiffParams, setStateDiffParams] = useState('{\n  "state_diff": {},\n  "classes": []\n}');
   const [impersonateAddr, setImpersonateAddr] = useState('');
   const [stopImpersonateAddr, setStopImpersonateAddr] = useState('');
   const [balanceAddr, setBalanceAddr] = useState('');
@@ -403,7 +409,27 @@ export default function ControlPanel() {
         </ActionCard>
         </ControlGroup>
 
-        <ControlGroup title="State & Runtime" description="Persist, restore, or restart the devnet process state.">
+        <ControlGroup title="State & Runtime" description="Modify, persist, restore, or restart the devnet process state.">
+        <ActionCard title="Apply State Diff" method="devnet_applyStateDiff"
+          label="Apply State Diff"
+          validate={() => {
+            try {
+              const params: unknown = JSON.parse(stateDiffParams);
+              if (!isRecord(params) || !isRecord(params.state_diff)) return 'Request must contain a state_diff object';
+              if (params.classes !== undefined && !Array.isArray(params.classes)) return 'classes must be an array';
+            } catch {
+              return 'Enter valid JSON';
+            }
+          }}
+          getParams={() => JSON.parse(stateDiffParams)}
+          onSuccess={() => { void queryClient.invalidateQueries(); }}>
+          <label htmlFor="state-diff-params" className="block text-xs text-gray-500 mb-1">Request parameters (JSON)</label>
+          <textarea id="state-diff-params" className="input w-full text-xs font-mono min-h-40 resize-y"
+            value={stateDiffParams} onChange={(e) => setStateDiffParams(e.target.value)} spellCheck={false} />
+          <p className="mt-2 text-xs text-gray-400">Changes apply atomically to pre-confirmed state without a transaction or a new block. Seal them with Create Block or the configured block-generation mode.</p>
+          <p className="mt-1 text-xs text-gray-500">Supply class definitions in classes to declare them automatically. The response lists their computed hashes. Restricted by default in restrictive mode.</p>
+        </ActionCard>
+
         <ActionCard title="Dump State" method="devnet_dump" getParams={() => dumpPath ? { path: dumpPath } : {}} label="Dump"
           renderResult={(data) => {
             if (data === null || data === undefined) return <div className="text-xs text-gray-400">Saved to file</div>;

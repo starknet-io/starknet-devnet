@@ -1263,6 +1263,70 @@
           "$ref": "#/components/errors/WILDCARD_ERROR"
         }
       ]
+    },
+    {
+      "name": "devnet_applyStateDiff",
+      "summary": "Atomically mutate effective pre-confirmed state without executing a transaction or sealing a block",
+      "description": "Supplied classes auto-declare; computed hashes are returned in input order. Deployment skips constructors. Changes are included in the next accepted block, captured by snapshots, and journaled for replay. Restricted by default. See the direct state mutation documentation for validation and ordering rules.",
+      "params": [
+        {
+          "name": "state_diff",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/STATE_DIFF_INPUT"
+          }
+        },
+        {
+          "name": "classes",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SUPPLIED_CLASS"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "classes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/APPLIED_CLASS"
+              }
+            }
+          },
+          "required": ["classes"]
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/INVALID_PARAMS"
+        },
+        {
+          "code": 20,
+          "message": "Contract not found"
+        },
+        {
+          "code": 28,
+          "message": "Class hash not found"
+        },
+        {
+          "code": 50,
+          "message": "Invalid contract class"
+        },
+        {
+          "code": -32604,
+          "message": "Method forbidden"
+        },
+        {
+          "$ref": "#/components/errors/WILDCARD_ERROR"
+        }
+      ]
     }
   ],
   "components": {
@@ -1533,6 +1597,337 @@
           }
         },
         "required": ["jsonrpc", "method", "id"]
+      },
+      "STATE_DIFF_INPUT": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "storage_diffs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "$ref": "#/components/schemas/ADDRESS"
+                },
+                "storage_entries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "$ref": "#/components/schemas/ADDRESS"
+                      },
+                      "value": {
+                        "$ref": "#/components/schemas/FELT"
+                      }
+                    },
+                    "required": ["key", "value"]
+                  }
+                }
+              },
+              "required": ["address", "storage_entries"]
+            }
+          },
+          "nonces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contract_address": {
+                  "$ref": "#/components/schemas/ADDRESS"
+                },
+                "nonce": {
+                  "$ref": "#/components/schemas/FELT"
+                }
+              },
+              "required": ["contract_address", "nonce"]
+            }
+          },
+          "deployed_contracts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "$ref": "#/components/schemas/ADDRESS"
+                },
+                "class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                }
+              },
+              "required": ["address", "class_hash"]
+            }
+          },
+          "replaced_classes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contract_address": {
+                  "$ref": "#/components/schemas/ADDRESS"
+                },
+                "class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                }
+              },
+              "required": ["contract_address", "class_hash"]
+            }
+          },
+          "declared_classes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                },
+                "compiled_class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                }
+              },
+              "required": ["class_hash", "compiled_class_hash"]
+            }
+          },
+          "deprecated_declared_classes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FELT"
+            }
+          },
+          "migrated_compiled_classes": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                },
+                "compiled_class_hash": {
+                  "$ref": "#/components/schemas/FELT"
+                }
+              },
+              "required": ["class_hash", "compiled_class_hash"]
+            },
+            "description": "Nonempty migration requests are unsupported."
+          }
+        }
+      },
+      "SUPPLIED_CLASS": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_class": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sierra_program": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/FELT"
+                    }
+                  },
+                  "contract_class_version": {
+                    "type": "string"
+                  },
+                  "entry_points_by_type": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "CONSTRUCTOR": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "function_idx": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["selector", "function_idx"]
+                        }
+                      },
+                      "EXTERNAL": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "function_idx": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["selector", "function_idx"]
+                        }
+                      },
+                      "L1_HANDLER": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "function_idx": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["selector", "function_idx"]
+                        }
+                      }
+                    },
+                    "required": ["CONSTRUCTOR", "EXTERNAL", "L1_HANDLER"]
+                  },
+                  "abi": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sierra_program",
+                  "contract_class_version",
+                  "entry_points_by_type",
+                  "abi"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "program": {
+                    "type": "string",
+                    "description": "Base64-encoded gzip Cairo 0 program"
+                  },
+                  "entry_points_by_type": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "CONSTRUCTOR": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "offset": {
+                              "oneOf": [
+                                {
+                                  "$ref": "#/components/schemas/FELT"
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["selector", "offset"]
+                        }
+                      },
+                      "EXTERNAL": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "offset": {
+                              "oneOf": [
+                                {
+                                  "$ref": "#/components/schemas/FELT"
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["selector", "offset"]
+                        }
+                      },
+                      "L1_HANDLER": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "selector": {
+                              "$ref": "#/components/schemas/FELT"
+                            },
+                            "offset": {
+                              "oneOf": [
+                                {
+                                  "$ref": "#/components/schemas/FELT"
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["selector", "offset"]
+                        }
+                      }
+                    },
+                    "required": ["CONSTRUCTOR", "EXTERNAL", "L1_HANDLER"]
+                  },
+                  "abi": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": ["program", "entry_points_by_type"]
+              }
+            ]
+          },
+          "class_hash": {
+            "$ref": "#/components/schemas/FELT"
+          },
+          "compiled_class_hash": {
+            "$ref": "#/components/schemas/FELT"
+          }
+        },
+        "required": ["contract_class"]
+      },
+      "APPLIED_CLASS": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "class_hash": {
+            "$ref": "#/components/schemas/FELT"
+          },
+          "compiled_class_hash": {
+            "$ref": "#/components/schemas/FELT"
+          }
+        },
+        "required": ["class_hash"]
       }
     },
     "errors": {

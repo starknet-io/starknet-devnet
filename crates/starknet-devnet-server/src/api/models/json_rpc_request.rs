@@ -139,6 +139,8 @@ pub enum StarknetSpecExtRequest {
 #[cfg_attr(test, derive(Debug))]
 #[serde(tag = "method", content = "params")]
 pub enum DevnetSpecRequest {
+    #[serde(rename = "devnet_applyStateDiff")]
+    ApplyStateDiff(starknet_types::rpc::state_mutation::ApplyStateDiffRequest),
     #[serde(rename = "devnet_impersonateAccount")]
     ImpersonateAccount(AccountAddressInput),
     #[serde(rename = "devnet_stopImpersonateAccount")]
@@ -379,7 +381,8 @@ impl DevnetSpecRequest {
             | Self::SetTime(_)
             | Self::IncreaseTime(_)
             | Self::Mint(_) => true,
-            Self::ImpersonateAccount(_)
+            Self::ApplyStateDiff(_)
+            | Self::ImpersonateAccount(_)
             | Self::StopImpersonateAccount(_)
             | Self::AutoImpersonate
             | Self::StopAutoImpersonate
@@ -402,7 +405,8 @@ impl DevnetSpecRequest {
     pub fn is_dumpable(&self) -> bool {
         #[warn(clippy::wildcard_enum_match_arm)]
         match self {
-            Self::ImpersonateAccount(_)
+            Self::ApplyStateDiff(_)
+            | Self::ImpersonateAccount(_)
             | Self::StopImpersonateAccount(_)
             | Self::AutoImpersonate
             | Self::StopAutoImpersonate
@@ -445,7 +449,8 @@ impl JsonRpcRequest {
                 | DevnetSpecRequest::DevnetStatus,
             ) => false,
             Self::DevnetSpecRequest(
-                DevnetSpecRequest::ImpersonateAccount(_)
+                DevnetSpecRequest::ApplyStateDiff(_)
+                | DevnetSpecRequest::ImpersonateAccount(_)
                 | DevnetSpecRequest::StopImpersonateAccount(_)
                 | DevnetSpecRequest::AutoImpersonate
                 | DevnetSpecRequest::StopAutoImpersonate

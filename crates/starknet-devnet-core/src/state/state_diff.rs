@@ -112,15 +112,35 @@ impl StateDiff {
     /// Modify this object by extending all of its properties with the corresponding properties of
     /// the `other` object.
     pub(crate) fn extend(&mut self, other: &StateDiff) {
+        for replacement in &other.replaced_classes {
+            let was_deployed =
+                self.address_to_class_hash.contains_key(&replacement.contract_address)
+                    && !self
+                        .replaced_classes
+                        .iter()
+                        .any(|item| item.contract_address == replacement.contract_address);
+            if !was_deployed {
+                self.replaced_classes
+                    .retain(|item| item.contract_address != replacement.contract_address);
+                self.replaced_classes.push(replacement.clone());
+            }
+        }
         self.address_to_class_hash.extend(&other.address_to_class_hash);
         self.address_to_nonce.extend(&other.address_to_nonce);
         for (address, slots) in &other.storage_updates {
             self.storage_updates.entry(*address).or_default().extend(slots);
         }
         self.class_hash_to_compiled_class_hash.extend(&other.class_hash_to_compiled_class_hash);
-        self.cairo_0_declared_contracts.extend(&other.cairo_0_declared_contracts);
-        self.declared_contracts.extend(&other.declared_contracts);
-        self.replaced_classes.extend(other.replaced_classes.clone());
+        for hash in &other.cairo_0_declared_contracts {
+            if !self.cairo_0_declared_contracts.contains(hash) {
+                self.cairo_0_declared_contracts.push(*hash);
+            }
+        }
+        for hash in &other.declared_contracts {
+            if !self.declared_contracts.contains(hash) {
+                self.declared_contracts.push(*hash);
+            }
+        }
     }
 }
 
@@ -143,8 +163,13 @@ impl From<StateDiff> for ThinStateDiff {
         let nonces: Vec<(ContractAddress, Felt)> = value.address_to_nonce.into_iter().collect();
 
         // deployed contracts (address -> class hash)
-        let deployed_contracts: Vec<(ContractAddress, Felt)> =
-            value.address_to_class_hash.into_iter().collect();
+        let deployed_contracts: Vec<(ContractAddress, Felt)> = value
+            .address_to_class_hash
+            .into_iter()
+            .filter(|(address, _)| {
+                !value.replaced_classes.iter().any(|item| item.contract_address == *address)
+            })
+            .collect();
 
         ThinStateDiff {
             deployed_contracts: deployed_contracts
@@ -289,6 +314,54 @@ mod tests {
         cairo_0_account_without_validations, dummy_cairo_1_contract_class, dummy_contract_address,
         dummy_felt, dummy_key_pair, resource_bounds_with_price_1, test_invoke_transaction_v3,
     };
+
+    #[test]
+    fn merging_class_changes_reports_one_final_replacement_or_deployment() {
+        let address = dummy_contract_address();
+        let replacement = |hash| StateDiff {
+            address_to_class_hash: [(address, hash)].into(),
+            replaced_classes: vec![ReplacedClasses { contract_address: address, class_hash: hash }],
+            ..Default::default()
+        };
+        let mut accumulated = StateDiff::default();
+        accumulated.extend(&replacement(Felt::ONE));
+        accumulated.extend(&replacement(Felt::TWO));
+        let thin: starknet_types::rpc::state::ThinStateDiff = accumulated.clone().into();
+        assert!(thin.deployed_contracts.is_empty());
+        assert_eq!(
+            thin.replaced_classes,
+            vec![ReplacedClasses { contract_address: address, class_hash: Felt::TWO }]
+        );
+        assert_eq!(thin.len(), 1);
+        assert!(!thin.is_empty());
+        let commitment: starknet_api::state::ThinStateDiff = accumulated.into();
+        assert_eq!(
+            commitment.deployed_contracts[&starknet_api::core::ContractAddress::from(address)].0,
+            Felt::TWO
+        );
+
+        let mut deployment = StateDiff {
+            address_to_class_hash: [(address, Felt::ONE)].into(),
+            ..Default::default()
+        };
+        deployment.extend(&replacement(Felt::TWO));
+        let thin: starknet_types::rpc::state::ThinStateDiff = deployment.into();
+        assert!(thin.replaced_classes.is_empty());
+        assert_eq!(thin.deployed_contracts.len(), 1);
+        assert_eq!(thin.deployed_contracts[0].class_hash, Felt::TWO);
+    }
+
+    #[test]
+    fn merging_declarations_deduplicates_hashes() {
+        let mut diff = StateDiff {
+            declared_contracts: vec![Felt::ONE],
+            cairo_0_declared_contracts: vec![Felt::TWO],
+            ..Default::default()
+        };
+        diff.extend(&diff.clone());
+        assert_eq!(diff.declared_contracts, vec![Felt::ONE]);
+        assert_eq!(diff.cairo_0_declared_contracts, vec![Felt::TWO]);
+    }
 
     #[test]
     fn correct_no_difference_between_non_modified_states() {

@@ -101,6 +101,7 @@ mod get_class_impls;
 mod predeployed;
 pub mod proofs;
 pub mod starknet_config;
+mod state_mutation;
 mod state_update;
 mod transaction_execution;
 pub(crate) mod transaction_trace;
@@ -1210,6 +1211,9 @@ impl Starknet {
         }
 
         self.pre_confirmed_state_diff = StateDiff::default();
+        // Executed transactions and manual declarations have already committed their classes
+        // under the pre-confirmed block number, even though that block is not accepted yet.
+        rpc_contract_classes.remove_classes_at(self.blocks.pre_confirmed_block.block_number().0);
         rpc_contract_classes.empty_staging();
         drop(rpc_contract_classes); // to later allow set_block_number
         self.blocks.aborted_blocks.extend_from_slice(&aborted);

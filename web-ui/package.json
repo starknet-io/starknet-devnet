@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "build:devnet": "tsc -b && vite build --outDir ../crates/starknet-devnet-server/assets/ui --emptyOutDir",
     "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

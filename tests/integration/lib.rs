@@ -8,6 +8,7 @@ mod account_impersonation;
 mod account_selection;
 mod advancing_time;
 mod advancing_time_on_fork;
+mod apply_state_diff;
 mod balance;
 mod blocks_generation;
 mod call;

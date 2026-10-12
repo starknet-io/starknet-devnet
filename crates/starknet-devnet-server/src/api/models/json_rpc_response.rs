@@ -7,6 +7,7 @@ use starknet_types::rpc::block::{Block, PreConfirmedBlock};
 use starknet_types::rpc::estimate_message_fee::FeeEstimateWrapper;
 use starknet_types::rpc::gas_modification::GasModification;
 use starknet_types::rpc::state::{PreConfirmedStateUpdate, StateUpdate};
+use starknet_types::rpc::state_mutation::ApplyStateDiffResponse;
 use starknet_types::rpc::transaction_receipt::TransactionReceipt;
 use starknet_types::rpc::transactions::{
     BlockTransactionTrace, BlockTransactionTracesWithInitialReads, EventsChunk,
@@ -100,6 +101,7 @@ pub enum StarknetExtResponse {
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum DevnetResponse {
+    AppliedStateDiff(ApplyStateDiffResponse),
     MessagingContractAddress(MessagingLoadAddress),
     FlushedMessages(FlushedMessages),
     MessageHash(MessageHash),

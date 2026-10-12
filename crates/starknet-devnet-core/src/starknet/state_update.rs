@@ -1,4 +1,4 @@
-use starknet_types::rpc::block::BlockId;
+use starknet_types::rpc::block::{BlockId, BlockStatus};
 use starknet_types::rpc::state::StateUpdate;
 
 use super::Starknet;
@@ -9,8 +9,11 @@ pub fn state_update_by_block_id(
     block_id: &BlockId,
 ) -> DevnetResult<StateUpdate> {
     let block = starknet.blocks.get_by_block_id(block_id).ok_or(crate::error::Error::NoBlock)?;
-    let state_diff =
-        starknet.blocks.hash_to_state_diff.get(&block.block_hash()).cloned().unwrap_or_default();
+    let state_diff = if block.status == BlockStatus::PreConfirmed {
+        starknet.pre_confirmed_state_diff.clone()
+    } else {
+        starknet.blocks.hash_to_state_diff.get(&block.block_hash()).cloned().unwrap_or_default()
+    };
 
     Ok(StateUpdate::new(block.block_hash(), state_diff.into()))
 }

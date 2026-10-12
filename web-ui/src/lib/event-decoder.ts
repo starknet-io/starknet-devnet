@@ -1,5 +1,5 @@
 import { keccak256 } from 'js-sha3';
-import { callRpc } from '@/lib/rpc-client';
+import { callRpc, getRpcUrl } from '@/lib/rpc-client';
 
 export type RpcBlockId = 'latest' | 'pre_confirmed' | { block_hash: string } | { block_number: number };
 
@@ -171,6 +171,10 @@ class CappedMap<K, V> {
       if (oldest !== undefined) this.map.delete(oldest);
     }
     this.map.set(key, value);
+  }
+
+  delete(key: K): void {
+    this.map.delete(key);
   }
 }
 
@@ -403,12 +407,19 @@ async function fetchContractClass({
 
 async function fetchClassByHash(classHash: string, blockId?: RpcBlockId): Promise<ContractClassInfo | null> {
   if (!classHash) return null;
+  // Tags and block numbers can change after mutations, sealing, or snapshot restoration.
+  if (!blockId || typeof blockId === 'string' || !('block_hash' in blockId)) {
+    return fetchClassByHashUncached(classHash, blockId);
+  }
 
-  const cacheKey = `${blockIdKey(blockId)}:${normalizeFelt(classHash)}`;
+  const cacheKey = `${getRpcUrl()}:${blockIdKey(blockId)}:${normalizeFelt(classHash)}`;
   const cached = classHashCache.get(cacheKey);
   if (cached) return cached;
 
-  const promise = fetchClassByHashUncached(classHash, blockId);
+  const promise = fetchClassByHashUncached(classHash, blockId, cacheKey).then((info) => {
+    if (!info) classHashCache.delete(cacheKey);
+    return info;
+  });
   classHashCache.set(cacheKey, promise);
   return promise;
 }
@@ -416,6 +427,7 @@ async function fetchClassByHash(classHash: string, blockId?: RpcBlockId): Promis
 async function fetchClassByHashUncached(
   classHash: string,
   blockId?: RpcBlockId,
+  cacheKey?: string,
 ): Promise<ContractClassInfo | null> {
   const requestedBlock = blockId ?? 'latest';
 
@@ -427,6 +439,8 @@ async function fetchClassByHashUncached(
       }),
     );
   } catch {
+    // A fallback to latest is mutable, even when the original request used a block hash.
+    if (cacheKey) classHashCache.delete(cacheKey);
     if (blockId && blockId !== 'latest') {
       try {
         return parseContractClass(
@@ -446,12 +460,18 @@ async function fetchClassByHashUncached(
 
 async function fetchClassAt(address: string, blockId?: RpcBlockId): Promise<ContractClassInfo | null> {
   if (!address) return null;
+  if (!blockId || typeof blockId === 'string' || !('block_hash' in blockId)) {
+    return fetchClassAtUncached(address, blockId);
+  }
 
-  const cacheKey = `${blockIdKey(blockId)}:${normalizeFelt(address)}`;
+  const cacheKey = `${getRpcUrl()}:${blockIdKey(blockId)}:${normalizeFelt(address)}`;
   const cached = classAtCache.get(cacheKey);
   if (cached) return cached;
 
-  const promise = fetchClassAtUncached(address, blockId);
+  const promise = fetchClassAtUncached(address, blockId, cacheKey).then((info) => {
+    if (!info) classAtCache.delete(cacheKey);
+    return info;
+  });
   classAtCache.set(cacheKey, promise);
   return promise;
 }
@@ -459,6 +479,7 @@ async function fetchClassAt(address: string, blockId?: RpcBlockId): Promise<Cont
 async function fetchClassAtUncached(
   address: string,
   blockId?: RpcBlockId,
+  cacheKey?: string,
 ): Promise<ContractClassInfo | null> {
   const requestedBlock = blockId ?? 'latest';
 
@@ -470,6 +491,7 @@ async function fetchClassAtUncached(
       }),
     );
   } catch {
+    if (cacheKey) classAtCache.delete(cacheKey);
     if (blockId && blockId !== 'latest') {
       try {
         return parseContractClass(
