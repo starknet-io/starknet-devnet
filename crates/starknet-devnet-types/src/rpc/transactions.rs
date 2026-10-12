@@ -273,11 +273,100 @@ impl TransactionWithReceipt {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[serde(untagged)]
+pub enum TransactionStatus {
+    PreExecution(PreExecutionTransactionStatus),
+    Executed(ExecutedTransactionStatus),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
 #[serde(deny_unknown_fields)]
-pub struct TransactionStatus {
+pub struct PreExecutionTransactionStatus {
+    pub finality_status: TransactionFinalityStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[serde(deny_unknown_fields)]
+pub struct ExecutedTransactionStatus {
     pub finality_status: TransactionFinalityStatus,
     pub failure_reason: Option<String>,
     pub execution_status: TransactionExecutionStatus,
+}
+
+impl TransactionStatus {
+    pub fn pre_execution(finality_status: TransactionFinalityStatus) -> Self {
+        Self::PreExecution(PreExecutionTransactionStatus { finality_status })
+    }
+
+    pub fn executed(
+        finality_status: TransactionFinalityStatus,
+        failure_reason: Option<String>,
+        execution_status: TransactionExecutionStatus,
+    ) -> Self {
+        Self::Executed(ExecutedTransactionStatus {
+            finality_status,
+            failure_reason,
+            execution_status,
+        })
+    }
+
+    pub fn finality_status(&self) -> TransactionFinalityStatus {
+        match self {
+            Self::PreExecution(status) => status.finality_status,
+            Self::Executed(status) => status.finality_status,
+        }
+    }
+
+    pub fn execution_status(&self) -> Option<TransactionExecutionStatus> {
+        match self {
+            Self::PreExecution(_) => None,
+            Self::Executed(status) => Some(status.execution_status),
+        }
+    }
+
+    pub fn failure_reason(&self) -> Option<&str> {
+        match self {
+            Self::PreExecution(_) => None,
+            Self::Executed(status) => status.failure_reason.as_deref(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod transaction_status_tests {
+    use starknet_rs_core::types::TransactionExecutionStatus;
+
+    use super::{TransactionFinalityStatus, TransactionStatus};
+
+    #[test]
+    fn pre_execution_status_omits_execution_fields() {
+        let status = TransactionStatus::pre_execution(TransactionFinalityStatus::Received);
+
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({ "finality_status": "RECEIVED" })
+        );
+    }
+
+    #[test]
+    fn executed_status_preserves_existing_shape() {
+        let status = TransactionStatus::executed(
+            TransactionFinalityStatus::PreConfirmed,
+            None,
+            TransactionExecutionStatus::Succeeded,
+        );
+
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({
+                "finality_status": "PRE_CONFIRMED",
+                "failure_reason": null,
+                "execution_status": "SUCCEEDED"
+            })
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

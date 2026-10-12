@@ -56,6 +56,10 @@ $ starknet-devnet --block-generation-on 10
 # Devnet: block automatically generated, contains no txs (manual creation did not restart the counter)
 ```
 
+## Manual mempool block creation
+
+With `--block-generation-on mempool`, submissions enter the pool as `RECEIVED` and do not execute immediately. Use `devnet_preconfirmTransactions` to select and execute them into the live proposal, then `devnet_sealBlock` to seal exactly that pre-confirmed prefix. `devnet_createBlock` processes eligible transactions according to the configured policy and seals the result. See [Mempool](./mempool) for ordering, capacity, and proposal abortion.
+
 ## Request new block creation
 
 To request the creation of a new block, send:
@@ -75,7 +79,7 @@ Result:
 {"block_hash": "0x115e1b390cafa7942b6ab141ab85040defe7dee9bef3bc31d8b5b3d01cc9c67"}
 ```
 
-The newly created block will contain all pre-confirmed transactions, if any, since the last block creation.
+The newly created block will contain all pre-confirmed transactions, if any, since the last block creation. In manual mempool mode, `devnet_createBlock` also processes eligible received transactions before sealing, subject to the configured block capacity.
 
 ## Timestamp manipulation
 

@@ -51,7 +51,7 @@ Timestamp controls are restored exactly, but wall-clock time continues to advanc
 
 External L1 state, live connections, interval scheduling, and global fork caches are not checkpointed. Messaging cursors are restored, so events still present on an external L1 may become visible to Devnet again. Existing WebSocket subscriptions remain connected and receive a reorg notification when confirmed blocks are displaced, followed by notifications for each restored block in order, including its header, accepted transactions, receipts, statuses, and events.
 
-Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Restored pre-confirmed transactions produce status updates when their status changes or they were absent before revert; unchanged statuses are not sent again. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
+Transaction-status subscriptions also receive updates when revert changes a retained transaction's L1 acceptance status, even if its block hash stays unchanged. Restored mempool and pre-confirmed transactions produce status updates when their status changes or they were absent before revert; unchanged statuses are not sent again. Fork-origin event queries release lifecycle access during origin requests, allowing snapshot, revert, and other state-changing RPCs to continue while the origin responds.
 
 ## Dumping
 
@@ -171,13 +171,15 @@ Currently, dumping produces a list of reproducible Devnet actions (state-changin
 
 Dumping and loading are not guaranteed to work across versions. I.e. if you dumped one version of Devnet, do not expect it to be loadable with a different version.
 
-If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. Use the same block-generation mode when loading as when dumping.
+If you dumped a Devnet utilizing one class for account predeployment (e.g. `--account-class cairo0`), you should use the same option when loading. Use the same block-generation mode and startup mempool configuration when loading as when dumping.
+
+In [mempool mode](./mempool), processing actions are dumped as the exact ordered transaction hashes selected, with stale-nonce removals recorded separately. Runtime configuration changes, removal, clearing, strict sealing, and proposal abortion are also recorded so replay does not depend on timing or current policy defaults.
 
 Loading does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 
 ## Restarting
 
-Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup.
+Devnet can be restarted by making a `JSON-RPC` request with method name `devnet_restart`. All deployed contracts (including predeployed), blocks and storage updates will be restarted to the original state, without the transactions and requests that may have been loaded from a dump file on startup. Restart also clears the mempool and open proposal and restores startup mempool settings.
 
 Restarting does not affect WebSocket connections, but removes all WebSocket [subscriptions](./api#websocket).
 

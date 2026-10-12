@@ -20,16 +20,17 @@ Since JSON-RPC v0.6.0, to find out which JSON-RPC version is supported by which 
 
 ### Local transaction statuses
 
-Locally submitted transactions execute during submission. Their finality status depends on the [block-generation mode](./blocks):
+In transaction, demand, and interval modes, locally submitted transactions execute during submission. Manual [mempool mode](./mempool) defers execution until explicit selection. Their finality status depends on the [block-generation mode](./blocks):
 
-| Mode                           | Status when submission succeeds | Status after block creation |
-| ------------------------------ | ------------------------------- | --------------------------- |
-| `transaction` (default)        | `ACCEPTED_ON_L2`                | `ACCEPTED_ON_L2`            |
-| `demand` or a numeric interval | `PRE_CONFIRMED`                 | `ACCEPTED_ON_L2`            |
+| Mode                           | Status when submission succeeds | Status after block creation                  |
+| ------------------------------ | ------------------------------- | -------------------------------------------- |
+| `transaction` (default)        | `ACCEPTED_ON_L2`                | `ACCEPTED_ON_L2`                             |
+| `demand` or a numeric interval | `PRE_CONFIRMED`                 | `ACCEPTED_ON_L2`                             |
+| `mempool`                      | `RECEIVED`                      | `ACCEPTED_ON_L2` after selection and sealing |
 
-Local transactions never enter `RECEIVED` or `CANDIDATE`. A validation failure returns an error without retaining a transaction. An executed transaction can have execution status `SUCCEEDED` or `REVERTED`; this is independent of its finality status. `ACCEPTED_ON_L1` is available through the explicit [L1 acceptance simulation](./blocks#accepting-blocks-on-l1).
+`RECEIVED` and the internal `CANDIDATE` phase are used only in manual mempool mode. Queued transactions have no execution status, receipt, or trace until processing; selected transactions become `PRE_CONFIRMED` before sealing. Stateless preparation failures return an error without admission, while execution-time failures are reported by the processing RPC and remove rejected entries. In other modes, a validation failure returns an error without retaining a transaction. An executed transaction can have execution status `SUCCEEDED` or `REVERTED`; this is independent of its finality status. `ACCEPTED_ON_L1` is available through the explicit [L1 acceptance simulation](./blocks#accepting-blocks-on-l1).
 
-`starknet_getTransactionStatus`, transaction receipts, and transaction-status WebSocket notifications report these executed statuses. An unknown or removed local transaction hash returns `TXN_HASH_NOT_FOUND` (code `29`) from `starknet_getTransactionStatus`. [Snapshot restoration](./dump-load-restart#in-memory-snapshots) can return a retained transaction to its earlier status. In forking mode, responses forwarded to the origin reflect that origin's behavior.
+`starknet_getTransactionStatus` and transaction-status WebSocket notifications report the transaction's current phase; receipts become available after execution. `devnet_mint` bypasses deferred admission and executes immediately even in manual mempool mode. An unknown or removed local transaction hash returns `TXN_HASH_NOT_FOUND` (code `29`) from `starknet_getTransactionStatus`. [Snapshot restoration](./dump-load-restart#in-memory-snapshots) can return a retained transaction to its earlier status. In forking mode, responses forwarded to the origin reflect that origin's behavior.
 
 ### Devnet API
 
@@ -83,6 +84,11 @@ For example, starting with `starknet-devnet --seed 42 --accounts 2 --host 127.0.
   "dump_on": "request",
   "dump_path": null,
   "block_generation_on": "demand",
+  "mempool_config": {
+    "ordering": "fifo",
+    "random_seed": 42,
+    "max_transactions_per_block": 500
+  },
   "lite_mode": false,
   "proof_mode": "devnet",
   "state_archive": "full",

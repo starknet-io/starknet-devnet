@@ -90,13 +90,22 @@ $ docker run --env-file .my-env-file starknetfoundation/starknet-devnet-rs
 
 ## Block generation
 
-`--block-generation-on` (environment variable `BLOCK_GENERATION_ON`) controls when executed transactions are sealed into accepted blocks:
+`--block-generation-on` (environment variable `BLOCK_GENERATION_ON`) controls transaction processing and block sealing:
 
 - `transaction` (default): execute and seal a block with each transaction.
 - `demand`: execute transactions immediately in the pre-confirmed block; seal with `devnet_createBlock`.
+- `mempool`: admit transactions as `RECEIVED`; select and execute through [mempool RPC methods](../mempool) before sealing.
 - A positive integer: execute immediately and seal the pre-confirmed block every specified number of seconds, including empty blocks.
 
 See [Blocks](../blocks) for status transitions and manual block creation.
+
+Configure manual mempool ordering and block capacity with:
+
+```bash
+starknet-devnet --block-generation-on mempool --mempool-ordering starknet --mempool-max-transactions-per-block 500
+```
+
+The available policies are `fifo`, `starknet`, and `random`. Use `--mempool-random-seed <SEED>` for reproducible random selection; it defaults to the Devnet account seed. Equivalent environment variables are `MEMPOOL_ORDERING`, `MEMPOOL_RANDOM_SEED`, and `MEMPOOL_MAX_TRANSACTIONS_PER_BLOCK`.
 
 ## Proof-related configuration
 
