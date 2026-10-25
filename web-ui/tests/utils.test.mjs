@@ -35,7 +35,7 @@ test('fractional gas prices convert exactly without floating-point rounding or t
   for (const value of ['', '0', '-1', '1foo', '1e3', '0.0000000001', '9007199.254740992']) assert.equal(exports.parseGasPrice(value), undefined);
 });
 
-test('dumps must be a native object or a legacy event array', () => {
+test('dumps must be a dump object or a legacy event array', () => {
   assert.equal(exports.validateDumpText('{"format":"starknet-devnet-dump"}'), undefined);
   assert.equal(exports.validateDumpText('[]'), undefined);
   assert.equal(exports.validateDumpText('  '), 'Choose or paste a dump');
