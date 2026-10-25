@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Gamepad2, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
-import { callRpc } from '@/lib/rpc-client';
+import { callRpc, callRpcWithRawParams } from '@/lib/rpc-client';
 import { formatTokenAmount } from '@/lib/formatters';
-import { asNumber, asString, asStringArray, isHex, isRecord, isSnapshotId, parseGasPrice, parseInt10 } from '@/lib/utils';
+import { asNumber, asString, asStringArray, isHex, isRecord, isSnapshotId, parseGasPrice, parseInt10, summarizeDump, validateDumpText } from '@/lib/utils';
 import { CopyableHash } from '@/components/CopyableHash';
 
 type Unit = 'ETH' | 'STRK';
@@ -20,11 +20,22 @@ function errorMessage(e: unknown): string {
   }
 }
 
+/** Saves `value` as a JSON file in the browser. */
+function downloadJson(value: unknown, fileName: string) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function ActionCard({
   title,
   method,
   children,
   getParams,
+  rawParams,
   label,
   renderResult,
   validate,
@@ -35,6 +46,8 @@ function ActionCard({
   children: React.ReactNode;
   /** Returns the params to send, or `null` if inputs are invalid. */
   getParams: () => Record<string, unknown> | null;
+  /** Returns the params as JSON text sent verbatim; takes precedence over `getParams`. */
+  rawParams?: () => string;
   label?: string;
   renderResult?: (data: unknown) => React.ReactNode;
   /** Optional client-side validation. Return a string error message, or undefined if valid. */
@@ -54,7 +67,7 @@ function ActionCard({
         return;
       }
     }
-    const params = getParams();
+    const params = rawParams ? undefined : getParams();
     if (params === null) {
       setResult({ type: 'error', message: 'Invalid input' });
       return;
@@ -62,7 +75,7 @@ function ActionCard({
     setLoading(true);
     setResult(null);
     try {
-      const data = await callRpc(method, params);
+      const data = rawParams ? await callRpcWithRawParams(method, rawParams()) : await callRpc(method, params);
       setResult({ type: 'success', data });
       onSuccess?.(data);
       if (!['devnet_snapshot', 'devnet_dump', 'devnet_getAccountBalance', 'devnet_getPredeployedAccounts'].includes(method)
@@ -171,11 +184,9 @@ export default function ControlPanel() {
   const [l2GasWei, setL2GasWei] = useState('');
   const [l2GasFri, setL2GasFri] = useState('');
   const [gasGenerateBlock, setGasGenerateBlock] = useState(false);
-  const [dumpPath, setDumpPath] = useState('');
-  const [dumpInline, setDumpInline] = useState(false);
-  const [loadPath, setLoadPath] = useState('');
-  const [loadSource, setLoadSource] = useState<'path' | 'events'>('path');
-  const [loadEvents, setLoadEvents] = useState('[]');
+  const [loadSource, setLoadSource] = useState<'file' | 'paste'>('file');
+  const [loadFile, setLoadFile] = useState<{ name: string; text: string } | null>(null);
+  const [loadPasted, setLoadPasted] = useState('');
   const [snapshotId, setSnapshotId] = useState('');
   const [restartMessaging, setRestartMessaging] = useState(false);
   const [stateDiffParams, setStateDiffParams] = useState('{\n  "state_diff": {},\n  "classes": []\n}');
@@ -458,37 +469,33 @@ export default function ControlPanel() {
           <p className="mt-2 text-xs text-gray-400">A successful revert consumes this snapshot and all newer snapshots. External L1 state is not restored. Restricted by default in restrictive mode.</p>
         </ActionCard>
 
-        <ActionCard title="Dump State" method="devnet_dump" getParams={() => ({ ...(dumpPath.trim() ? { path: dumpPath.trim() } : {}), inline: dumpInline })} label="Dump"
-          renderResult={(data) => {
-            if (data === null || data === undefined) return <div className="text-xs text-gray-400">Saved to file</div>;
-            if (Array.isArray(data)) return <div className="text-xs text-gray-200"><p className="mb-2">{data.length} event(s) in dump</p><pre className="whitespace-pre-wrap break-all font-mono">{JSON.stringify(data, null, 2)}</pre></div>;
-            return null;
-          }}
-        >
-          <InputField placeholder="Server file path (optional)" value={dumpPath} onChange={setDumpPath} />
-          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-            <input type="checkbox" checked={dumpInline} onChange={(e) => setDumpInline(e.target.checked)} className="rounded-sm" />Ignore startup dump path</label>
-          <p className="mt-2 text-xs text-gray-500">Requires --dump-on at startup. Events are always returned and can be copied as JSON. An explicit path is still written.</p>
+        <ActionCard title="Dump State" method="devnet_dump" getParams={() => ({})} label="Dump"
+          onSuccess={(data) => downloadJson(data, `devnet-dump-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)}
+          renderResult={(data) => <div className="text-xs text-gray-200">{summarizeDump(data)}</div>}>
+          <p className="text-xs text-gray-400">Downloads the current state as a JSON file. Load it here or on startup with --load-path. Dumps load only into the same Devnet release. Restricted by default in restrictive mode.</p>
         </ActionCard>
 
-        <ActionCard title="Load State" method="devnet_load"
-          validate={() => {
-            if (loadSource === 'path') return !loadPath.trim() ? 'Path is required' : undefined;
-            try {
-              if (!Array.isArray(JSON.parse(loadEvents))) return 'Events must be a JSON array';
-            } catch { return 'Enter valid JSON'; }
-          }}
-          getParams={() => loadSource === 'path' ? { path: loadPath.trim() } : { events: JSON.parse(loadEvents) }}
-          label="Load">
+        <ActionCard title="Load State" method="devnet_load" label="Load"
+          validate={() => validateDumpText(loadSource === 'file' ? loadFile?.text ?? '' : loadPasted)}
+          getParams={() => ({})}
+          rawParams={() => `{"dump":${loadSource === 'file' ? loadFile?.text ?? '' : loadPasted}}`}>
           <label htmlFor="load-source" className="block text-xs text-gray-500 mb-1">Load from</label>
-          <select id="load-source" className="input w-full text-xs mb-2" value={loadSource} onChange={(e) => setLoadSource(e.target.value as 'path' | 'events')}>
-            <option value="path">Server file</option><option value="events">Inline events</option>
+          <select id="load-source" className="input w-full text-xs mb-2" value={loadSource} onChange={(e) => setLoadSource(e.target.value as 'file' | 'paste')}>
+            <option value="file">Dump file</option><option value="paste">Pasted JSON</option>
           </select>
-          {loadSource === 'path' ? <InputField placeholder="Server file path to load" value={loadPath} onChange={setLoadPath} /> : <>
-            <label htmlFor="load-events" className="block text-xs text-gray-500 mb-1">Events (JSON array)</label>
-            <textarea id="load-events" className="input w-full text-xs font-mono min-h-40 resize-y" value={loadEvents} onChange={(e) => setLoadEvents(e.target.value)} spellCheck={false} />
+          {loadSource === 'file' ? <>
+            <input id="load-file" type="file" accept=".json,application/json" className="block w-full text-xs text-gray-400"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) { setLoadFile(null); return; }
+                void file.text().then((text) => setLoadFile({ name: file.name, text }));
+              }} />
+            {loadFile && <p className="mt-1 text-xs text-gray-500">{loadFile.name} ({Math.ceil(loadFile.text.length / 1024)} KB)</p>}
+          </> : <>
+            <label htmlFor="load-dump" className="block text-xs text-gray-500 mb-1">Dump (JSON)</label>
+            <textarea id="load-dump" className="input w-full text-xs font-mono min-h-40 resize-y" value={loadPasted} onChange={(e) => setLoadPasted(e.target.value)} spellCheck={false} />
           </>}
-          <p className="mt-2 text-xs text-gray-400">Replaces the current state by replaying the dump and invalidates all snapshots. Use the same block-generation mode as the original instance.</p>
+          <p className="mt-2 text-xs text-gray-400">Replaces the current state and invalidates all snapshots. Accepts dumps from Dump State and legacy event arrays, which are replayed. Dumps with a different block-generation mode or forking origin load only on startup.</p>
         </ActionCard>
 
         <ActionCard title="Restart Devnet" method="devnet_restart" getParams={() => ({ restart_l1_to_l2_messaging: restartMessaging })} label="Restart"

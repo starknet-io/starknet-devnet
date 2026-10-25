@@ -48,3 +48,13 @@ test('RPC validation errors retain field context from the server', async () => {
   }) }) });
   await assert.rejects(api.callRpc('devnet_applyStateDiff', {}), /classes\[0\]\.class_hash/);
 });
+
+test('raw params are sent verbatim, keeping integers beyond the safe range', async () => {
+  const rawParams = '{"dump":[{"params":{"amount":123456789012345678901234567890}}]}';
+  const api = client({ fetch: async (_, options) => {
+    assert.ok(options.body.endsWith(`"method":"devnet_load","params":${rawParams}}`), options.body);
+    assert.equal(JSON.parse(options.body).jsonrpc, '2.0');
+    return { ok: true, json: async () => ({ result: {} }) };
+  } });
+  assert.deepEqual(await api.callRpcWithRawParams('devnet_load', rawParams), {});
+});

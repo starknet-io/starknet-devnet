@@ -34,3 +34,20 @@ test('fractional gas prices convert exactly without floating-point rounding or t
   assert.equal(exports.parseGasPrice('9007199.254740991'), Number.MAX_SAFE_INTEGER);
   for (const value of ['', '0', '-1', '1foo', '1e3', '0.0000000001', '9007199.254740992']) assert.equal(exports.parseGasPrice(value), undefined);
 });
+
+test('dumps must be a native object or a legacy event array', () => {
+  assert.equal(exports.validateDumpText('{"format":"starknet-devnet-dump"}'), undefined);
+  assert.equal(exports.validateDumpText('[]'), undefined);
+  assert.equal(exports.validateDumpText('  '), 'Choose or paste a dump');
+  assert.equal(exports.validateDumpText('{'), 'The dump is not valid JSON');
+  assert.equal(exports.validateDumpText('"dump"'), 'A dump is a JSON object or a legacy event array');
+});
+
+test('dump summaries count the genesis block and transactions', () => {
+  assert.equal(
+    exports.summarizeDump({ blocks: { accepted: [{}, {}] }, transactions: [{}] }),
+    'Dump downloaded: 3 blocks, 1 transaction',
+  );
+  assert.equal(exports.summarizeDump({ blocks: { accepted: [] }, transactions: [] }), 'Dump downloaded: 1 block, 0 transactions');
+  assert.equal(exports.summarizeDump(null), 'Dump downloaded');
+});
