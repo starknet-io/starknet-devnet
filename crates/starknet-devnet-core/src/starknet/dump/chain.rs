@@ -211,7 +211,7 @@ impl ConfigDump {
     pub(super) fn decode(
         self,
         definitions: &ClassDefinitions,
-        options: &super::NativeDumpLoadOptions,
+        options: &super::DumpLoadOptions,
     ) -> DevnetResult<StarknetConfig> {
         let Self {
             seed,
