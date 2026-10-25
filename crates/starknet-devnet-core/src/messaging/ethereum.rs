@@ -172,6 +172,12 @@ impl EthereumMessaging {
         let from_block = self.last_fetched_block + 1;
         let mut messages = vec![];
 
+        // No new L1 blocks since the last fetch; nodes reject ranges with from_block > to_block.
+        if from_block > to_block {
+            self.last_fetched_block = to_block;
+            return Ok(messages);
+        }
+
         self.fetch_logs(from_block, to_block).await?.into_iter().for_each(
             |(block_number, block_logs)| {
                 trace!(
