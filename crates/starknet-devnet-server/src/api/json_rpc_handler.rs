@@ -3,7 +3,6 @@ use futures::StreamExt;
 use starknet_core::StarknetBlock;
 use starknet_core::error::DevnetResult;
 use starknet_core::starknet::Starknet;
-use starknet_core::starknet::starknet_config::DumpOn;
 use starknet_types::emitted_event::SubscriptionEmittedEvent;
 use starknet_types::rpc::block::{BlockId, BlockTag, ReorgData};
 use starknet_types::rpc::transactions::TransactionFinalityStatus;
@@ -22,7 +21,6 @@ use crate::api::models::{
 };
 use crate::api::origin_forwarder::{OriginForwarder, PreparedOriginCall};
 use crate::api::{Api, ApiError, error};
-use crate::dump_util::{clear_dump_file, dump_event};
 use crate::restrictive_mode::is_json_rpc_method_restricted;
 use crate::rpc_core;
 use crate::rpc_core::error::{ErrorCode, RpcError};
@@ -130,7 +128,6 @@ impl JsonRpcHandler {
         }
 
         let is_request_forwardable = request.is_forwardable_to_origin(); // applicable if forking
-        let is_request_dumpable = request.is_dumpable();
 
         // for later comparison and subscription notifications
         let old_latest_block = if request.requires_notifying() {
@@ -159,13 +156,6 @@ impl JsonRpcHandler {
                 result: starknet_resp,
                 forwarded: Some(forwarder.prepare_call(original_call).await),
             };
-        }
-
-        if starknet_resp.is_ok()
-            && is_request_dumpable
-            && let Err(e) = self.update_dump(&original_call).await
-        {
-            return Err(ApiError::RpcError(e)).into();
         }
 
         if let Err(e) = self.broadcast_changes(old_latest_block, old_pre_confirmed_block).await {
@@ -724,7 +714,7 @@ impl JsonRpcHandler {
             }
             DevnetSpecRequest::AutoImpersonate => self.set_auto_impersonate(true).await,
             DevnetSpecRequest::StopAutoImpersonate => self.set_auto_impersonate(false).await,
-            DevnetSpecRequest::Dump(request) => self.dump(request.unwrap_or_default()).await,
+            DevnetSpecRequest::Dump => self.dump().await,
             DevnetSpecRequest::ApplyStateDiff(request) => self.apply_state_diff(request).await,
             DevnetSpecRequest::Snapshot => self.snapshot().await,
             DevnetSpecRequest::Revert(request) => self.revert(request).await,
@@ -840,47 +830,6 @@ impl JsonRpcHandler {
         crate::metrics::RPC_CALL_COUNT.with_label_values(&[&method, status]).inc();
 
         result
-    }
-
-    async fn update_dump(&self, event: &RpcMethodCall) -> Result<(), RpcError> {
-        match self.api.config.dump_on {
-            Some(DumpOn::Block) => {
-                let path = self
-                    .api
-                    .config
-                    .dump_path
-                    .as_deref()
-                    .ok_or(RpcError::internal_error_with("Undefined dump path"))?;
-                let mut dumpable_events = self.api.dumpable_events.lock().await;
-
-                dump_event(event, path).map_err(|e| {
-                    let msg = format!("Failed dumping of {}: {e}", event.method);
-                    RpcError::internal_error_with(msg)
-                })?;
-                dumpable_events.push(event.clone());
-            }
-            Some(DumpOn::Request | DumpOn::Exit) => {
-                self.api.dumpable_events.lock().await.push(event.clone())
-            }
-            None => (),
-        }
-
-        Ok(())
-    }
-
-    pub async fn re_execute(&self, events: &[RpcMethodCall]) -> Result<(), RpcError> {
-        let _lifecycle = self.api.lifecycle.write().await;
-        // Startup decoding is read-only. Any journal replacement belongs to this coordinated
-        // application phase, just as it does for devnet_load.
-        self.api.snapshots.lock().await.checkpoints.clear();
-        if let (Some(DumpOn::Block), Some(path)) =
-            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
-        {
-            clear_dump_file(path).map_err(|error| {
-                RpcError::internal_error_with(format!("Failed clearing startup journal: {error}"))
-            })?;
-        }
-        self.re_execute_locked(events).await
     }
 
     pub(crate) async fn re_execute_locked(&self, events: &[RpcMethodCall]) -> Result<(), RpcError> {

@@ -1,4 +1,9 @@
-use starknet_core::starknet::starknet_config::DumpOn;
+use std::sync::Arc;
+
+use serde_json::Value;
+use starknet_core::starknet::Starknet;
+use starknet_core::starknet::dump::{NativeDump, NativeDumpLoadOptions};
+use starknet_core::starknet::starknet_config::StarknetConfig;
 use starknet_rs_core::types::TransactionExecutionStatus;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::felt::{TransactionHash, felt_from_prefixed_hex};
@@ -17,15 +22,14 @@ use super::models::{
     DeclareTransactionOutput, DeployAccountTransactionOutput, DevnetResponse, JsonRpcResponse,
     StarknetResponse, TransactionHashOutput,
 };
-use crate::api::JsonRpcHandler;
 use crate::api::account_helpers::{get_balance, get_erc20_fee_unit_address};
 use crate::api::models::{
     AbortedBlocks, AbortingBlocks, AcceptOnL1Request, AcceptedOnL1Blocks, CreatedBlock,
-    DumpRequest, FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, LoadRequest,
-    MessageHash, MessagingLoadAddress, MintTokensRequest, MintTokensResponse,
-    PostmanLoadL1MessagingContract, RestartParameters, RevertRequest, SetTime, SetTimeResponse,
+    FlushParameters, FlushedMessages, IncreaseTime, IncreaseTimeResponse, LoadRequest, MessageHash,
+    MessagingLoadAddress, MintTokensRequest, MintTokensResponse, PostmanLoadL1MessagingContract,
+    RestartParameters, RevertRequest, SetTime, SetTimeResponse,
 };
-use crate::dump_util::{clear_dump_file, dump_events, read_events, replace_dump_events};
+use crate::api::{Api, JsonRpcHandler};
 use crate::rpc_core::error::RpcError;
 use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
@@ -62,13 +66,12 @@ impl JsonRpcHandler {
             Some(origin) => origin.acceptance_boundary().await,
             None => None,
         };
-        let dump_event_count = self.api.dumpable_events.lock().await.len();
         let core = self.api.starknet.lock().await.checkpoint();
 
         snapshots.last_id = snapshot_id;
         snapshots.checkpoints.insert(
             snapshot_id,
-            crate::api::ServerCheckpoint { core, dump_event_count, origin_accepted_on_l1_through },
+            crate::api::ServerCheckpoint { core, origin_accepted_on_l1_through },
         );
 
         Ok(DevnetResponse::SnapshotId(format!("0x{snapshot_id:x}")).into())
@@ -88,8 +91,7 @@ impl JsonRpcHandler {
             return Ok(DevnetResponse::Reverted(false).into());
         };
         // Acquire every destination before publication. Cancellation during preparation must
-        // leave the checkpoint, journal, and live state untouched.
-        let mut dumpable_events = self.api.dumpable_events.lock().await;
+        // leave the checkpoint and live state untouched.
         let mut starknet = self.api.starknet.lock().await;
         let mut origin_acceptance = match &self.origin_caller {
             Some(origin) => Some(origin.lock_acceptance().await),
@@ -97,34 +99,19 @@ impl JsonRpcHandler {
         };
         let sockets = self.api.sockets.lock().await;
         let checkpoint = entry.get();
-        let dump_event_count = checkpoint.dump_event_count;
         let origin_accepted_on_l1_through = checkpoint.origin_accepted_on_l1_through;
-        if dump_event_count > dumpable_events.len() {
-            return Err(ApiError::RpcError(RpcError::internal_error_with(
-                "Snapshot dump position exceeds the current journal",
-            )));
-        }
         let notifications = Self::revert_notifications(&starknet, checkpoint.core.as_starknet())?;
 
-        if let (Some(DumpOn::Block), Some(path)) =
-            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
-        {
-            replace_dump_events(&dumpable_events[..dump_event_count], path)
-                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?;
-        }
-
-        // Commit: no await or fallible operation between filesystem publication and the
-        // complete in-memory restore, including snapshot consumption.
+        // Commit: no await or fallible operation until the restore is complete, including
+        // snapshot consumption.
         let checkpoint = entry.remove();
         starknet.restore_checkpoint(checkpoint.core);
         if let Some(acceptance) = &mut origin_acceptance {
             acceptance.restore(origin_accepted_on_l1_through);
         }
-        dumpable_events.truncate(dump_event_count);
         snapshots.checkpoints.retain(|id, _| *id < snapshot_id);
         drop(origin_acceptance);
         drop(starknet);
-        drop(dumpable_events);
         drop(snapshots);
         sockets.notify_subscribers(&notifications);
         Ok(DevnetResponse::Reverted(true).into())
@@ -209,56 +196,155 @@ impl JsonRpcHandler {
     }
 
     /// devnet_dump
-    pub async fn dump(&self, request: DumpRequest) -> StrictRpcResult {
-        if self.api.config.dump_on.is_none() {
-            return Err(ApiError::DumpError {
-                msg: "Please provide --dump-on mode on startup.".to_string(),
-            });
-        }
+    pub async fn dump(&self) -> StrictRpcResult {
+        Ok(DevnetResponse::DevnetDump(Box::new(self.native_dump().await?)).into())
+    }
 
-        // Keep the event snapshot and any file rewrite synchronized with block-mode appends.
-        let dumpable_events = self.api.dumpable_events.lock().await;
-
-        let path = if request.inline {
-            request.path.unwrap_or_default()
-        } else {
-            request.path.or_else(|| self.api.config.dump_path.clone()).unwrap_or_default()
+    /// Encodes the instance, including the forking origin's L1-acceptance boundary.
+    pub async fn native_dump(&self) -> Result<NativeDump, ApiError> {
+        let origin_accepted_on_l1_through = match &self.origin_caller {
+            Some(origin) => origin.acceptance_boundary().await,
+            None => None,
         };
+        let mut dump = self.api.starknet.lock().await.native_dump()?;
+        dump.origin_accepted_on_l1_through = origin_accepted_on_l1_through;
+        Ok(dump)
+    }
 
-        if !path.is_empty() {
-            dump_events(&dumpable_events, &path)
-                .map_err(|err| ApiError::DumpError { msg: err.to_string() })?;
+    /// Restores the forking origin's L1-acceptance boundary recorded in a dump loaded on startup.
+    pub async fn restore_origin_acceptance(&self, accepted_on_l1_through: Option<u64>) {
+        if let Some(origin) = &self.origin_caller {
+            origin.lock_acceptance().await.restore(accepted_on_l1_through);
         }
-
-        Ok(DevnetResponse::DevnetDump(Some(dumpable_events.clone())).into())
     }
 
     /// devnet_load
     pub async fn load(&self, request: LoadRequest) -> StrictRpcResult {
-        // Serialize file reads and clears with block-mode appends and endpoint rewrites.
-        let dumpable_events = self.api.dumpable_events.lock().await;
-        let events = match request {
-            LoadRequest::Path { path } => read_events(&path)
-                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?,
-            LoadRequest::Events { events } => events,
-        };
-        // File-read/parse errors preserve snapshots. Invalidate before the first destructive
-        // action, including clearing a configured block-mode journal before reset/replay.
-        self.api.snapshots.lock().await.checkpoints.clear();
-        if let (Some(DumpOn::Block), Some(path)) =
-            (self.api.config.dump_on, self.api.config.dump_path.as_deref())
-        {
-            clear_dump_file(path)
-                .map_err(|error| ApiError::DumpError { msg: error.to_string() })?;
-        }
-        // Re-execution records the loaded events, so release the lock before restarting.
-        drop(dumpable_events);
-
-        // Necessary to restart before loading; restarting messaging to allow re-execution
-        self.restart(Some(RestartParameters { restart_l1_to_l2_messaging: true })).await?;
-        self.re_execute_locked(&events).await.map_err(ApiError::RpcError)?;
-
+        self.load_dump(request.dump).await?;
         Ok(JsonRpcResponse::Empty)
+    }
+
+    /// Replaces the instance state with a native dump or a legacy event array. On failure, the
+    /// state, snapshots and subscriptions are left unchanged.
+    pub async fn load_dump(&self, dump: Value) -> Result<(), ApiError> {
+        let result = match dump {
+            Value::Array(_) => self.load_legacy_dump(dump).await,
+            dump => self.load_native_dump(dump).await,
+        };
+        if result.is_err() {
+            // Building a replacement instance updates the global metrics.
+            self.api.starknet.lock().await.sync_metrics();
+        }
+        result
+    }
+
+    async fn load_native_dump(&self, dump: Value) -> Result<(), ApiError> {
+        let dump = NativeDump::from_value(dump).map_err(load_error)?;
+        let options = NativeDumpLoadOptions {
+            dump_on: self.api.config.dump_on,
+            dump_path: self.api.config.dump_path.clone(),
+            fork_url: None,
+        };
+        let dumped_config = dump.starknet_config(&options).map_err(load_error)?;
+        self.assert_loadable_without_reconfiguration(&dumped_config)?;
+
+        let origin_accepted_on_l1_through = dump.origin_accepted_on_l1_through;
+        let loaded = Starknet::from_native_dump(dump, &options).map_err(load_error)?;
+        self.replace_state(loaded, origin_accepted_on_l1_through).await;
+        Ok(())
+    }
+
+    /// Legacy dumps are replayed on a separate instance, so a failed replay cannot affect this
+    /// one and the replay notifies no subscribers.
+    async fn load_legacy_dump(&self, dump: Value) -> Result<(), ApiError> {
+        let events: Vec<RpcMethodCall> = serde_json::from_value(dump).map_err(|error| {
+            ApiError::RpcError(RpcError::invalid_params(format!("Invalid legacy dump: {error}")))
+        })?;
+        if let Some(event) = events
+            .iter()
+            .find(|event| matches!(event.method.as_str(), "devnet_dump" | "devnet_load"))
+        {
+            return Err(ApiError::RpcError(RpcError::invalid_params(format!(
+                "Legacy dumps containing {} cannot be loaded",
+                event.method
+            ))));
+        }
+
+        let config = self.api.starknet.lock().await.config.clone();
+        let replay = JsonRpcHandler::new(Api {
+            config: Arc::new(config.clone()),
+            server_config: self.api.server_config.clone(),
+            starknet: Arc::new(tokio::sync::Mutex::new(Starknet::new(&config)?)),
+            sockets: Default::default(),
+            snapshots: Default::default(),
+            lifecycle: Default::default(),
+        });
+        replay.re_execute_locked(&events).await.map_err(ApiError::RpcError)?;
+
+        let loaded = std::mem::take(&mut *replay.api.starknet.lock().await);
+        let origin_accepted_on_l1_through = match &replay.origin_caller {
+            Some(origin) => origin.acceptance_boundary().await,
+            None => None,
+        };
+        self.replace_state(loaded, origin_accepted_on_l1_through).await;
+        Ok(())
+    }
+
+    /// The server is wired to its startup block generation and forking origin, so dumps that
+    /// change them load only at startup.
+    fn assert_loadable_without_reconfiguration(
+        &self,
+        dumped: &StarknetConfig,
+    ) -> Result<(), ApiError> {
+        let running = &self.api.config;
+        let mismatch = if dumped.block_generation_on != running.block_generation_on {
+            Some(format!(
+                "block generation {:?}, but this Devnet uses {:?}",
+                dumped.block_generation_on, running.block_generation_on
+            ))
+        } else if (&dumped.fork_config.url, dumped.fork_config.block_number)
+            != (&running.fork_config.url, running.fork_config.block_number)
+        {
+            let describe = |config: &StarknetConfig| match (
+                &config.fork_config.url,
+                config.fork_config.block_number,
+            ) {
+                (Some(url), Some(block_number)) => {
+                    format!("a fork of {url} at block {block_number}")
+                }
+                _ => "no fork".to_string(),
+            };
+            Some(format!("{}, but this Devnet uses {}", describe(dumped), describe(running)))
+        } else {
+            None
+        };
+
+        match mismatch {
+            Some(mismatch) => Err(ApiError::RpcError(RpcError::invalid_params(format!(
+                "The dump uses {mismatch}; load it at startup instead"
+            )))),
+            None => Ok(()),
+        }
+    }
+
+    /// Replaces the instance state, invalidating snapshots and clearing subscriptions while
+    /// keeping WebSocket connections.
+    async fn replace_state(&self, loaded: Starknet, origin_accepted_on_l1_through: Option<u64>) {
+        let mut snapshots = self.api.snapshots.lock().await;
+        let mut starknet = self.api.starknet.lock().await;
+        let mut origin_acceptance = match &self.origin_caller {
+            Some(origin) => Some(origin.lock_acceptance().await),
+            None => None,
+        };
+        let mut sockets = self.api.sockets.lock().await;
+
+        *starknet = loaded;
+        starknet.sync_metrics();
+        if let Some(acceptance) = &mut origin_acceptance {
+            acceptance.restore(origin_accepted_on_l1_through);
+        }
+        snapshots.checkpoints.clear();
+        sockets.clear();
     }
 
     /// devnet_postmanLoad
@@ -406,7 +492,6 @@ impl JsonRpcHandler {
         // Invalidate immediately before the first destructive reset. The allocator deliberately
         // remains monotonic for the lifetime of the process.
         self.api.snapshots.lock().await.checkpoints.clear();
-        self.api.dumpable_events.lock().await.clear();
 
         let _acceptance_guard = if let Some(origin_caller) = &self.origin_caller {
             Some(origin_caller.acceptance_lock.lock().await)
@@ -528,6 +613,16 @@ async fn execute_rpc_tx(
             Ok(tx_hash)
         }
         ResponseResult::Error(e) => Err(e),
+    }
+}
+
+/// Maps a failure to read a dump; invalid dumps are reported as invalid params.
+fn load_error(error: starknet_core::error::Error) -> ApiError {
+    match error {
+        starknet_core::error::Error::InvalidDump(msg) => {
+            ApiError::RpcError(RpcError::invalid_params(format!("Invalid dump: {msg}")))
+        }
+        other => ApiError::StarknetDevnetError(other),
     }
 }
 

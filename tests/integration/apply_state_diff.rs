@@ -9,8 +9,8 @@ use tokio_tungstenite::connect_async;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::PREDEPLOYED_ACCOUNT_ADDRESS;
 use crate::common::utils::{
-    UniqueAutoDeletableFile, assert_no_notifications, get_events_contract_artifacts,
-    get_simple_contract_artifacts, send_text_rpc_via_ws, subscribe_new_heads, subscribe_new_txs,
+    assert_no_notifications, get_events_contract_artifacts, get_simple_contract_artifacts,
+    send_text_rpc_via_ws, subscribe_new_heads, subscribe_new_txs,
 };
 
 fn storage_diff(address: Felt, key: Felt, value: Felt) -> Value {
@@ -348,23 +348,15 @@ async fn declarations_deployments_replacements_and_historical_classes() {
 }
 
 #[tokio::test]
-async fn atomic_errors_leave_state_classes_and_journal_unchanged() {
-    let dump = UniqueAutoDeletableFile::new("apply_state_diff_atomic");
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
-        "--dump-on",
-        "block",
-        "--dump-path",
-        &dump.path,
-        "--block-generation-on",
-        "demand",
-    ])
-    .await
-    .unwrap();
+async fn atomic_errors_leave_state_and_classes_unchanged() {
+    let devnet = BackgroundDevnet::spawn_with_additional_args(&["--block-generation-on", "demand"])
+        .await
+        .unwrap();
     let address = Felt::from_hex_unchecked(PREDEPLOYED_ACCOUNT_ADDRESS);
     let (class, compiled_hash) = get_simple_contract_artifacts();
     let class_hash = class.class_hash();
     apply(&devnet, storage_diff(address, Felt::from(0x55), Felt::ONE)).await;
-    let before = std::fs::read(&dump.path).unwrap();
+    let before = devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
     let before_diff = state_diff(&devnet, json!("pre_confirmed")).await;
     let invalid_class = devnet
         .send_custom_rpc(
@@ -380,7 +372,7 @@ async fn atomic_errors_leave_state_classes_and_journal_unchanged() {
         .await
         .unwrap_err();
     assert_eq!(invalid_class.code, 50);
-    assert_eq!(std::fs::read(&dump.path).unwrap(), before);
+    assert_eq!(devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap(), before);
     for invalid in [
         json!({ "classes": [{ "contract_class": class }], "state_diff": {
             "storage_diffs": [{ "address": address, "storage_entries": [{ "key": "0x55", "value": "0x2" }] }],
@@ -392,7 +384,7 @@ async fn atomic_errors_leave_state_classes_and_journal_unchanged() {
         json!({ "classes": [{ "contract_class": class }], "state_diff": { "declared_classes": [{ "class_hash": class_hash, "compiled_class_hash": compiled_hash + Felt::ONE }] } }),
     ] {
         assert!(devnet.send_custom_rpc("devnet_applyStateDiff", invalid).await.is_err());
-        assert_eq!(std::fs::read(&dump.path).unwrap(), before);
+        assert_eq!(devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap(), before);
         assert_eq!(state_diff(&devnet, json!("pre_confirmed")).await, before_diff);
         assert_eq!(
             devnet
@@ -417,18 +409,8 @@ async fn atomic_errors_leave_state_classes_and_journal_unchanged() {
 }
 
 #[tokio::test]
-async fn snapshots_replay_restart_and_abort_restore_mutations() {
-    let dump = UniqueAutoDeletableFile::new("apply_state_diff_replay");
-    let args = [
-        "--dump-on",
-        "block",
-        "--dump-path",
-        &dump.path,
-        "--block-generation-on",
-        "demand",
-        "--state-archive-capacity",
-        "full",
-    ];
+async fn snapshots_load_restart_and_abort_restore_mutations() {
+    let args = ["--block-generation-on", "demand", "--state-archive-capacity", "full"];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&args).await.unwrap();
     let address = Felt::from_hex_unchecked(PREDEPLOYED_ACCOUNT_ADDRESS);
     let key = Felt::from(0x55);
@@ -466,7 +448,8 @@ async fn snapshots_replay_restart_and_abort_restore_mutations() {
     ])
     .await
     .unwrap();
-    replay.send_custom_rpc("devnet_load", json!({ "path": dump.path })).await.unwrap();
+    let dump = devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
+    replay.send_custom_rpc("devnet_load", json!({ "dump": dump })).await.unwrap();
     assert_eq!(storage(&replay, address, key, json!("latest")).await, Felt::ONE);
     assert_eq!(storage(&replay, address, key, json!("pre_confirmed")).await, Felt::from(3));
     assert_eq!(

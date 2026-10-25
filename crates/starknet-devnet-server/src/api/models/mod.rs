@@ -29,7 +29,6 @@ use starknet_types::rpc::transactions::{
 use starknet_types::serde_helpers::dec_string::deserialize_biguint;
 use starknet_types::starknet_api::block::BlockNumber;
 
-use crate::rpc_core::request::RpcMethodCall;
 use crate::subscribe::{TransactionFinalityStatusWithoutL1, TransactionStatusWithoutL1};
 
 fn deserialize_address<'de, D>(deserializer: D) -> Result<Option<Vec<ContractAddress>>, D::Error>
@@ -367,27 +366,38 @@ pub struct TransactionReceiptSubscriptionInput {
     pub finality_status: Option<Vec<TransactionFinalityStatusWithoutL1>>,
 }
 
-#[derive(Deserialize, Clone, Default)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub struct DumpRequest {
-    pub path: Option<String>,
-    #[serde(default)]
-    pub inline: bool,
-}
-
 #[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RevertRequest {
     pub snapshot_id: String,
 }
 
-#[derive(Deserialize, Clone)]
-#[serde(untagged, deny_unknown_fields)]
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub enum LoadRequest {
-    Path { path: String },
-    Events { events: Vec<RpcMethodCall> },
+/// Parameters of `devnet_load`: a native dump object or a legacy event array.
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct LoadRequest {
+    pub dump: serde_json::Value,
+}
+
+impl<'de> Deserialize<'de> for LoadRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Params {
+            dump: serde_json::Value,
+        }
+
+        let params = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+        if let Some(removed) = ["path", "events"].into_iter().find(|key| params.contains_key(*key))
+        {
+            return Err(serde::de::Error::custom(format!(
+                "The `{removed}` parameter of devnet_load was removed; pass the dump as `dump`"
+            )));
+        }
+        let Params { dump } = serde_json::from_value(serde_json::Value::Object(params))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self { dump })
+    }
 }
 
 #[derive(Deserialize)]
@@ -406,7 +416,7 @@ pub struct MessageHash {
 }
 
 // Implemented as type alias so JSON returned doesn't have extra key
-pub type DumpResponseBody = Option<Vec<RpcMethodCall>>;
+pub type DumpResponseBody = Box<starknet_core::starknet::dump::NativeDump>;
 
 #[derive(Serialize)]
 pub struct CreatedBlock {

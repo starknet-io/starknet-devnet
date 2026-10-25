@@ -7,7 +7,7 @@ use futures::future::join_all;
 use futures::{StreamExt, poll};
 use serde_json::{Value, json};
 use starknet_core::starknet::Starknet;
-use starknet_core::starknet::starknet_config::{DumpOn, StarknetConfig};
+use starknet_core::starknet::starknet_config::StarknetConfig;
 use starknet_types::rpc::block::SubscriptionBlockId;
 use tokio::sync::Notify;
 
@@ -22,9 +22,8 @@ use crate::rpc_handler::RpcHandler;
 use crate::socket_writer::SocketSender;
 
 fn handler() -> JsonRpcHandler {
-    let config = StarknetConfig { dump_on: Some(DumpOn::Request), ..Default::default() };
     JsonRpcHandler::new(Api::new(
-        Starknet::new(&config).unwrap(),
+        Starknet::new(&StarknetConfig::default()).unwrap(),
         ServerConfig {
             host: std::net::Ipv4Addr::LOCALHOST.into(),
             port: 0,
@@ -169,12 +168,12 @@ async fn slow_event_queries_and_origin_bound_resolution_do_not_block_writes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn replay_can_read_events_without_reacquiring_lifecycle_access() {
     let handler = handler();
-    let event = serde_json::from_value(json!({
+    let event = json!({
         "jsonrpc": "2.0", "id": 1, "method": "starknet_getEvents",
         "params": {"filter": {"chunk_size": 1}},
-    }))
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), handler.re_execute(&[event]))
+    });
+    let _lifecycle = handler.api.lifecycle.write().await;
+    tokio::time::timeout(Duration::from_secs(5), handler.load_dump(json!([event])))
         .await
         .expect("event replay reacquired lifecycle access")
         .unwrap();
@@ -208,7 +207,7 @@ async fn latest_subscription_preparation_does_not_read_moving_state() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cancellation_during_revert_preparation_preserves_snapshot_and_journal() {
+async fn cancellation_during_revert_preparation_preserves_snapshot() {
     let handler = handler();
     assert_eq!(
         call(&handler, "devnet_snapshot", json!([])).await,
@@ -226,19 +225,17 @@ async fn cancellation_during_revert_preparation_preserves_snapshot_and_journal()
     drop(revert);
     drop(sockets);
     assert!(handler.api.snapshots.lock().await.checkpoints.contains_key(&1));
-    assert_eq!(handler.api.dumpable_events.lock().await.len(), 1);
     assert_eq!(handler.api.starknet.lock().await.get_latest_block().unwrap().block_number().0, 1);
 
     assert_eq!(
         call(&handler, "devnet_revert", json!({"snapshot_id": "0x1"})).await,
         ResponseResult::Success(json!(true))
     );
-    assert!(handler.api.dumpable_events.lock().await.is_empty());
     assert_eq!(handler.api.starknet.lock().await.get_latest_block().unwrap().block_number().0, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
+async fn concurrent_writes_and_snapshots_capture_distinct_states() {
     let handler = handler();
     let calls = (0..12).map(|index| {
         call(
@@ -256,13 +253,12 @@ async fn concurrent_writes_and_snapshots_keep_journal_positions_consistent() {
     }
     let snapshots = handler.api.snapshots.lock().await;
     assert_eq!(snapshots.checkpoints.len(), 6);
-    for checkpoint in snapshots.checkpoints.values() {
-        assert_eq!(
-            checkpoint.core.latest_block().unwrap().block_number().0 as usize,
-            checkpoint.dump_event_count
-        );
-    }
-    assert_eq!(handler.api.dumpable_events.lock().await.len(), 6);
+    let block_numbers: std::collections::BTreeSet<_> = snapshots
+        .checkpoints
+        .values()
+        .map(|checkpoint| checkpoint.core.latest_block().unwrap().block_number())
+        .collect();
+    assert_eq!(block_numbers.len(), 6);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,104 +1,85 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::{self, File};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use starknet_core::error::{DevnetResult, Error};
 
-use crate::rpc_core::request::RpcMethodCall;
-
-pub type DumpEvent = RpcMethodCall;
-
-/// Saves Devnet `events` to the file at `path`. If `events` is empty, does nothing.
-pub fn dump_events(events: &Vec<DumpEvent>, path: &str) -> DevnetResult<()> {
-    if !events.is_empty() {
-        let events_dump = serde_json::to_string(events)
-            .map_err(|e| Error::SerializationError { origin: e.to_string() })?;
-        fs::write(Path::new(&path), events_dump)?;
-    }
-
-    Ok(())
-}
-
-/// Atomically replaces a block-mode journal. An empty journal removes the destination because
-/// append-mode dumping expects a missing file instead of an empty JSON array.
-pub fn replace_dump_events(events: &[DumpEvent], path: &str) -> DevnetResult<()> {
-    if events.is_empty() {
-        return clear_dump_file(path);
-    }
-
+/// Writes `dump` to `path`, replacing the file only once the new content is fully written and
+/// synced. If writing fails, an existing file at `path` is left intact.
+pub fn write_dump(dump: &impl serde::Serialize, path: &str) -> DevnetResult<()> {
     let destination = Path::new(path);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| Error::UnexpectedInternalError { msg: error.to_string() })?
         .as_nanos();
-    let temporary = destination.with_extension(format!("snapshot-{nonce}.tmp"));
-    let serialized = serde_json::to_vec(events)
-        .map_err(|error| Error::SerializationError { origin: error.to_string() })?;
+    let temporary = destination.with_extension(format!("{nonce}.tmp"));
 
-    if let Err(error) = fs::write(&temporary, serialized) {
+    let result = (|| {
+        let mut writer = BufWriter::new(File::create(&temporary)?);
+        serde_json::to_writer(&mut writer, dump)
+            .map_err(|error| Error::SerializationError { origin: error.to_string() })?;
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+        fs::rename(&temporary, destination)?;
+        Ok(())
+    })();
+    if result.is_err() {
         let _ = fs::remove_file(&temporary);
-        return Err(Error::IoError(error));
     }
-    if let Err(error) = fs::rename(&temporary, destination) {
-        let _ = fs::remove_file(&temporary);
-        return Err(Error::IoError(error));
-    }
-    Ok(())
+    result
 }
 
-/// Attaches starknet event to the end of the file at `path`. If no file present, creates it.
-pub fn dump_event(event: &DumpEvent, path: &str) -> DevnetResult<()> {
-    let file_path = Path::new(path);
-    if file_path.exists() {
-        // attach to file
-        let event_dump = serde_json::to_string(event)
-            .map_err(|e| Error::SerializationError { origin: e.to_string() })?;
-        let mut file =
-            OpenOptions::new().append(true).read(true).open(file_path).map_err(Error::IoError)?;
-        let mut buffer = [0; 1];
-        file.seek(SeekFrom::End(-1))?;
-        file.read_exact(&mut buffer)?;
-        if String::from_utf8_lossy(&buffer).into_owned() == "]" {
-            // if the last character is "]", remove it and add event at the end
-            let length = file.seek(SeekFrom::End(0)).map_err(Error::IoError)?;
-            file.set_len(length - 1).map_err(Error::IoError)?; // remove last "]" with set_len
-            file.write_all(format!(", {event_dump}]").as_bytes()).map_err(Error::IoError)?;
-        } else {
-            // if the last character is not "]" it means that it's a wrongly formatted
-            // file
-            return Err(Error::FormatError);
+/// Reads the dump at `path` as JSON, without interpreting it.
+pub fn read_dump(path: &str) -> DevnetResult<serde_json::Value> {
+    let file = File::open(Path::new(path)).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => Error::FileNotFound,
+        _ => Error::IoError(error),
+    })?;
+    serde_json::from_reader(BufReader::new(file))
+        .map_err(|e| Error::DeserializationError { origin: e.to_string() })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{read_dump, write_dump};
+
+    #[test]
+    fn writes_and_reads_dump() {
+        let directory = std::env::temp_dir().join(format!("devnet-dump-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("dump.json");
+        let path = path.to_str().unwrap();
+
+        write_dump(&json!({ "a": 1 }), path).unwrap();
+        write_dump(&json!({ "a": 2 }), path).unwrap();
+        assert_eq!(read_dump(path).unwrap(), json!({ "a": 2 }));
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn failed_write_keeps_previous_dump() {
+        let directory =
+            std::env::temp_dir().join(format!("devnet-dump-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("dump.json");
+        let path = path.to_str().unwrap();
+        write_dump(&json!({ "a": 1 }), path).unwrap();
+
+        // Serialization fails midway, after the temporary file was created.
+        struct Unserializable;
+        impl serde::Serialize for Unserializable {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("unserializable"))
+            }
         }
-    } else {
-        // create file
-        let events = vec![event];
-        let events_dump = serde_json::to_string(&events)
-            .map_err(|e| Error::SerializationError { origin: e.to_string() })?;
-        fs::write(Path::new(&path), events_dump)?;
+        assert!(write_dump(&Unserializable, path).is_err());
+
+        assert_eq!(read_dump(path).unwrap(), json!({ "a": 1 }));
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(&directory).unwrap();
     }
-
-    Ok(())
-}
-
-/// Removes the dump file at `path`, ignoring it if it does not exist.
-pub fn clear_dump_file(path: &str) -> DevnetResult<()> {
-    match fs::remove_file(Path::new(path)) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(Error::IoError(err)),
-    }
-}
-
-/// Read and validate a journal without changing it or any running state.
-pub fn read_events(path: &str) -> DevnetResult<Vec<DumpEvent>> {
-    let file_path = Path::new(path);
-    if path.is_empty() || !file_path.exists() {
-        return Err(Error::FileNotFound);
-    }
-
-    let file = File::open(file_path).map_err(Error::IoError)?;
-    let events: Vec<DumpEvent> = serde_json::from_reader(file)
-        .map_err(|e| Error::DeserializationError { origin: e.to_string() })?;
-
-    Ok(events)
 }

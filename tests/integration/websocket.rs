@@ -14,9 +14,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::utils::{
-    FeeUnit, LocalFee, UniqueAutoDeletableFile, assert_no_notifications,
-    get_simple_contract_artifacts, send_binary_rpc_via_ws, send_ctrl_c_signal_and_wait,
-    send_text_rpc_via_ws, subscribe,
+    FeeUnit, LocalFee, assert_no_notifications, get_simple_contract_artifacts,
+    send_binary_rpc_via_ws, send_text_rpc_via_ws, subscribe,
 };
 
 async fn send_batch_via_ws(
@@ -238,62 +237,29 @@ async fn method_restriction_applies_via_ws() {
 }
 
 #[tokio::test]
-// Dumping section isolated to prevent variable mixing
 async fn should_load_correct_devnet_with_state_modified_via_ws() {
-    // Common to dumpable and loaded Devnet
-    let dump_file = UniqueAutoDeletableFile::new("tmp");
     let mint_address = "0x1";
     let mint_amount = 100;
 
-    {
-        let devnet_args = ["--dump-on", "request"];
-        let devnet_dumpable =
-            BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
-        let (mut ws_on_dumped, _) = connect_async(devnet_dumpable.ws_url()).await.unwrap();
-
-        send_text_rpc_via_ws(
-            &mut ws_on_dumped,
-            "devnet_mint",
-            json!({ "address": mint_address, "amount": mint_amount, "unit": "FRI" }),
-        )
-        .await
-        .unwrap();
-
-        let dump_resp = send_text_rpc_via_ws(
-            &mut ws_on_dumped,
-            "devnet_dump",
-            json!({ "path": dump_file.path }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            dump_resp,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 0,
-                "result": [{
-                    "jsonrpc": "2.0",
-                    "method": "devnet_mint",
-                    "params": {
-                        "address": mint_address,
-                        "amount": mint_amount,
-                        "unit": "FRI"
-                    },
-                    "id": 0
-                }]
-            })
-        );
-
-        send_ctrl_c_signal_and_wait(&devnet_dumpable.process).await;
-    }
+    let devnet_dumpable = BackgroundDevnet::spawn().await.unwrap();
+    let (mut ws_on_dumped, _) = connect_async(devnet_dumpable.ws_url()).await.unwrap();
+    send_text_rpc_via_ws(
+        &mut ws_on_dumped,
+        "devnet_mint",
+        json!({ "address": mint_address, "amount": mint_amount, "unit": "FRI" }),
+    )
+    .await
+    .unwrap();
+    let dump_resp =
+        send_text_rpc_via_ws(&mut ws_on_dumped, "devnet_dump", json!({})).await.unwrap();
+    let dump = dump_resp["result"].clone();
+    assert_eq!(dump["format"], "starknet-devnet-dump");
 
     let devnet_loaded = BackgroundDevnet::spawn().await.unwrap();
     let (mut ws_on_loaded, _) = connect_async(devnet_loaded.ws_url()).await.unwrap();
-
-    let load_resp =
-        send_text_rpc_via_ws(&mut ws_on_loaded, "devnet_load", json!({ "path": dump_file.path }))
-            .await
-            .unwrap();
+    let load_resp = send_text_rpc_via_ws(&mut ws_on_loaded, "devnet_load", json!({ "dump": dump }))
+        .await
+        .unwrap();
     assert_eq!(load_resp, json!({ "jsonrpc": "2.0", "id": 0, "result": {} }));
 
     let balance_resp = send_text_rpc_via_ws(
@@ -311,9 +277,24 @@ async fn should_load_correct_devnet_with_state_modified_via_ws() {
 }
 
 #[tokio::test]
+async fn should_receive_load_requests_larger_than_default_ws_message_limit() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
+
+    // Larger than the 64 MiB default; rejected by validation rather than by the transport.
+    let oversized = json!({
+        "format": "starknet-devnet-dump",
+        "version": 1,
+        "padding": "0".repeat(70 * 1024 * 1024),
+    });
+    let load_resp =
+        send_text_rpc_via_ws(&mut ws, "devnet_load", json!({ "dump": oversized })).await.unwrap();
+    assert_eq!(load_resp["error"]["code"], -32602, "{load_resp}");
+}
+
+#[tokio::test]
 async fn should_support_restarting_via_ws() {
-    let devnet_args = ["--dump-on", "request"];
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
 
     let (mut ws, _) = connect_async(devnet.ws_url()).await.unwrap();
 

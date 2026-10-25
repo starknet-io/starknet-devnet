@@ -79,11 +79,14 @@ pub async fn handle_socket<THandler: RpcHandler>(
     State(handler): State<THandler>,
 ) -> impl IntoResponse {
     tracing::info!("New websocket connection!");
-    ws_upgrade.on_failed_upgrade(|e| tracing::error!("Failed websocket upgrade: {e:?}")).on_upgrade(
-        move |socket| async move {
+    // Like HTTP request bodies, messages are unbounded, so large dumps can be loaded.
+    ws_upgrade
+        .max_message_size(usize::MAX)
+        .max_frame_size(usize::MAX)
+        .on_failed_upgrade(|e| tracing::error!("Failed websocket upgrade: {e:?}"))
+        .on_upgrade(move |socket| async move {
             handler.on_websocket(socket).await;
-        },
-    )
+        })
 }
 
 /// Handle the JSON-RPC [Request]

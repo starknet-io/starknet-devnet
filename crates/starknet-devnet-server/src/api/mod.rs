@@ -9,7 +9,6 @@ use tokio::sync::Mutex;
 use tracing::error;
 
 use crate::ServerConfig;
-use crate::dump_util::DumpEvent;
 use crate::subscribe::SocketCollection;
 
 mod account_helpers;
@@ -20,6 +19,8 @@ pub mod json_rpc_handler;
 pub mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod load_tests;
 pub mod models;
 pub(crate) mod origin_forwarder;
 #[cfg(test)]
@@ -38,7 +39,6 @@ pub struct Api {
     pub config: Arc<StarknetConfig>,
     pub server_config: Arc<ServerConfig>,
     pub starknet: Arc<Mutex<Starknet>>,
-    pub dumpable_events: Arc<Mutex<Vec<DumpEvent>>>,
     pub sockets: Arc<Mutex<SocketCollection>>,
     pub(crate) snapshots: Arc<Mutex<SnapshotStore>>,
     pub lifecycle: Arc<lifecycle::Lifecycle>,
@@ -46,7 +46,6 @@ pub struct Api {
 
 pub(crate) struct ServerCheckpoint {
     pub core: StarknetCheckpoint,
-    pub dump_event_count: usize,
     pub origin_accepted_on_l1_through: Option<u64>,
 }
 
@@ -62,7 +61,6 @@ impl Api {
             config: Arc::new(starknet.config.clone()),
             server_config: Arc::new(server_config),
             starknet: Arc::new(Mutex::new(starknet)),
-            dumpable_events: Default::default(),
             sockets: Arc::new(Mutex::new(SocketCollection::default())),
             snapshots: Default::default(),
             lifecycle: Default::default(),

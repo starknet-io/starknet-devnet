@@ -14,14 +14,14 @@ use crate::api::models::{
     BlockAndContractAddressInput, BlockAndIndexInput, BlockIdAndFlagsInput, BlockIdInput,
     BlockTransactionTracesInput, BroadcastedDeclareTransactionInput,
     BroadcastedDeployAccountTransactionInput, BroadcastedInvokeTransactionInput, CallInput,
-    ClassHashInput, DumpRequest, EstimateFeeInput, EventsInput, EventsSubscriptionInput,
-    FlushParameters, GetStorageInput, GetStorageProofInput, IncreaseTime, JsonRpcResponse,
-    L1TransactionHashInput, LoadRequest, MintTokensRequest, PostmanLoadL1MessagingContract,
-    ProveTransactionInput, RestartParameters, RevertRequest, SetTime, SimulateTransactionsInput,
-    StateUpdateInput, SubscriptionBlockIdInput, SubscriptionIdInput, TransactionHashAndFlagsInput,
+    ClassHashInput, EstimateFeeInput, EventsInput, EventsSubscriptionInput, FlushParameters,
+    GetStorageInput, GetStorageProofInput, IncreaseTime, JsonRpcResponse, L1TransactionHashInput,
+    LoadRequest, MintTokensRequest, PostmanLoadL1MessagingContract, ProveTransactionInput,
+    RestartParameters, RevertRequest, SetTime, SimulateTransactionsInput, StateUpdateInput,
+    SubscriptionBlockIdInput, SubscriptionIdInput, TransactionHashAndFlagsInput,
     TransactionHashInput, TransactionReceiptSubscriptionInput, TransactionSubscriptionInput,
 };
-use crate::api::serde_helpers::{empty_params, optional_params};
+use crate::api::serde_helpers::{dump_params, empty_params, optional_params};
 use crate::rpc_core::error::RpcError;
 use crate::rpc_core::request::RpcMethodCall;
 use crate::rpc_core::response::ResponseResult;
@@ -149,8 +149,8 @@ pub enum DevnetSpecRequest {
     AutoImpersonate,
     #[serde(rename = "devnet_stopAutoImpersonate", with = "empty_params")]
     StopAutoImpersonate,
-    #[serde(rename = "devnet_dump", with = "optional_params")]
-    Dump(Option<DumpRequest>),
+    #[serde(rename = "devnet_dump", with = "dump_params")]
+    Dump,
     #[serde(rename = "devnet_snapshot", with = "empty_params")]
     Snapshot,
     #[serde(rename = "devnet_revert")]
@@ -308,44 +308,6 @@ impl StarknetSpecRequest {
             | Self::AddInvokeTransaction(_) => false,
         }
     }
-
-    pub fn is_dumpable(&self) -> bool {
-        #[warn(clippy::wildcard_enum_match_arm)]
-        match self {
-            Self::AddDeclareTransaction(_)
-            | Self::AddDeployAccountTransaction(_)
-            | Self::AddInvokeTransaction(_) => true,
-            Self::SpecVersion
-            | Self::BlockWithTransactionHashes(_)
-            | Self::BlockWithFullTransactions(_)
-            | Self::BlockWithReceipts(_)
-            | Self::StateUpdate(_)
-            | Self::StorageAt(_)
-            | Self::TransactionByHash(_)
-            | Self::TransactionByBlockAndIndex(_)
-            | Self::TransactionReceiptByTransactionHash(_)
-            | Self::TransactionStatusByHash(_)
-            | Self::ClassByHash(_)
-            | Self::ClassHashAtContractAddress(_)
-            | Self::ClassAtContractAddress(_)
-            | Self::BlockTransactionCount(_)
-            | Self::Call(_)
-            | Self::EstimateFee(_)
-            | Self::BlockNumber
-            | Self::BlockHashAndNumber
-            | Self::ChainId
-            | Self::Syncing
-            | Self::Events(_)
-            | Self::ContractNonce(_)
-            | Self::EstimateMessageFee(_)
-            | Self::SimulateTransactions(_)
-            | Self::TraceTransaction(_)
-            | Self::BlockTransactionTraces(_)
-            | Self::MessagesStatusByL1Hash(_)
-            | Self::CompiledCasmByClassHash(_)
-            | Self::StorageProof(_) => false,
-        }
-    }
 }
 
 impl StarknetSpecExtRequest {
@@ -356,12 +318,6 @@ impl StarknetSpecExtRequest {
         }
     }
     pub fn is_forwardable_to_origin(&self) -> bool {
-        #![warn(clippy::wildcard_enum_match_arm)]
-        match self {
-            Self::ProveTransaction(_) => false,
-        }
-    }
-    pub fn is_dumpable(&self) -> bool {
         #![warn(clippy::wildcard_enum_match_arm)]
         match self {
             Self::ProveTransaction(_) => false,
@@ -386,45 +342,13 @@ impl DevnetSpecRequest {
             | Self::StopImpersonateAccount(_)
             | Self::AutoImpersonate
             | Self::StopAutoImpersonate
-            | Self::Dump(_)
+            | Self::Dump
             | Self::Snapshot
             | Self::Revert(_)
             | Self::Load(_)
             | Self::PostmanLoadL1MessagingContract(_)
             | Self::PostmanConsumeMessageFromL2(_)
             | Self::SetGasPrice(_)
-            | Self::Restart(_)
-            | Self::PredeployedAccounts(_)
-            | Self::AccountBalance(_)
-            | Self::DevnetConfig
-            | Self::DevnetStatus => false,
-        }
-    }
-
-    /// postmanFlush not dumped because it creates new RPC calls which get dumped
-    pub fn is_dumpable(&self) -> bool {
-        #[warn(clippy::wildcard_enum_match_arm)]
-        match self {
-            Self::ApplyStateDiff(_)
-            | Self::ImpersonateAccount(_)
-            | Self::StopImpersonateAccount(_)
-            | Self::AutoImpersonate
-            | Self::StopAutoImpersonate
-            | Self::PostmanLoadL1MessagingContract(_)
-            | Self::PostmanSendMessageToL2(_)
-            | Self::PostmanConsumeMessageFromL2(_)
-            | Self::CreateBlock
-            | Self::AbortBlocks(_)
-            | Self::AcceptOnL1(_)
-            | Self::SetGasPrice(_)
-            | Self::SetTime(_)
-            | Self::IncreaseTime(_)
-            | Self::Mint(_) => true,
-            Self::Dump(_)
-            | Self::Snapshot
-            | Self::Revert(_)
-            | Self::Load(_)
-            | Self::PostmanFlush(_)
             | Self::Restart(_)
             | Self::PredeployedAccounts(_)
             | Self::AccountBalance(_)
@@ -454,7 +378,7 @@ impl JsonRpcRequest {
                 | DevnetSpecRequest::StopImpersonateAccount(_)
                 | DevnetSpecRequest::AutoImpersonate
                 | DevnetSpecRequest::StopAutoImpersonate
-                | DevnetSpecRequest::Dump(_)
+                | DevnetSpecRequest::Dump
                 | DevnetSpecRequest::Snapshot
                 | DevnetSpecRequest::Revert(_)
                 | DevnetSpecRequest::Load(_)
@@ -522,15 +446,6 @@ impl JsonRpcRequest {
             Self::StarknetSpecRequest(req) => req.is_forwardable_to_origin(),
             Self::StarknetSpecExtRequest(req) => req.is_forwardable_to_origin(),
             Self::DevnetSpecRequest(_) => false,
-        }
-    }
-
-    pub fn is_dumpable(&self) -> bool {
-        #[warn(clippy::wildcard_enum_match_arm)]
-        match self {
-            Self::StarknetSpecRequest(req) => req.is_dumpable(),
-            Self::StarknetSpecExtRequest(req) => req.is_dumpable(),
-            Self::DevnetSpecRequest(req) => req.is_dumpable(),
         }
     }
 
@@ -1110,10 +1025,6 @@ mod requests_tests {
             }),
             json!({
                 "method":"devnet_dump",
-            }),
-            json!({
-                "method":"devnet_dump",
-                "params": {"path": "path"}
             }),
             json!({
                 "method":"devnet_getPredeployedAccounts",

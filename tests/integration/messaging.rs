@@ -801,25 +801,26 @@ async fn test_correct_message_order() {
 }
 
 #[tokio::test]
-/// Here we test if the devnet_postmanLoad method call is indeed dumped and then used in a load.
-async fn test_dumpability_of_messaging_contract_loading() {
-    let dump_file = UniqueAutoDeletableFile::new("dump");
-    let devnet_args = ["--dump-path", &dump_file.path, "--dump-on", "exit"];
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&devnet_args).await.unwrap();
+/// Loading restores the L1 messaging configuration without contacting the L1 node.
+async fn messaging_contract_loading_is_restored_without_contacting_l1() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
     let anvil = BackgroundAnvil::spawn().await.unwrap();
 
     devnet
         .send_custom_rpc("devnet_postmanLoad", json!({ "network_url": anvil.url }))
         .await
         .unwrap();
+    let dump = devnet.send_custom_rpc("devnet_dump", Value::Null).await.unwrap();
 
-    // assert loadability while Anvil is still alive
-    devnet.send_custom_rpc("devnet_dump", Value::Null).await.unwrap();
-    devnet.send_custom_rpc("devnet_load", json!({ "path": dump_file.path })).await.unwrap();
+    // The loaded instance flushes through the restored L1 connection.
+    let loaded = BackgroundDevnet::spawn().await.unwrap();
+    loaded.send_custom_rpc("devnet_load", json!({ "dump": dump })).await.unwrap();
+    loaded.send_custom_rpc("devnet_postmanFlush", json!({})).await.unwrap();
 
-    // assert loading fails if anvil not alive
+    // Loading does not need the L1 node.
     send_ctrl_c_signal_and_wait(&anvil.process).await;
-    match devnet.send_custom_rpc("devnet_load", json!({ "path": dump_file.path })).await {
+    loaded.send_custom_rpc("devnet_load", json!({ "dump": dump })).await.unwrap();
+    match loaded.send_custom_rpc("devnet_postmanFlush", json!({})).await {
         Err(RpcError { .. }) => {}
         other => panic!("Unexpected response: {other:?}"),
     };

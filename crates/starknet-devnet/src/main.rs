@@ -2,15 +2,17 @@ use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::net::IpAddr;
 use std::result::Result::Ok;
+use std::sync::Arc;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use cli::Args;
 use futures::future::join_all;
 use serde::de::IntoDeserializer;
 use serde_json::json;
+use server::ServerConfig;
 use server::api::{Api, JsonRpcHandler, RPC_SPEC_VERSION};
-use server::dump_util::{dump_events, read_events};
+use server::dump_util::{read_dump, write_dump};
 use server::server::serve_http_json_rpc;
 use starknet_core::account::Account;
 use starknet_core::constants::{
@@ -18,6 +20,7 @@ use starknet_core::constants::{
     STRK_ERC20_CONTRACT_ADDRESS, UDC_CONTRACT_ADDRESS, UDC_CONTRACT_CLASS_HASH,
 };
 use starknet_core::starknet::Starknet;
+use starknet_core::starknet::dump::{NativeDump, NativeDumpLoadOptions};
 use starknet_core::starknet::starknet_config::{
     BlockGenerationOn, DumpOn, ForkConfig, StarknetConfig,
 };
@@ -306,35 +309,74 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("cairo_native enabled: blockifier will use native execution");
 
     // parse arguments
-    let args = Args::parse();
+    let matches = Args::command().get_matches();
+    let args = Args::from_arg_matches(&matches)?;
     let (mut starknet_config, server_config) = args.to_config()?;
 
-    // If fork url is provided, then set fork config and chain_id from forked network
-    if let Some(url) = starknet_config.fork_config.url.as_ref() {
-        let json_rpc_client = JsonRpcClient::new(HttpTransport::new(url.clone()));
-        set_and_log_fork_config(&mut starknet_config.fork_config, &json_rpc_client).await?;
-        set_erc20_contract_class_and_class_hash_if_different_than_default(
-            &json_rpc_client,
-            &mut starknet_config,
-        )
-        .await?;
-        // TODO: Add check for UDC contract
-        starknet_config.chain_id = json_rpc_client.chain_id().await?.into();
+    let startup_dump = match args.startup_dump_path()? {
+        Some(path) => Some(
+            read_dump(path).map_err(|e| anyhow::anyhow!("Failed to read dump at {path}: {e}"))?,
+        ),
+        None => None,
+    };
+
+    // A native dump carries the configuration it applies to; legacy dumps are replayed on top of
+    // an instance built from the command line.
+    let (starknet, legacy_dump, origin_accepted_on_l1_through) = match startup_dump {
+        Some(serde_json::Value::Object(_)) if args.legacy_dump_conversion_path().is_some() => {
+            anyhow::bail!("The dump at --load-path is already in the native format");
+        }
+        Some(dump @ serde_json::Value::Object(_)) => {
+            let dump = NativeDump::from_value(dump)?;
+            let options = NativeDumpLoadOptions {
+                dump_on: starknet_config.dump_on,
+                dump_path: starknet_config.dump_path.clone(),
+                fork_url: starknet_config.fork_config.url.clone(),
+            };
+            let dumped_config = dump.starknet_config(&options)?;
+            cli::assert_options_match_dump(&matches, &starknet_config, &dumped_config)?;
+            if let ForkConfig { url: Some(url), block_number: Some(number), block_hash, .. } =
+                &dumped_config.fork_config
+            {
+                assert_fork_origin_matches(url, *number, *block_hash).await?;
+            }
+
+            let origin_accepted_on_l1_through = dump.origin_accepted_on_l1_through;
+            (Starknet::from_native_dump(dump, &options)?, None, origin_accepted_on_l1_through)
+        }
+        legacy_dump => {
+            // If fork url is provided, then set fork config and chain_id from forked network
+            if let Some(url) = starknet_config.fork_config.url.as_ref() {
+                let json_rpc_client = JsonRpcClient::new(HttpTransport::new(url.clone()));
+                set_and_log_fork_config(&mut starknet_config.fork_config, &json_rpc_client).await?;
+                set_erc20_contract_class_and_class_hash_if_different_than_default(
+                    &json_rpc_client,
+                    &mut starknet_config,
+                )
+                .await?;
+                // TODO: Add check for UDC contract
+                starknet_config.chain_id = json_rpc_client.chain_id().await?.into();
+            }
+
+            let mut starknet = Starknet::new(&starknet_config)?;
+            // set block timestamp shift during startup if start time is set
+            if let Some(start_time) = starknet_config.start_time {
+                starknet.set_block_timestamp_shift(
+                    start_time as i64 - Starknet::get_unix_timestamp_as_seconds() as i64,
+                );
+            };
+            (starknet, legacy_dump, None)
+        }
+    };
+    let starknet_config = starknet.config.clone();
+
+    if let Some(output_path) = args.legacy_dump_conversion_path() {
+        let legacy_dump = legacy_dump
+            .ok_or_else(|| anyhow::anyhow!("No legacy dump found at --load-path to convert"))?;
+        return convert_legacy_dump(starknet, server_config, legacy_dump, output_path).await;
     }
 
-    // shadow mutability of starknet_config
-    let starknet_config = starknet_config;
-
-    let mut starknet = Starknet::new(&starknet_config)?;
-
     let (address, listener) = bind_port(server_config.host, server_config.port).await?;
-
-    // set block timestamp shift during startup if start time is set
-    if let Some(start_time) = starknet_config.start_time {
-        starknet.set_block_timestamp_shift(
-            start_time as i64 - Starknet::get_unix_timestamp_as_seconds() as i64,
-        );
-    };
 
     log_chain_id(&starknet_config.chain_id);
     log_predeployed_contracts(&starknet_config);
@@ -348,23 +390,18 @@ async fn main() -> Result<(), anyhow::Error> {
     let api = Api::new(starknet, server_config);
     let ui_enabled = api.server_config.ui_enabled;
     let json_rpc_handler = JsonRpcHandler::new(api.clone());
-    if let Some(dump_path) = &starknet_config.dump_path {
-        // Try to load events from the path. Since the same CLI parameter is used for dump and load
-        // path, it may be the case that there is no file at the path. This means that the file will
-        // be created during Devnet's lifetime via dumping, so its non-existence is here ignored.
-        match read_events(dump_path) {
-            Ok(loadable_events) => json_rpc_handler
-                .re_execute(&loadable_events)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to re-execute dumped Devnet: {e}"))?,
-            Err(starknet_core::error::Error::FileNotFound) => (),
-            Err(err) => return Err(err.into()),
-        }
-    };
+    json_rpc_handler.restore_origin_acceptance(origin_accepted_on_l1_through).await;
+    if let Some(legacy_dump) = legacy_dump {
+        let _lifecycle = api.lifecycle.write().await;
+        json_rpc_handler
+            .load_dump(legacy_dump)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to load dump: {e}"))?;
+    }
 
     let acquired_port = listener.local_addr()?.port();
 
-    let server = serve_http_json_rpc(listener, &api.server_config, json_rpc_handler).await;
+    let server = serve_http_json_rpc(listener, &api.server_config, json_rpc_handler.clone()).await;
     info!("Starknet Devnet listening on {}", address);
     if ui_enabled {
         info!("Web UI explorer enabled at http://{}/ui", address);
@@ -401,8 +438,12 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     // run server also as a JoinHandle
-    let server_handle =
-        task::spawn(server.with_graceful_shutdown(shutdown_signal(api)).into_future());
+    let exit_dump_failure = Arc::new(std::sync::Mutex::new(None));
+    let server_handle = task::spawn(
+        server
+            .with_graceful_shutdown(shutdown_signal(json_rpc_handler, exit_dump_failure.clone()))
+            .into_future(),
+    );
     tasks.push(server_handle);
 
     tracing::debug!("Starknet Devnet started in {:.2?}", timestamp.elapsed());
@@ -415,6 +456,47 @@ async fn main() -> Result<(), anyhow::Error> {
         result??;
     }
 
+    match exit_dump_failure.lock().map_err(|e| anyhow::anyhow!("{e}"))?.take() {
+        Some(failure) => Err(failure),
+        None => Ok(()),
+    }
+}
+
+/// Replays `legacy_dump` on top of `starknet` and writes the result as a native dump to
+/// `output_path`. Transitional, for migrating legacy dumps.
+async fn convert_legacy_dump(
+    starknet: Starknet,
+    server_config: ServerConfig,
+    legacy_dump: serde_json::Value,
+    output_path: &str,
+) -> Result<(), anyhow::Error> {
+    let json_rpc_handler = JsonRpcHandler::new(Api::new(starknet, server_config));
+    json_rpc_handler
+        .load_dump(legacy_dump)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load legacy dump: {e}"))?;
+    let dump = json_rpc_handler.native_dump().await?;
+    write_dump(&dump, output_path)?;
+    info!("Converted the legacy dump to the native format at {output_path}");
+    Ok(())
+}
+
+/// Fails if the forking origin's block differs from the one the dump was forked from.
+async fn assert_fork_origin_matches(
+    url: &url::Url,
+    block_number: u64,
+    dumped_block_hash: Option<Felt>,
+) -> Result<(), anyhow::Error> {
+    let json_rpc_client = JsonRpcClient::new(HttpTransport::new(url.clone()));
+    check_forking_spec_version(&json_rpc_client).await?;
+    let (_, origin_block_hash) =
+        get_block_hash(BlockId::Number(block_number), &json_rpc_client).await?;
+    if dumped_block_hash != Some(origin_block_hash) {
+        anyhow::bail!(
+            "Block {block_number} of the forking origin {url} has hash {origin_block_hash:#x}, \
+             which differs from the block the dump was forked from"
+        );
+    }
     Ok(())
 }
 
@@ -455,15 +537,31 @@ async fn create_block_interval(
     }
 }
 
+/// Waits for Ctrl+C and dumps on exit if configured. A failed dump keeps the previous file and is
+/// recorded in `failure`, so the process exits with an error.
 #[allow(clippy::expect_used)]
-pub async fn shutdown_signal(api: Api) {
+pub async fn shutdown_signal(
+    handler: JsonRpcHandler,
+    failure: Arc<std::sync::Mutex<Option<anyhow::Error>>>,
+) {
     tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
 
-    // dump on exit scenario
-    if let (Some(DumpOn::Exit), Some(dump_path)) = (api.config.dump_on, &api.config.dump_path) {
-        let _lifecycle = api.lifecycle.write().await;
-        let events = { api.dumpable_events.lock().await.clone() };
-        dump_events(&events, dump_path).expect("Failed to dump.");
+    let config = &handler.api.config;
+    if let (Some(DumpOn::Exit), Some(dump_path)) = (config.dump_on, &config.dump_path) {
+        let _lifecycle = handler.api.lifecycle.write().await;
+        let result = match handler.native_dump().await {
+            Ok(dump) => write_dump(&dump, dump_path).map_err(anyhow::Error::from),
+            Err(e) => Err(anyhow::Error::from(e)),
+        };
+        match result {
+            Ok(()) => info!("Dumped Devnet to {dump_path}"),
+            Err(e) => {
+                error!("Failed to dump Devnet to {dump_path}: {e}");
+                if let Ok(mut failure) = failure.lock() {
+                    *failure = Some(e.context(format!("Failed to dump Devnet to {dump_path}")));
+                }
+            }
+        }
     }
 }
 

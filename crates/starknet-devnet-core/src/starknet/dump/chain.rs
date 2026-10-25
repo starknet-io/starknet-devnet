@@ -71,7 +71,7 @@ mod decimal {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ChainIdDump {
     Mainnet,
@@ -79,7 +79,7 @@ enum ChainIdDump {
     Custom(Felt),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ForkDump {
     url: Option<String>,
@@ -90,7 +90,7 @@ struct ForkDump {
 }
 
 /// Chain configuration. Classes are referenced by hash and stored once in the class table.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ConfigDump {
     seed: u32,
@@ -206,6 +206,11 @@ impl ConfigDump {
             predeclare_argent: *predeclare_argent,
             class_size_config: class_size_config.clone(),
         })
+    }
+
+    /// Returns the hashes of the classes the configuration refers to.
+    pub(super) fn class_hashes(&self) -> [Felt; 3] {
+        [self.account_contract_class_hash, self.eth_erc20_class_hash, self.strk_erc20_class_hash]
     }
 
     pub(super) fn decode(

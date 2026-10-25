@@ -1,6 +1,7 @@
 use std::num::NonZeroU128;
 
 use clap::Parser;
+use clap::parser::{ArgMatches, ValueSource};
 use server::ServerConfig;
 use server::api::models::JsonRpcRequest;
 use server::restrictive_mode::DEFAULT_RESTRICTED_JSON_RPC_METHODS;
@@ -176,7 +177,10 @@ pub(crate) struct Args {
     #[arg(long = "dump-on")]
     #[arg(env = "DUMP_ON")]
     #[arg(value_name = "EVENT")]
-    #[arg(help = "Specify when to dump the state of Devnet;")]
+    #[arg(value_parser = parse_dump_on)]
+    #[arg(help = "Specify when to dump the state of Devnet to --dump-path. Possible values are:
+- \"exit\" - on graceful shutdown (e.g. Ctrl+C); the previous file is kept if writing fails
+Dumps can also be requested at any time via devnet_dump;")]
     dump_on: Option<DumpOn>,
 
     #[arg(long = "lite-mode")]
@@ -198,9 +202,24 @@ pub(crate) struct Args {
     #[arg(long = "dump-path")]
     #[arg(env = "DUMP_PATH")]
     #[arg(value_name = "DUMP_PATH")]
-    #[arg(help = "Specify the path to dump to;")]
-    #[arg(required_if_eq_any([("dump_on", "exit"), ("dump_on", "block")]))]
+    #[arg(help = "Specify the path to dump to. Without --load-path, Devnet also loads from this \
+                  path on startup if the file exists;")]
+    #[arg(required_if_eq("dump_on", "exit"))]
     dump_path: Option<String>,
+
+    #[arg(long = "load-path")]
+    #[arg(env = "LOAD_PATH")]
+    #[arg(value_name = "LOAD_PATH")]
+    #[arg(help = "Specify the path of a dump to load on startup;")]
+    load_path: Option<String>,
+
+    #[arg(long = "convert-legacy-dump")]
+    #[arg(value_name = "OUTPUT_PATH")]
+    #[arg(requires = "load_path")]
+    #[arg(help = "Transitional: load the legacy dump at --load-path, write it in the native \
+                  format to OUTPUT_PATH and exit without starting the server. Specify the \
+                  options the legacy dump was created with;")]
+    convert_legacy_dump: Option<String>,
 
     #[arg(long = "block-generation-on")]
     #[arg(env = "BLOCK_GENERATION_ON")]
@@ -286,7 +305,159 @@ Calling devnet_createBlock JSON-RPC method is also an option in modes other than
     ui_enabled: bool,
 }
 
+fn parse_dump_on(value: &str) -> Result<DumpOn, String> {
+    match value {
+        "exit" => Ok(DumpOn::Exit),
+        "block" | "request" => Err(format!(
+            "`--dump-on {value}` was removed; dumps are returned by devnet_dump at any time, and \
+             `--dump-on exit` writes one on shutdown"
+        )),
+        _ => Err("possible values: exit".to_string()),
+    }
+}
+
+/// Rejects explicitly specified options that differ from the configuration of a dump loaded on
+/// startup, whose configuration applies. The forking URL may be replaced and is not checked.
+pub(crate) fn assert_options_match_dump(
+    matches: &ArgMatches,
+    specified: &StarknetConfig,
+    dumped: &StarknetConfig,
+) -> Result<(), anyhow::Error> {
+    let options = [
+        ("accounts_count", "--accounts", specified.total_accounts == dumped.total_accounts),
+        (
+            "account_class_choice",
+            "--account-class",
+            specified.account_contract_class_hash == dumped.account_contract_class_hash,
+        ),
+        (
+            "account_class_custom",
+            "--account-class-custom",
+            specified.account_contract_class_hash == dumped.account_contract_class_hash,
+        ),
+        (
+            "predeclare_argent",
+            "--predeclare-argent",
+            specified.predeclare_argent == dumped.predeclare_argent,
+        ),
+        (
+            "initial_balance",
+            "--initial-balance",
+            specified.predeployed_accounts_initial_balance
+                == dumped.predeployed_accounts_initial_balance,
+        ),
+        ("seed", "--seed", specified.seed == dumped.seed),
+        ("start_time", "--start-time", specified.start_time == dumped.start_time),
+        ("gas_price_wei", "--gas-price", specified.gas_price_wei == dumped.gas_price_wei),
+        ("gas_price_fri", "--gas-price-fri", specified.gas_price_fri == dumped.gas_price_fri),
+        (
+            "data_gas_price_wei",
+            "--data-gas-price",
+            specified.data_gas_price_wei == dumped.data_gas_price_wei,
+        ),
+        (
+            "data_gas_price_fri",
+            "--data-gas-price-fri",
+            specified.data_gas_price_fri == dumped.data_gas_price_fri,
+        ),
+        (
+            "l2_gas_price_wei",
+            "--l2-gas-price",
+            specified.l2_gas_price_wei == dumped.l2_gas_price_wei,
+        ),
+        (
+            "l2_gas_price_fri",
+            "--l2-gas-price-fri",
+            specified.l2_gas_price_fri == dumped.l2_gas_price_fri,
+        ),
+        ("chain_id", "--chain-id", specified.chain_id.to_felt() == dumped.chain_id.to_felt()),
+        ("lite_mode", "--lite-mode", specified.lite_mode == dumped.lite_mode),
+        ("proof_mode", "--proof-mode", specified.proof_mode == dumped.proof_mode),
+        (
+            "block_generation_on",
+            "--block-generation-on",
+            specified.block_generation_on == dumped.block_generation_on,
+        ),
+        (
+            "state_archive",
+            "--state-archive-capacity",
+            specified.state_archive == dumped.state_archive,
+        ),
+        (
+            "fork_block",
+            "--fork-block",
+            specified.fork_config.block_number == dumped.fork_config.block_number,
+        ),
+        (
+            "fork_upstream_caching",
+            "--fork-upstream-caching",
+            specified.fork_config.caching_enabled == dumped.fork_config.caching_enabled,
+        ),
+        (
+            "maximum_contract_class_size",
+            "--maximum-contract-class-size",
+            specified.class_size_config.maximum_contract_class_size
+                == dumped.class_size_config.maximum_contract_class_size,
+        ),
+        (
+            "maximum_contract_bytecode_size",
+            "--maximum-contract-bytecode-size",
+            specified.class_size_config.maximum_contract_bytecode_size
+                == dumped.class_size_config.maximum_contract_bytecode_size,
+        ),
+        (
+            "maximum_sierra_length",
+            "--maximum-sierra-length",
+            specified.class_size_config.maximum_sierra_length
+                == dumped.class_size_config.maximum_sierra_length,
+        ),
+    ];
+
+    let conflicting: Vec<&str> = options
+        .into_iter()
+        .filter(|(id, _, matching)| {
+            !matching
+                && matches!(
+                    matches.value_source(id),
+                    Some(ValueSource::CommandLine | ValueSource::EnvVariable)
+                )
+        })
+        .map(|(_, flag, _)| flag)
+        .collect();
+    if conflicting.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "The loaded dump was created with a different {}; omit the option to use the dump's \
+             configuration",
+            conflicting.join(", ")
+        )
+    }
+}
+
 impl Args {
+    /// Returns where to write a legacy dump converted to the native format, if requested.
+    pub(crate) fn legacy_dump_conversion_path(&self) -> Option<&str> {
+        self.convert_legacy_dump.as_deref()
+    }
+
+    /// Returns the path of the dump to load on startup, if any.
+    pub(crate) fn startup_dump_path(&self) -> Result<Option<&str>, anyhow::Error> {
+        match (&self.load_path, &self.dump_path) {
+            (Some(load_path), _) => {
+                if !std::path::Path::new(load_path).exists() {
+                    anyhow::bail!("No dump found at --load-path {load_path}");
+                }
+                Ok(Some(load_path))
+            }
+            // The dump file is created on exit, so it may not exist yet.
+            (None, Some(dump_path)) if std::path::Path::new(dump_path).exists() => {
+                Ok(Some(dump_path))
+            }
+            (None, _) => Ok(None),
+        }
+    }
+
     pub(crate) fn get_metrics_addr(&self) -> Option<std::net::SocketAddr> {
         self.metrics_host
             .as_ref()
@@ -416,7 +587,7 @@ impl RequestResponseLogging {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, FromArgMatches, Parser};
     use starknet_core::constants::CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH;
     use starknet_core::starknet::starknet_config::{
         BlockGenerationOn, DumpOn, StateArchiveCapacity,
@@ -424,7 +595,7 @@ mod tests {
     use starknet_types::num_bigint::BigUint;
     use tracing_subscriber::EnvFilter;
 
-    use super::{Args, RequestResponseLogging};
+    use super::{Args, RequestResponseLogging, assert_options_match_dump};
     use crate::ip_addr_wrapper::IpAddrWrapper;
 
     const CAIRO_0_ERC20_CONTRACT_PATH: &str =
@@ -780,17 +951,15 @@ mod tests {
 
     #[test]
     fn test_when_dump_path_flag_required() {
-        for event in ["exit", "block"] {
-            match Args::try_parse_from(["--", "--dump-on", event]) {
-                Ok(args) => panic!("Should have failed; got: {args:?}"),
-                Err(e) => assert_eq!(
-                    get_first_line(&e.to_string()),
-                    "error: the following required arguments were not provided:"
-                ),
-            }
+        match Args::try_parse_from(["--", "--dump-on", "exit"]) {
+            Ok(args) => panic!("Should have failed; got: {args:?}"),
+            Err(e) => assert_eq!(
+                get_first_line(&e.to_string()),
+                "error: the following required arguments were not provided:"
+            ),
         }
-        match Args::try_parse_from(["--", "--dump-on", "request"]) {
-            Ok(Args { dump_on: Some(DumpOn::Request), .. }) => (),
+        match Args::try_parse_from(["--", "--dump-on", "exit", "--dump-path", "dump.json"]) {
+            Ok(Args { dump_on: Some(DumpOn::Exit), .. }) => (),
             other => panic!("Invalid arg parse result: {other:?}"),
         }
     }
@@ -801,9 +970,87 @@ mod tests {
             Ok(args) => panic!("Should have failed; got: {args:?}"),
             Err(e) => assert_eq!(
                 get_first_line(&e.to_string()),
-                "error: invalid value 'e' for '--dump-on <EVENT>'"
+                "error: invalid value 'e' for '--dump-on <EVENT>': possible values: exit"
             ),
         }
+    }
+
+    #[test]
+    fn removed_dump_modes_are_rejected() {
+        for mode in ["block", "request"] {
+            match Args::try_parse_from(["--", "--dump-on", mode, "--dump-path", "dump.json"]) {
+                Ok(args) => panic!("Should have failed; got: {args:?}"),
+                Err(e) => assert!(
+                    get_first_line(&e.to_string())
+                        .contains(&format!("`--dump-on {mode}` was removed")),
+                    "{e}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_dump_conversion_requires_load_path() {
+        match Args::try_parse_from(["--", "--convert-legacy-dump", "native.json"]) {
+            Ok(args) => panic!("Should have failed; got: {args:?}"),
+            Err(e) => assert_eq!(
+                get_first_line(&e.to_string()),
+                "error: the following required arguments were not provided:"
+            ),
+        }
+        let args = Args::try_parse_from([
+            "--",
+            "--convert-legacy-dump",
+            "native.json",
+            "--load-path",
+            "legacy.json",
+        ])
+        .unwrap();
+        assert_eq!(args.legacy_dump_conversion_path(), Some("native.json"));
+    }
+
+    #[test]
+    fn startup_loads_from_load_path_or_existing_dump_path() {
+        let existing = std::env::temp_dir().join(format!("devnet-cli-dump-{}", std::process::id()));
+        std::fs::write(&existing, "{}").unwrap();
+        let existing = existing.to_str().unwrap();
+        let missing = format!("{existing}-missing");
+
+        let path = |args: &[&str]| {
+            let args = Args::try_parse_from([&["--"], args].concat()).unwrap();
+            args.startup_dump_path().map(|path| path.map(str::to_string))
+        };
+        assert_eq!(path(&["--load-path", existing]).unwrap().as_deref(), Some(existing));
+        assert!(path(&["--load-path", &missing]).is_err());
+        assert_eq!(path(&["--dump-path", existing]).unwrap().as_deref(), Some(existing));
+        assert_eq!(path(&["--dump-path", &missing]).unwrap(), None);
+        assert_eq!(
+            path(&["--dump-path", &missing, "--load-path", existing]).unwrap().as_deref(),
+            Some(existing)
+        );
+        std::fs::remove_file(existing).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn options_conflicting_with_a_loaded_dump_are_rejected() {
+        let dumped = Args::parse_from(["--", "--seed", "1"]).to_config().unwrap().0;
+        let check = |args: &[&str]| {
+            let matches = Args::command().try_get_matches_from([&["--"], args].concat()).unwrap();
+            let specified = Args::from_arg_matches(&matches).unwrap().to_config().unwrap().0;
+            assert_options_match_dump(&matches, &specified, &dumped)
+        };
+
+        // Unspecified options and specified options with the dumped values are accepted.
+        check(&[]).unwrap();
+        check(&["--seed", "1", "--port", "1234", "--fork-network", "http://localhost:1"]).unwrap();
+
+        let error = check(&["--seed", "2", "--accounts", "3", "--lite-mode"]).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "The loaded dump was created with a different --accounts, --seed, --lite-mode; omit \
+             the option to use the dump's configuration"
+        );
     }
 
     #[test]

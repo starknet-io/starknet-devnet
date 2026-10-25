@@ -21,6 +21,31 @@ pub mod empty_params {
     }
 }
 
+/// Parameters of `devnet_dump`, which takes none.
+pub mod dump_params {
+    use serde::de::Error as DeError;
+    use serde::{Deserialize, Deserializer};
+    use serde_json::Value;
+
+    pub fn deserialize<'de, D>(d: D) -> Result<(), D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(d)? {
+            Value::Object(params)
+                if let Some(removed) =
+                    ["path", "inline"].into_iter().find(|key| params.contains_key(*key)) =>
+            {
+                Err(DeError::custom(format!(
+                    "The `{removed}` parameter of devnet_dump was removed; it returns the dump \
+                     and writes no files"
+                )))
+            }
+            params => super::empty_params::deserialize(params).map_err(DeError::custom),
+        }
+    }
+}
+
 pub mod optional_params {
     use serde::de::{DeserializeOwned, Error as DeError};
     use serde::{Deserialize, Deserializer};

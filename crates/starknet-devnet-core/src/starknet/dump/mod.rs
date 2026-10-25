@@ -20,7 +20,7 @@ use self::state::{
     ClassTable, ClassesDump, CompiledClasses, Genesis, LatestDump, invalid_dump, rebuild_states,
 };
 use super::Starknet;
-use super::starknet_config::DumpOn;
+use super::starknet_config::{DumpOn, StarknetConfig};
 use crate::error::DevnetResult;
 
 mod chain;
@@ -93,6 +93,12 @@ impl NativeDump {
 
     pub fn devnet_version(&self) -> &str {
         &self.devnet_version
+    }
+
+    /// Returns the configuration that loading the dump with `options` applies.
+    pub fn starknet_config(&self, options: &NativeDumpLoadOptions) -> DevnetResult<StarknetConfig> {
+        let definitions = self.classes.definitions_of(&self.config.class_hashes());
+        self.config.clone().decode(&definitions, options)
     }
 }
 
