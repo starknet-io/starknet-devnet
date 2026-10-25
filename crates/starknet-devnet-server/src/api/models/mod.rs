@@ -416,7 +416,7 @@ pub struct MessageHash {
 }
 
 // Implemented as type alias so JSON returned doesn't have extra key
-pub type DumpResponseBody = Box<starknet_core::starknet::dump::NativeDump>;
+pub type DumpResponseBody = Box<starknet_core::starknet::dump::StateDump>;
 
 #[derive(Serialize)]
 pub struct CreatedBlock {

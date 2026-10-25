@@ -127,7 +127,7 @@ pub struct Starknet {
     pub(crate) messaging: MessagingBroker,
     rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
     cheats: Cheats,
-    /// Identifies the genesis state produced by the configuration. Native dumps record it and
+    /// Identifies the genesis state produced by the configuration. Dumps record it and
     /// load only into an instance with the same genesis.
     genesis_fingerprint: Felt,
 }

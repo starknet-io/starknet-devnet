@@ -20,7 +20,7 @@ use starknet_core::constants::{
     STRK_ERC20_CONTRACT_ADDRESS, UDC_CONTRACT_ADDRESS, UDC_CONTRACT_CLASS_HASH,
 };
 use starknet_core::starknet::Starknet;
-use starknet_core::starknet::dump::{NativeDump, NativeDumpLoadOptions};
+use starknet_core::starknet::dump::{DumpLoadOptions, StateDump};
 use starknet_core::starknet::starknet_config::{
     BlockGenerationOn, DumpOn, ForkConfig, StarknetConfig,
 };
@@ -327,8 +327,8 @@ async fn main() -> Result<(), anyhow::Error> {
             anyhow::bail!("The dump at --load-path is already in the native format");
         }
         Some(dump @ serde_json::Value::Object(_)) => {
-            let dump = NativeDump::from_value(dump)?;
-            let options = NativeDumpLoadOptions {
+            let dump = StateDump::from_value(dump)?;
+            let options = DumpLoadOptions {
                 dump_on: starknet_config.dump_on,
                 dump_path: starknet_config.dump_path.clone(),
                 fork_url: starknet_config.fork_config.url.clone(),
@@ -342,7 +342,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
 
             let origin_accepted_on_l1_through = dump.origin_accepted_on_l1_through;
-            (Starknet::from_native_dump(dump, &options)?, None, origin_accepted_on_l1_through)
+            (Starknet::from_dump(dump, &options)?, None, origin_accepted_on_l1_through)
         }
         legacy_dump => {
             // If fork url is provided, then set fork config and chain_id from forked network

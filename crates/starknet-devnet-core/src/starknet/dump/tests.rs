@@ -11,7 +11,7 @@ use starknet_types::rpc::gas_modification::GasModificationRequest;
 use starknet_types::traits::TryHashProducer;
 
 use super::state::layer_json;
-use super::{NativeDump, NativeDumpLoadOptions};
+use super::{DumpLoadOptions, StateDump};
 use crate::constants::STRK_ERC20_CONTRACT_ADDRESS;
 use crate::error::Error;
 use crate::messaging::ethereum::EthereumMessaging;
@@ -24,13 +24,13 @@ use crate::utils::test_utils::cairo_0_account_without_validations;
 
 /// Dumps `starknet` through JSON and loads the result.
 fn round_trip(starknet: &Starknet) -> Starknet {
-    let value = serde_json::to_value(starknet.native_dump().unwrap()).unwrap();
-    let dump = NativeDump::from_value(value).unwrap();
-    Starknet::from_native_dump(dump, &NativeDumpLoadOptions::default()).unwrap()
+    let value = serde_json::to_value(starknet.dump().unwrap()).unwrap();
+    let dump = StateDump::from_value(value).unwrap();
+    Starknet::from_dump(dump, &DumpLoadOptions::default()).unwrap()
 }
 
 fn dump_json(starknet: &Starknet) -> Value {
-    serde_json::to_value(starknet.native_dump().unwrap()).unwrap()
+    serde_json::to_value(starknet.dump().unwrap()).unwrap()
 }
 
 /// Asserts that RPC-observable data of both instances is identical.
@@ -326,18 +326,17 @@ fn restored_instance_restarts_with_dumped_configuration() {
 #[test]
 fn load_options_replace_instance_settings() {
     let original = Starknet::new(&StarknetConfig::default()).unwrap();
-    let dump = NativeDump::from_value(dump_json(&original)).unwrap();
-    let options =
-        NativeDumpLoadOptions { dump_path: Some("out.json".to_string()), ..Default::default() };
-    let restored = Starknet::from_native_dump(dump, &options).unwrap();
+    let dump = StateDump::from_value(dump_json(&original)).unwrap();
+    let options = DumpLoadOptions { dump_path: Some("out.json".to_string()), ..Default::default() };
+    let restored = Starknet::from_dump(dump, &options).unwrap();
     assert_eq!(restored.config.dump_path.as_deref(), Some("out.json"));
 
-    let dump = NativeDump::from_value(dump_json(&original)).unwrap();
-    let options = NativeDumpLoadOptions {
+    let dump = StateDump::from_value(dump_json(&original)).unwrap();
+    let options = DumpLoadOptions {
         fork_url: Some("http://127.0.0.1:1".parse().unwrap()),
         ..Default::default()
     };
-    match Starknet::from_native_dump(dump, &options) {
+    match Starknet::from_dump(dump, &options) {
         Err(Error::InvalidDump(msg)) => assert!(msg.contains("not forked"), "{msg}"),
         other => panic!("unexpected result: {:?}", other.map(|_| ())),
     }
@@ -369,7 +368,7 @@ fn rejects_other_formats_and_versions() {
         (unknown_field, "unknown field `unexpected`"),
         (missing_section, "missing field `blocks`"),
     ] {
-        match NativeDump::from_value(input) {
+        match StateDump::from_value(input) {
             Err(Error::InvalidDump(msg)) => assert!(msg.contains(expected), "{msg}"),
             other => panic!("expected {expected:?}, got {:?}", other.map(|_| ())),
         }
@@ -418,8 +417,8 @@ fn rejects_dump_of_a_different_genesis() {
     let mut dump = dump_json(&starknet);
     dump["genesis_fingerprint"] = json!("0x1");
 
-    let dump = NativeDump::from_value(dump).unwrap();
-    match Starknet::from_native_dump(dump, &NativeDumpLoadOptions::default()) {
+    let dump = StateDump::from_value(dump).unwrap();
+    match Starknet::from_dump(dump, &DumpLoadOptions::default()) {
         Err(Error::InvalidDump(msg)) => assert!(msg.contains("different genesis"), "{msg}"),
         other => panic!("unexpected result: {:?}", other.map(|_| ())),
     }
