@@ -58,7 +58,7 @@ async fn latest_block_number(handler: &JsonRpcHandler) -> u64 {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn native_dump_round_trips_and_invalidates_snapshots_without_reusing_ids() {
+async fn dump_round_trips_and_invalidates_snapshots_without_reusing_ids() {
     let origin = handler();
     success(&origin, "devnet_createBlock", json!([])).await;
     success(&origin, "devnet_createBlock", json!([])).await;

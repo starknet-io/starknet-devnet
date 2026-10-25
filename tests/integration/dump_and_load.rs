@@ -326,7 +326,7 @@ async fn legacy_dumps_load_via_rpc_and_on_startup() {
         devnet_load.get_balance_latest(&Felt::from(DUMMY_ADDRESS), FeeUnit::Fri).await.unwrap();
     assert_eq!(balance, Felt::from(DUMMY_AMOUNT));
 
-    // Dumps produced after loading a legacy dump are native.
+    // Dumps produced after loading a legacy dump are in the current format.
     let dump = devnet_load.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
     assert_eq!(dump["format"], "starknet-devnet-dump");
 }
@@ -463,9 +463,9 @@ async fn test_dumping_after_restart() {
 }
 
 #[tokio::test]
-async fn legacy_dump_converts_to_native_format() {
+async fn legacy_dump_converts_to_current_format() {
     let legacy_file = UniqueAutoDeletableFile::new("legacy_dump_to_convert");
-    let native_file = UniqueAutoDeletableFile::new("converted_native_dump");
+    let converted_file = UniqueAutoDeletableFile::new("converted_dump");
     let events = json!([
         { "jsonrpc": "2.0", "id": 1, "method": "devnet_createBlock" },
         {
@@ -479,31 +479,32 @@ async fn legacy_dump_converts_to_native_format() {
         "--load-path",
         &legacy_file.path,
         "--convert-legacy-dump",
-        &native_file.path,
+        &converted_file.path,
     ])
     .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 
     let converted: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&native_file.path).unwrap()).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(&converted_file.path).unwrap()).unwrap();
     assert_eq!(converted["format"], "starknet-devnet-dump");
 
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&["--load-path", &native_file.path])
-        .await
-        .unwrap();
+    let devnet =
+        BackgroundDevnet::spawn_with_additional_args(&["--load-path", &converted_file.path])
+            .await
+            .unwrap();
     assert_eq!(devnet.get_latest_block_with_tx_hashes().await.unwrap().block_number, 2);
     let balance =
         devnet.get_balance_latest(&Felt::from(DUMMY_ADDRESS), FeeUnit::Fri).await.unwrap();
     assert_eq!(balance, Felt::from(DUMMY_AMOUNT));
 
-    // Converting a native dump is refused.
+    // Converting a dump that is not a legacy dump is refused.
     let output = BackgroundDevnet::run_to_completion(&[
         "--load-path",
-        &native_file.path,
+        &converted_file.path,
         "--convert-legacy-dump",
         &legacy_file.path,
     ])
     .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("already in the native format"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not a legacy dump"));
 }

@@ -216,7 +216,7 @@ Dumps can also be requested at any time via devnet_dump;")]
     #[arg(long = "convert-legacy-dump")]
     #[arg(value_name = "OUTPUT_PATH")]
     #[arg(requires = "load_path")]
-    #[arg(help = "Transitional: load the legacy dump at --load-path, write it in the native \
+    #[arg(help = "Transitional: load the legacy dump at --load-path, write it in the current \
                   format to OUTPUT_PATH and exit without starting the server. Specify the \
                   options the legacy dump was created with;")]
     convert_legacy_dump: Option<String>,
@@ -436,7 +436,7 @@ pub(crate) fn assert_options_match_dump(
 }
 
 impl Args {
-    /// Returns where to write a legacy dump converted to the native format, if requested.
+    /// Returns where to write a legacy dump converted to the current format, if requested.
     pub(crate) fn legacy_dump_conversion_path(&self) -> Option<&str> {
         self.convert_legacy_dump.as_deref()
     }
@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn legacy_dump_conversion_requires_load_path() {
-        match Args::try_parse_from(["--", "--convert-legacy-dump", "native.json"]) {
+        match Args::try_parse_from(["--", "--convert-legacy-dump", "converted.json"]) {
             Ok(args) => panic!("Should have failed; got: {args:?}"),
             Err(e) => assert_eq!(
                 get_first_line(&e.to_string()),
@@ -1001,12 +1001,12 @@ mod tests {
         let args = Args::try_parse_from([
             "--",
             "--convert-legacy-dump",
-            "native.json",
+            "converted.json",
             "--load-path",
             "legacy.json",
         ])
         .unwrap();
-        assert_eq!(args.legacy_dump_conversion_path(), Some("native.json"));
+        assert_eq!(args.legacy_dump_conversion_path(), Some("converted.json"));
     }
 
     #[test]

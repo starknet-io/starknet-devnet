@@ -372,7 +372,7 @@ pub struct RevertRequest {
     pub snapshot_id: String,
 }
 
-/// Parameters of `devnet_load`: a native dump object or a legacy event array.
+/// Parameters of `devnet_load`: a dump object or a legacy event array.
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct LoadRequest {
@@ -416,7 +416,7 @@ pub struct MessageHash {
 }
 
 // Implemented as type alias so JSON returned doesn't have extra key
-pub type DumpResponseBody = Box<starknet_core::starknet::dump::NativeDump>;
+pub type DumpResponseBody = Box<starknet_core::starknet::dump::StateDump>;
 
 #[derive(Serialize)]
 pub struct CreatedBlock {

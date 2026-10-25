@@ -20,7 +20,7 @@ use starknet_core::constants::{
     STRK_ERC20_CONTRACT_ADDRESS, UDC_CONTRACT_ADDRESS, UDC_CONTRACT_CLASS_HASH,
 };
 use starknet_core::starknet::Starknet;
-use starknet_core::starknet::dump::{NativeDump, NativeDumpLoadOptions};
+use starknet_core::starknet::dump::{DumpLoadOptions, StateDump};
 use starknet_core::starknet::starknet_config::{
     BlockGenerationOn, DumpOn, ForkConfig, StarknetConfig,
 };
@@ -320,15 +320,15 @@ async fn main() -> Result<(), anyhow::Error> {
         None => None,
     };
 
-    // A native dump carries the configuration it applies to; legacy dumps are replayed on top of
+    // A dump carries the configuration it applies to; legacy dumps are replayed on top of
     // an instance built from the command line.
     let (starknet, legacy_dump, origin_accepted_on_l1_through) = match startup_dump {
         Some(serde_json::Value::Object(_)) if args.legacy_dump_conversion_path().is_some() => {
-            anyhow::bail!("The dump at --load-path is already in the native format");
+            anyhow::bail!("The dump at --load-path is not a legacy dump; load it as it is");
         }
         Some(dump @ serde_json::Value::Object(_)) => {
-            let dump = NativeDump::from_value(dump)?;
-            let options = NativeDumpLoadOptions {
+            let dump = StateDump::from_value(dump)?;
+            let options = DumpLoadOptions {
                 dump_on: starknet_config.dump_on,
                 dump_path: starknet_config.dump_path.clone(),
                 fork_url: starknet_config.fork_config.url.clone(),
@@ -342,7 +342,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
 
             let origin_accepted_on_l1_through = dump.origin_accepted_on_l1_through;
-            (Starknet::from_native_dump(dump, &options)?, None, origin_accepted_on_l1_through)
+            (Starknet::from_dump(dump, &options)?, None, origin_accepted_on_l1_through)
         }
         legacy_dump => {
             // If fork url is provided, then set fork config and chain_id from forked network
@@ -462,7 +462,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 }
 
-/// Replays `legacy_dump` on top of `starknet` and writes the result as a native dump to
+/// Replays `legacy_dump` on top of `starknet` and writes the result as a dump to
 /// `output_path`. Transitional, for migrating legacy dumps.
 async fn convert_legacy_dump(
     starknet: Starknet,
@@ -475,9 +475,9 @@ async fn convert_legacy_dump(
         .load_dump(legacy_dump)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to load legacy dump: {e}"))?;
-    let dump = json_rpc_handler.native_dump().await?;
+    let dump = json_rpc_handler.state_dump().await?;
     write_dump(&dump, output_path)?;
-    info!("Converted the legacy dump to the native format at {output_path}");
+    info!("Converted the legacy dump and wrote it to {output_path}");
     Ok(())
 }
 
@@ -549,7 +549,7 @@ pub async fn shutdown_signal(
     let config = &handler.api.config;
     if let (Some(DumpOn::Exit), Some(dump_path)) = (config.dump_on, &config.dump_path) {
         let _lifecycle = handler.api.lifecycle.write().await;
-        let result = match handler.native_dump().await {
+        let result = match handler.state_dump().await {
             Ok(dump) => write_dump(&dump, dump_path).map_err(anyhow::Error::from),
             Err(e) => Err(anyhow::Error::from(e)),
         };

@@ -1,6 +1,6 @@
-//! Native, versioned persistence of all Devnet-owned state.
+//! Versioned persistence of all Devnet-owned state.
 //!
-//! A native dump holds the configuration and everything that happened after genesis. Loading
+//! A dump holds the configuration and everything that happened after genesis. Loading
 //! rebuilds the genesis with [`Starknet::new`] and applies the dumped blocks, state diffs,
 //! transactions and controls on top of it, without replaying transactions. A dump loads only into
 //! a Devnet whose genesis for the configuration matches, which in practice means the same release.
@@ -26,14 +26,14 @@ use crate::error::DevnetResult;
 mod chain;
 mod state;
 
-/// Identifies native dumps.
-pub const NATIVE_DUMP_FORMAT: &str = "starknet-devnet-dump";
-/// The native dump format version produced and accepted by this Devnet.
-pub const NATIVE_DUMP_VERSION: u64 = 1;
+/// Identifies dumps.
+pub const DUMP_FORMAT: &str = "starknet-devnet-dump";
+/// The dump format version produced and accepted by this Devnet.
+pub const DUMP_FORMAT_VERSION: u64 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NativeDump {
+pub struct StateDump {
     format: String,
     version: u64,
     /// The Devnet version that produced the dump. Informational only.
@@ -53,36 +53,36 @@ pub struct NativeDump {
 
 /// Settings of the loading instance that a dump does not carry.
 #[derive(Debug, Clone, Default)]
-pub struct NativeDumpLoadOptions {
+pub struct DumpLoadOptions {
     pub dump_on: Option<DumpOn>,
     pub dump_path: Option<String>,
     /// Replaces the origin URL recorded in a dump of a forked instance.
     pub fork_url: Option<Url>,
 }
 
-impl NativeDump {
-    /// Parses a native dump, rejecting other formats and unsupported versions before decoding the
+impl StateDump {
+    /// Parses a dump, rejecting other formats and unsupported versions before decoding the
     /// rest of the document.
     pub fn from_value(value: Value) -> DevnetResult<Self> {
         let object = value.as_object().ok_or_else(|| invalid_dump("expected a JSON object"))?;
         match object.get("format") {
-            Some(Value::String(format)) if format == NATIVE_DUMP_FORMAT => {}
+            Some(Value::String(format)) if format == DUMP_FORMAT => {}
             Some(format) => {
                 return Err(invalid_dump(format!(
-                    "unsupported format {format}; expected \"{NATIVE_DUMP_FORMAT}\""
+                    "unsupported format {format}; expected \"{DUMP_FORMAT}\""
                 )));
             }
             None => {
                 return Err(invalid_dump(format!(
-                    "missing \"format\"; expected \"{NATIVE_DUMP_FORMAT}\""
+                    "missing \"format\"; expected \"{DUMP_FORMAT}\""
                 )));
             }
         }
         match object.get("version") {
-            Some(version) if version.as_u64() == Some(NATIVE_DUMP_VERSION) => {}
+            Some(version) if version.as_u64() == Some(DUMP_FORMAT_VERSION) => {}
             Some(version) => {
                 return Err(invalid_dump(format!(
-                    "unsupported version {version}; supported: {NATIVE_DUMP_VERSION}"
+                    "unsupported version {version}; supported: {DUMP_FORMAT_VERSION}"
                 )));
             }
             None => return Err(invalid_dump("missing \"version\"")),
@@ -96,7 +96,7 @@ impl NativeDump {
     }
 
     /// Returns the configuration that loading the dump with `options` applies.
-    pub fn starknet_config(&self, options: &NativeDumpLoadOptions) -> DevnetResult<StarknetConfig> {
+    pub fn starknet_config(&self, options: &DumpLoadOptions) -> DevnetResult<StarknetConfig> {
         let definitions = self.classes.definitions_of(&self.config.class_hashes());
         self.config.clone().decode(&definitions, options)
     }
@@ -105,7 +105,7 @@ impl NativeDump {
 impl Starknet {
     /// Encodes all Devnet-owned state that the genesis of the configuration does not produce.
     /// Does not modify the instance.
-    pub fn native_dump(&self) -> DevnetResult<NativeDump> {
+    pub fn dump(&self) -> DevnetResult<StateDump> {
         let Starknet {
             latest_state,
             // Rebuilt from the latest state and the pre-confirmed state diff.
@@ -134,9 +134,9 @@ impl Starknet {
         );
         let config = ConfigDump::encode(config, &mut table)?;
 
-        Ok(NativeDump {
-            format: NATIVE_DUMP_FORMAT.to_string(),
-            version: NATIVE_DUMP_VERSION,
+        Ok(StateDump {
+            format: DUMP_FORMAT.to_string(),
+            version: DUMP_FORMAT_VERSION,
             devnet_version: env!("CARGO_PKG_VERSION").to_string(),
             genesis_fingerprint: *genesis_fingerprint,
             origin_accepted_on_l1_through: None,
@@ -156,14 +156,11 @@ impl Starknet {
         })
     }
 
-    /// Builds a new instance from a native dump without replaying transactions. Fails without
+    /// Builds a new instance from a dump without replaying transactions. Fails without
     /// affecting any existing instance's state; building the genesis does update the global
     /// block and transaction metrics, which the caller resynchronizes for the instance it keeps.
-    pub fn from_native_dump(
-        dump: NativeDump,
-        options: &NativeDumpLoadOptions,
-    ) -> DevnetResult<Self> {
-        let NativeDump {
+    pub fn from_dump(dump: StateDump, options: &DumpLoadOptions) -> DevnetResult<Self> {
+        let StateDump {
             format: _,
             version: _,
             devnet_version: _,
@@ -185,7 +182,7 @@ impl Starknet {
         if genesis.genesis_fingerprint != genesis_fingerprint {
             return Err(invalid_dump(
                 "the dump was created by a Devnet with a different genesis for its configuration; \
-                 native dumps load only into the same Devnet release",
+                 dumps load only into the same Devnet release",
             ));
         }
         let Starknet {

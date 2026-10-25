@@ -256,7 +256,7 @@ async fn failed_loads_preserve_snapshots_and_state() {
     let mint_after_snapshot = devnet.mint(address, 20).await;
     assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(30_u8));
 
-    // An invalid native dump is rejected without changing the state or the snapshot.
+    // An invalid dump is rejected without changing the state or the snapshot.
     let invalid = json!({ "format": "starknet-devnet-dump", "version": 2 });
     assert!(devnet.send_custom_rpc("devnet_load", json!({ "dump": invalid })).await.is_err());
     assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(30_u8));
