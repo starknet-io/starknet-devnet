@@ -956,8 +956,10 @@ impl JsonRpcHandler {
 
     /// devnet_getConfig
     pub async fn get_devnet_config(&self) -> StrictRpcResult {
+        // The instance's configuration, which a loaded dump may have replaced.
+        let starknet_config = self.api.starknet.lock().await.config.clone();
         Ok(DevnetResponse::DevnetConfig(DevnetConfig {
-            starknet_config: (*self.api.config).clone(),
+            starknet_config,
             server_config: (*self.api.server_config).clone(),
         })
         .into())
