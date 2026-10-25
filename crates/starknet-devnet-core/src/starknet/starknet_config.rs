@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU128;
 
 use clap::Error;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use starknet_rs_core::types::Felt;
 use starknet_types::chain_id::ChainId;
 use starknet_types::contract_class::ContractClass;
@@ -26,7 +26,7 @@ pub enum DumpOn {
     Request,
 }
 
-#[derive(Copy, Clone, Debug, clap::ValueEnum, Serialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, clap::ValueEnum, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofMode {
     Full,
@@ -34,7 +34,7 @@ pub enum ProofMode {
     None,
 }
 
-#[derive(Default, Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum, Serialize)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[clap(rename_all = "snake_case")]
 pub enum StateArchiveCapacity {
@@ -43,7 +43,7 @@ pub enum StateArchiveCapacity {
     Full,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockGenerationOn {
     Transaction,
@@ -51,7 +51,7 @@ pub enum BlockGenerationOn {
     Interval(u64),
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClassSizeConfig {
     pub maximum_contract_class_size: u64,
     pub maximum_contract_bytecode_size: u64,

@@ -19,7 +19,7 @@ pub struct DictState {
     pub address_to_class_hash: HashMap<ContractAddress, ClassHash>,
     pub class_hash_to_class: HashMap<ClassHash, RunnableCompiledClass>,
     pub class_hash_to_compiled_class_hash: HashMap<ClassHash, CompiledClassHash>,
-    defaulter: StarknetDefaulter,
+    pub(crate) defaulter: StarknetDefaulter,
 }
 
 impl DictState {

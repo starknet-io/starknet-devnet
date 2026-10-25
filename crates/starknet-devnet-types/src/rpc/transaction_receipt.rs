@@ -88,8 +88,8 @@ pub struct CommonTransactionReceipt {
     pub execution_resources: ExecutionResources,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct ExecutionResources {
     pub l1_gas: u64,
     pub l1_data_gas: u64,

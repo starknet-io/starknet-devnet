@@ -4,7 +4,10 @@ use blockifier::execution::call_info::CallInfo;
 use blockifier::execution::stack_trace::ErrorStack;
 use blockifier::transaction::objects::TransactionExecutionInfo;
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use starknet_api::block::BlockNumber;
+use starknet_api::execution_resources::GasVector;
+use starknet_api::transaction::fields::Fee;
 use starknet_rs_core::types::ExecutionResult;
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::emitted_event::{Event, OrderedEvent};
@@ -12,8 +15,8 @@ use starknet_types::felt::{BlockHash, TransactionHash};
 use starknet_types::messaging::MessageToL2;
 use starknet_types::rpc::messaging::{MessageToL1, OrderedMessageToL1};
 use starknet_types::rpc::transaction_receipt::{
-    DeployAccountTransactionReceipt, FeeAmount, FeeInUnits, L1HandlerTransactionReceipt,
-    TransactionReceipt,
+    DeployAccountTransactionReceipt, ExecutionResources, FeeAmount, FeeInUnits,
+    L1HandlerTransactionReceipt, TransactionReceipt,
 };
 use starknet_types::rpc::transactions::{
     DeclareTransaction, DeployAccountTransaction, InvokeTransaction, Transaction,
@@ -42,6 +45,11 @@ impl StarknetTransactions {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// Iterates over transactions in insertion order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &StarknetTransaction> {
+        self.0.values()
+    }
 }
 
 impl HashIdentifiedMut for StarknetTransactions {
@@ -60,6 +68,115 @@ impl HashIdentified for StarknetTransactions {
     }
 }
 
+/// The parts of a transaction's execution that remain observable after it was executed. Extracted
+/// once from blockifier's `TransactionExecutionInfo`, so retained transactions do not depend on
+/// blockifier's internal representation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct TransactionOutput {
+    pub(crate) events: Vec<Event>,
+    pub(crate) messages_sent: Vec<MessageToL1>,
+    pub(crate) actual_fee: Fee,
+    pub(crate) gas_consumed: GasVector,
+    pub(crate) execution_resources: ExecutionResources,
+    pub(crate) revert_error: Option<String>,
+}
+
+impl From<&TransactionExecutionInfo> for TransactionOutput {
+    fn from(execution_info: &TransactionExecutionInfo) -> Self {
+        Self {
+            events: get_events(execution_info),
+            messages_sent: get_l2_to_l1_messages(execution_info),
+            actual_fee: execution_info.receipt.fee,
+            gas_consumed: execution_info.receipt.gas,
+            execution_resources: ExecutionResources::from(execution_info),
+            revert_error: execution_info.revert_error.as_ref().map(|err| err.to_string()),
+        }
+    }
+}
+
+fn get_events(execution_info: &TransactionExecutionInfo) -> Vec<Event> {
+    let mut events: Vec<Event> = vec![];
+
+    fn get_blockifier_events_recursively(
+        call_info: &blockifier::execution::call_info::CallInfo,
+    ) -> Vec<(OrderedEvent, ContractAddress)> {
+        let mut events: Vec<(OrderedEvent, ContractAddress)> = vec![];
+
+        events.extend(
+            call_info
+                .execution
+                .events
+                .iter()
+                .map(|e| (OrderedEvent::from(e), call_info.call.storage_address.into())),
+        );
+
+        call_info.inner_calls.iter().for_each(|call| {
+            events.extend(get_blockifier_events_recursively(call));
+        });
+
+        events
+    }
+
+    let call_infos = vec![
+        execution_info.validate_call_info.as_ref(),
+        execution_info.execute_call_info.as_ref(),
+        execution_info.fee_transfer_call_info.as_ref(),
+    ];
+
+    for inner_call_info in call_infos.into_iter().flatten() {
+        let mut not_sorted_events = get_blockifier_events_recursively(inner_call_info);
+        not_sorted_events.sort_by_key(|(ordered_event, _)| ordered_event.order);
+        events.extend(not_sorted_events.into_iter().map(|(ordered_event, address)| Event {
+            from_address: address,
+            keys: ordered_event.keys,
+            data: ordered_event.data,
+        }));
+    }
+
+    events
+}
+
+fn get_l2_to_l1_messages(execution_info: &TransactionExecutionInfo) -> Vec<MessageToL1> {
+    let mut messages = vec![];
+
+    fn get_blockifier_messages_recursively(call_info: &CallInfo) -> Vec<OrderedMessageToL1> {
+        let mut messages = vec![];
+
+        // Ensure we always take the address of the contract that is sending the message.
+        // In the case of a library syscall, storage address will automatically refer to the
+        // caller address.
+        let from_address = call_info.call.storage_address;
+
+        messages.extend(call_info.execution.l2_to_l1_messages.iter().map(|m| {
+            OrderedMessageToL1 {
+                order: m.order,
+                #[allow(clippy::expect_used)] // TODO
+                message: MessageToL1 {
+                    to_address: m.message.to_address.try_into().expect("TODO"),
+                    from_address: from_address.into(),
+                    payload: m.message.payload.0.clone(),
+                },
+            }
+        }));
+
+        call_info.inner_calls.iter().for_each(|inner_call| {
+            messages.extend(get_blockifier_messages_recursively(inner_call));
+        });
+
+        messages
+    }
+
+    let call_infos = execution_info.non_optional_call_infos();
+
+    for inner_call_info in call_infos {
+        let mut not_sorted_messages = get_blockifier_messages_recursively(inner_call_info);
+        not_sorted_messages.sort_by_key(|message| message.order);
+        messages.extend(not_sorted_messages.into_iter().map(|m| m.message));
+    }
+
+    messages
+}
+
 #[derive(Clone, Debug)]
 pub struct StarknetTransaction {
     pub inner: TransactionWithHash,
@@ -67,7 +184,7 @@ pub struct StarknetTransaction {
     pub(crate) execution_result: ExecutionResult,
     pub(crate) block_hash: Option<BlockHash>,
     pub(crate) block_number: Option<BlockNumber>,
-    pub(crate) execution_info: Arc<TransactionExecutionInfo>,
+    pub(crate) output: Arc<TransactionOutput>,
     pub(crate) trace: Option<Arc<TransactionTrace>>,
 }
 
@@ -93,51 +210,13 @@ impl StarknetTransaction {
             inner: transaction.clone(),
             block_hash: None,
             block_number: Some(pre_confirmed_block_number),
-            execution_info: Arc::new(execution_info),
+            output: Arc::new(TransactionOutput::from(&execution_info)),
             trace: Some(Arc::new(trace)),
         }
     }
 
     pub fn get_events(&self) -> Vec<Event> {
-        let mut events: Vec<Event> = vec![];
-
-        fn get_blockifier_events_recursively(
-            call_info: &blockifier::execution::call_info::CallInfo,
-        ) -> Vec<(OrderedEvent, ContractAddress)> {
-            let mut events: Vec<(OrderedEvent, ContractAddress)> = vec![];
-
-            events.extend(
-                call_info
-                    .execution
-                    .events
-                    .iter()
-                    .map(|e| (OrderedEvent::from(e), call_info.call.storage_address.into())),
-            );
-
-            call_info.inner_calls.iter().for_each(|call| {
-                events.extend(get_blockifier_events_recursively(call));
-            });
-
-            events
-        }
-
-        let call_infos = vec![
-            self.execution_info.validate_call_info.as_ref(),
-            self.execution_info.execute_call_info.as_ref(),
-            self.execution_info.fee_transfer_call_info.as_ref(),
-        ];
-
-        for inner_call_info in call_infos.into_iter().flatten() {
-            let mut not_sorted_events = get_blockifier_events_recursively(inner_call_info);
-            not_sorted_events.sort_by_key(|(ordered_event, _)| ordered_event.order);
-            events.extend(not_sorted_events.into_iter().map(|(ordered_event, address)| Event {
-                from_address: address,
-                keys: ordered_event.keys,
-                data: ordered_event.data,
-            }));
-        }
-
-        events
+        self.output.events.clone()
     }
 
     pub fn get_receipt(&self) -> DevnetResult<TransactionReceipt> {
@@ -149,7 +228,7 @@ impl StarknetTransaction {
         // L1 Handler transactions are in WEI
         // V3 transactions are in STRK(FRI)
         // Other transactions versions are in ETH(WEI)
-        let fee_amount = FeeAmount { amount: self.execution_info.receipt.fee };
+        let fee_amount = FeeAmount { amount: self.output.actual_fee };
         let actual_fee_in_units = match self.inner.transaction {
             Transaction::L1Handler(_) => FeeInUnits::WEI(fee_amount),
             Transaction::Declare(DeclareTransaction::V3(_))
@@ -166,7 +245,7 @@ impl StarknetTransaction {
             &self.execution_result,
             self.finality_status,
             actual_fee_in_units,
-            &self.execution_info,
+            self.output.execution_resources.clone(),
         );
 
         match &self.inner.transaction {
@@ -195,7 +274,7 @@ impl StarknetTransaction {
     pub fn get_status(&self) -> TransactionStatus {
         TransactionStatus {
             finality_status: self.finality_status,
-            failure_reason: self.execution_info.revert_error.as_ref().map(|err| err.to_string()),
+            failure_reason: self.output.revert_error.clone(),
             execution_status: self.execution_result.status(),
         }
     }
@@ -205,44 +284,7 @@ impl StarknetTransaction {
     }
 
     pub fn get_l2_to_l1_messages(&self) -> Vec<MessageToL1> {
-        let mut messages = vec![];
-
-        fn get_blockifier_messages_recursively(call_info: &CallInfo) -> Vec<OrderedMessageToL1> {
-            let mut messages = vec![];
-
-            // Ensure we always take the address of the contract that is sending the message.
-            // In the case of a library syscall, storage address will automatically refer to the
-            // caller address.
-            let from_address = call_info.call.storage_address;
-
-            messages.extend(call_info.execution.l2_to_l1_messages.iter().map(|m| {
-                OrderedMessageToL1 {
-                    order: m.order,
-                    #[allow(clippy::expect_used)] // TODO
-                    message: MessageToL1 {
-                        to_address: m.message.to_address.try_into().expect("TODO"),
-                        from_address: from_address.into(),
-                        payload: m.message.payload.0.clone(),
-                    },
-                }
-            }));
-
-            call_info.inner_calls.iter().for_each(|inner_call| {
-                messages.extend(get_blockifier_messages_recursively(inner_call));
-            });
-
-            messages
-        }
-
-        let call_infos = self.execution_info.non_optional_call_infos();
-
-        for inner_call_info in call_infos {
-            let mut not_sorted_messages = get_blockifier_messages_recursively(inner_call_info);
-            not_sorted_messages.sort_by_key(|message| message.order);
-            messages.extend(not_sorted_messages.into_iter().map(|m| m.message));
-        }
-
-        messages
+        self.output.messages_sent.clone()
     }
 }
 
@@ -259,7 +301,7 @@ impl From<&StarknetTransaction>
             ),
             transaction_output:
                 starknet_api::block_hash::block_hash_calculator::TransactionOutputForHash {
-                    actual_fee: tx.execution_info.receipt.fee,
+                    actual_fee: tx.output.actual_fee,
                     events: tx
                         .get_events()
                         .iter()
@@ -287,7 +329,7 @@ impl From<&StarknetTransaction>
                             )
                         }
                     },
-                    gas_consumed: tx.execution_info.receipt.gas,
+                    gas_consumed: tx.output.gas_consumed,
                     messages_sent: tx
                         .get_l2_to_l1_messages()
                         .into_iter()
@@ -373,7 +415,10 @@ mod tests {
         assert_eq!(sn_tx.block_number, extracted_tran.block_number);
         assert!(sn_tx.inner == extracted_tran.inner);
         assert_eq!(sn_tx.finality_status, extracted_tran.finality_status);
-        assert_eq!(sn_tx.execution_info, extracted_tran.execution_info);
+        assert_eq!(
+            serde_json::to_value(&sn_tx.output).unwrap(),
+            serde_json::to_value(&extracted_tran.output).unwrap()
+        );
         assert_eq!(sn_tx.block_number, Some(block_number));
     }
 

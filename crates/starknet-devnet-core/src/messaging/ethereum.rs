@@ -11,6 +11,7 @@ use alloy::signers::local::{LocalSignerError, PrivateKeySigner};
 use alloy::sol;
 use alloy::sol_types::SolEvent;
 use alloy::transports::RpcError;
+use serde::{Deserialize, Serialize};
 use starknet_rs_core::types::{Felt, Hash256};
 use starknet_types::felt::felt_from_prefixed_hex;
 use starknet_types::rpc::contract_address::ContractAddress;
@@ -96,7 +97,46 @@ pub struct EthereumMessaging {
     // If so, it must be dumped too.
 }
 
+/// Persisted form of [`EthereumMessaging`]. Restoring it performs no L1 requests.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EthereumMessagingDump {
+    node_url: String,
+    messaging_contract_address: Address,
+    last_fetched_block: u64,
+    chain_id: Option<u64>,
+    deployer_private_key: B256,
+}
+
 impl EthereumMessaging {
+    pub(crate) fn to_dump(&self) -> EthereumMessagingDump {
+        let Self { wallet, messaging_contract_address, node_url, last_fetched_block } = self;
+        EthereumMessagingDump {
+            node_url: node_url.to_string(),
+            messaging_contract_address: *messaging_contract_address,
+            last_fetched_block: *last_fetched_block,
+            chain_id: wallet.chain_id(),
+            deployer_private_key: wallet.to_bytes(),
+        }
+    }
+
+    pub(crate) fn from_dump(dump: EthereumMessagingDump) -> DevnetResult<Self> {
+        let EthereumMessagingDump {
+            node_url,
+            messaging_contract_address,
+            last_fetched_block,
+            chain_id,
+            deployer_private_key,
+        } = dump;
+        let node_url = node_url
+            .parse()
+            .map_err(|e| Error::InvalidDump(format!("Invalid L1 node URL '{node_url}': {e}")))?;
+        let wallet = PrivateKeySigner::from_bytes(&deployer_private_key)
+            .map_err(|e| Error::InvalidDump(format!("Invalid L1 deployer private key: {e}")))?
+            .with_chain_id(chain_id);
+        Ok(Self { wallet, messaging_contract_address, node_url, last_fetched_block })
+    }
+
     /// Instantiates a new `EthereumMessaging`.
     ///
     /// # Arguments

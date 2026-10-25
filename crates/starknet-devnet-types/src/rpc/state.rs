@@ -48,8 +48,8 @@ pub struct PreConfirmedStateUpdate {
     pub state_diff: ThinStateDiff,
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize, Eq, PartialEq), serde(deny_unknown_fields))]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(Eq, PartialEq), serde(deny_unknown_fields))]
 pub struct ThinStateDiff {
     pub deployed_contracts: Vec<DeployedContract>,
     pub storage_diffs: Vec<StorageDiff>,

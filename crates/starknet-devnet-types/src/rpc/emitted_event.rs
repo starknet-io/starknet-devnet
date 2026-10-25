@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use starknet_api::block::BlockNumber;
 use starknet_types_core::felt::Felt;
 
@@ -38,16 +38,16 @@ impl From<starknet_rs_core::types::EmittedEvent> for EmittedEvent {
     }
 }
 
-#[derive(Serialize, Clone, Debug)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct Event {
     pub from_address: ContractAddress,
     pub keys: Vec<Felt>,
     pub data: Vec<Felt>,
 }
 
-#[derive(Serialize, Clone, Debug)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct OrderedEvent {
     pub keys: Vec<Felt>,
     pub data: Vec<Felt>,

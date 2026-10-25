@@ -27,4 +27,10 @@ impl Cheats {
     pub(crate) fn is_auto_impersonate(&self) -> bool {
         self.auto_impersonate
     }
+    pub(crate) fn from_parts(
+        impersonated_accounts: HashSet<ContractAddress>,
+        auto_impersonate: bool,
+    ) -> Self {
+        Self { impersonated_accounts, auto_impersonate }
+    }
 }

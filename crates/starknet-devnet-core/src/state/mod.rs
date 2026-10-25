@@ -67,10 +67,10 @@ pub trait CustomState {
 /// the latest state, just that it is bound to be. Since there is no way of telling if a class is in
 /// the latest state or no, retrieving from the latest state has to be done via block number.
 pub struct CommittedClassStorage {
-    staging: HashMap<ClassHash, ContractClass>,
-    committed: HashMap<ClassHash, (ContractClass, u64)>,
+    pub(crate) staging: HashMap<ClassHash, ContractClass>,
+    pub(crate) committed: HashMap<ClassHash, (ContractClass, u64)>,
     /// Remembers all classes committed at a block
-    block_number_to_classes: HashMap<u64, Vec<ClassHash>>,
+    pub(crate) block_number_to_classes: HashMap<u64, Vec<ClassHash>>,
 }
 
 impl CommittedClassStorage {
@@ -153,11 +153,11 @@ pub struct StarknetState {
     /// The class storage is meant to be shared between states to prevent copying (due to memory
     /// concerns). Knowing which class was added when is made possible by storing the class
     /// together with the block number.
-    rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
+    pub(crate) rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
     /// Used for old state preservation purposes.
-    historic_state: DictState,
+    pub(crate) historic_state: DictState,
     /// Maps each (contract_address, storage_key) to the block number of its most recent update.
-    storage_metadata: HashMap<(ContractAddress, StorageKey), u64>,
+    pub(crate) storage_metadata: HashMap<(ContractAddress, StorageKey), u64>,
 }
 
 impl Default for StarknetState {

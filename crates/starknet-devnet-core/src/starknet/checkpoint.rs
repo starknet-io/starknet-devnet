@@ -38,6 +38,7 @@ impl StarknetCheckpoint {
             messaging,
             rpc_contract_classes,
             cheats,
+            genesis_fingerprint,
         } = starknet;
 
         let rpc_contract_classes = Arc::new(RwLock::new(rpc_contract_classes.read().clone()));
@@ -63,6 +64,7 @@ impl StarknetCheckpoint {
             messaging: messaging.clone(),
             rpc_contract_classes,
             cheats: cheats.clone(),
+            genesis_fingerprint: *genesis_fingerprint,
         })
     }
 

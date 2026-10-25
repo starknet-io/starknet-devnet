@@ -4,7 +4,6 @@ use blockifier::blockifier_versioned_constants::VersionedConstants;
 use blockifier::state::cached_state::StateMaps;
 use blockifier::state::state_api::StateReader;
 use blockifier::transaction::account_transaction::ExecutionFlags;
-use blockifier::transaction::objects::TransactionExecutionInfo;
 use deploy_transaction::DeployTransaction;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use starknet_api::block::{BlockNumber, GasPrice};
@@ -110,9 +109,9 @@ pub enum TransactionType {
     L1Handler,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq), serde(deny_unknown_fields))]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq), serde(deny_unknown_fields))]
 pub enum Transaction {
     Declare(DeclareTransaction),
     DeployAccount(DeployAccountTransaction),
@@ -144,8 +143,8 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq))]
 pub struct TransactionWithHash {
     transaction_hash: TransactionHash,
     #[serde(flatten)]
@@ -214,10 +213,9 @@ impl TransactionWithHash {
         execution_result: &ExecutionResult,
         finality_status: TransactionFinalityStatus,
         actual_fee: FeeInUnits,
-        execution_info: &TransactionExecutionInfo,
+        execution_resources: ExecutionResources,
     ) -> CommonTransactionReceipt {
         let r#type = self.get_type();
-        let execution_resources = ExecutionResources::from(execution_info);
 
         CommonTransactionReceipt {
             r#type,
@@ -280,8 +278,8 @@ pub struct TransactionStatus {
     pub execution_status: TransactionExecutionStatus,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum DeclareTransaction {
     V3(DeclareTransactionV3),
@@ -295,8 +293,8 @@ impl DeclareTransaction {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum InvokeTransaction {
     V3(InvokeTransactionV3),
@@ -310,8 +308,8 @@ impl InvokeTransaction {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize, PartialEq, Eq))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum DeployAccountTransaction {
     V3(Box<DeployAccountTransactionV3>),
@@ -945,8 +943,7 @@ pub enum TraceFlag {
     ReturnInitialReads,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CallType {
     LibraryCall,
@@ -954,8 +951,8 @@ pub enum CallType {
     Delegate,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct FunctionInvocation {
     contract_address: ContractAddress,
     entry_point_selector: EntryPointSelector,
@@ -972,16 +969,15 @@ pub struct FunctionInvocation {
     is_reverted: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct InnerExecutionResources {
     pub l1_gas: u64,
     pub l2_gas: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize))]
 pub enum TransactionTrace {
     Invoke(InvokeTransactionTrace),
     Declare(DeclareTransactionTrace),
@@ -996,14 +992,13 @@ pub struct BlockTransactionTrace {
     pub trace_root: TransactionTrace,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct Reversion {
     pub revert_reason: String, // TODO use blockifier's RevertError
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum ExecutionInvocation {
@@ -1011,8 +1006,8 @@ pub enum ExecutionInvocation {
     Reverted(Reversion),
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct InvokeTransactionTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validate_invocation: Option<FunctionInvocation>,
@@ -1024,8 +1019,8 @@ pub struct InvokeTransactionTrace {
     pub execution_resources: ExecutionResources,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct DeclareTransactionTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validate_invocation: Option<FunctionInvocation>,
@@ -1036,8 +1031,8 @@ pub struct DeclareTransactionTrace {
     pub execution_resources: ExecutionResources,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct DeployAccountTransactionTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validate_invocation: Option<FunctionInvocation>,
@@ -1050,8 +1045,8 @@ pub struct DeployAccountTransactionTrace {
     pub execution_resources: ExecutionResources,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct L1HandlerTransactionTrace {
     pub function_invocation: ExecutionInvocation,
     #[serde(skip_serializing_if = "Option::is_none")]
