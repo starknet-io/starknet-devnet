@@ -53,7 +53,7 @@ The accepted block's state update reports final values for overlapping writes. R
 
 ## Errors and lifecycle compatibility
 
-Invalid requests leave state, accumulated diffs, class registries, and existing transactions unchanged. Failed requests are excluded from the replay journal.
+Invalid requests leave state, accumulated diffs, class registries, and existing transactions unchanged.
 
 | Code     | Meaning                                                                                                        |
 | -------- | -------------------------------------------------------------------------------------------------------------- |
@@ -65,4 +65,4 @@ Invalid requests leave state, accumulated diffs, class registries, and existing 
 
 Duplicate entries within a category, repeated storage keys, overlapping deployment/replacement targets, incompatible declaration categories, and unknown request fields are rejected. Nonempty `migrated_compiled_classes` is unsupported. Empty migration arrays are accepted.
 
-The method works over HTTP and WebSocket and is restricted by default under `--restrictive-mode`. Snapshots capture manual changes and supplied classes; revert restores them together with the journal. Dump/load preserves their ordering relative to transactions and block creation. Restart clears them with the rest of Devnet state, and block abortion restores the surviving accepted state. Existing dump-file I/O failure behavior also applies to this method.
+The method works over HTTP and WebSocket and is restricted by default under `--restrictive-mode`. Snapshots and [dumps](./dump-load-restart#dumping) capture manual changes and supplied classes like any other state. Restart clears them with the rest of Devnet state, and block abortion restores the surviving accepted state.

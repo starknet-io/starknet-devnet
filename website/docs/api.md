@@ -64,9 +64,9 @@ To interact with Devnet using the [Starknet API](#starknet-api), use [starknet.j
 
 ## Config API
 
-Send `devnet_getConfig` to retrieve the resolved startup configuration, including explicit CLI or environment settings and defaults. Use `starknet-devnet --help` to interpret the fields; some field names differ from their CLI options. Runtime changes made by methods such as `devnet_setGasPrice`, `devnet_setTime`, impersonation, or snapshot restoration do not update this response. Use [`devnet_getStatus`](#status-api) for a summary of runtime state and block queries for gas prices currently in effect.
+Send `devnet_getConfig` to retrieve the resolved startup configuration, including explicit CLI or environment settings and defaults. Use `starknet-devnet --help` to interpret the fields; some field names differ from their CLI options. Runtime changes made by methods such as `devnet_setGasPrice`, `devnet_setTime`, impersonation, or snapshot restoration do not update this response. After a [dump is loaded](./dump-load-restart#loading), the response reports the dump's configuration. Use [`devnet_getStatus`](#status-api) for a summary of runtime state and block queries for gas prices currently in effect.
 
-For example, starting with `starknet-devnet --seed 42 --accounts 2 --host 127.0.0.1 --block-generation-on demand --dump-on request --state-archive-capacity full` returns the following result. Class hashes and defaults may change between versions.
+For example, starting with `starknet-devnet --seed 42 --accounts 2 --host 127.0.0.1 --block-generation-on demand --dump-on exit --dump-path dump.json --state-archive-capacity full` returns the following result. Class hashes and defaults may change between versions.
 
 ```json
 {
@@ -82,8 +82,8 @@ For example, starting with `starknet-devnet --seed 42 --accounts 2 --host 127.0.
   "l2_gas_price_wei": 1000000000,
   "l2_gas_price_fri": 1000000000,
   "chain_id": "SN_SEPOLIA",
-  "dump_on": "request",
-  "dump_path": null,
+  "dump_on": "exit",
+  "dump_path": "dump.json",
   "block_generation_on": "demand",
   "lite_mode": false,
   "proof_mode": "devnet",
