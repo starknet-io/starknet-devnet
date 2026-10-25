@@ -5,6 +5,7 @@ use starknet_rs_accounts::{
     Account, AccountFactory, AccountFactoryError, ExecutionEncoding, OpenZeppelinAccountFactory,
     SingleOwnerAccount,
 };
+use starknet_rs_core::types::contract::legacy::LegacyContractClass;
 use starknet_rs_core::types::{
     BlockId, BlockTag, Call, ContractClass, DeclareTransaction, Felt, FunctionCall,
     MaybePreConfirmedBlockWithTxHashes, StarknetError, Transaction,
@@ -157,6 +158,78 @@ async fn test_getting_cairo0_class_from_fork() {
     // assert_eq!(retrieved_class, ContractClass::Legacy(contract_class.compress().unwrap()));
     // TODO For now, successfully unwrapping the retrieved class serves as proof of correctness.
     // Currently asserting cairo0 artifacts is failing; related: https://github.com/starknet-io/starknet-devnet/pull/380
+}
+
+#[tokio::test]
+async fn test_calling_and_invoking_cairo0_contract_present_only_on_origin() {
+    let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    let (signer, account_address) = origin_devnet.get_first_predeployed_account_credentials().await;
+
+    // Cairo 0 classes cannot be declared via transactions, so supply one via state diff
+    let class: LegacyContractClass = serde_json::from_str(
+        &std::fs::read_to_string("../../contracts/test_artifacts/cairo0/simple_contract.json")
+            .unwrap(),
+    )
+    .unwrap();
+    let class_hash = class.class_hash().unwrap();
+    let contract_address = Felt::from(0xdead);
+    let initial_value = Felt::from(10_u32);
+    origin_devnet
+        .send_custom_rpc(
+            "devnet_applyStateDiff",
+            serde_json::json!({
+                "classes": [{ "contract_class": class.compress().unwrap() }],
+                "state_diff": {
+                    "deprecated_declared_classes": [class_hash],
+                    "deployed_contracts": [{ "address": contract_address, "class_hash": class_hash }],
+                    "storage_diffs": [{
+                        "address": contract_address,
+                        "storage_entries": [{
+                            "key": get_storage_var_address("balance", &[]).unwrap(),
+                            "value": initial_value
+                        }]
+                    }]
+                }
+            }),
+        )
+        .await
+        .unwrap();
+    origin_devnet.create_block().await.unwrap();
+
+    // the class is executed in the fork after being fetched from the origin
+    let fork_devnet = origin_devnet.fork().await.unwrap();
+    let fork_balance = get_contract_balance(&fork_devnet, contract_address).await.unwrap();
+    assert_eq!(fork_balance, initial_value);
+
+    let fork_predeployed_account = SingleOwnerAccount::new(
+        fork_devnet.clone_provider(),
+        signer,
+        account_address,
+        constants::CHAIN_ID,
+        ExecutionEncoding::New,
+    );
+
+    let increment = Felt::from(5_u32);
+    let invoke_result = fork_predeployed_account
+        .execute_v3(vec![Call {
+            to: contract_address,
+            selector: get_selector_from_name("increase_balance").unwrap(),
+            calldata: vec![increment],
+        }])
+        .l1_gas(0)
+        .l1_data_gas(1e3 as u64)
+        .l2_gas(1e7 as u64)
+        .send()
+        .await
+        .unwrap();
+    assert_tx_succeeded_accepted(&invoke_result.transaction_hash, &fork_devnet.json_rpc_client)
+        .await
+        .unwrap();
+
+    let origin_balance = get_contract_balance(&origin_devnet, contract_address).await.unwrap();
+    assert_eq!(origin_balance, initial_value);
+    let fork_balance = get_contract_balance(&fork_devnet, contract_address).await.unwrap();
+    assert_eq!(fork_balance, initial_value + increment);
 }
 
 #[tokio::test]
