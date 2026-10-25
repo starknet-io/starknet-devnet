@@ -354,6 +354,14 @@ impl From<&StarknetBlock> for starknet_types::rpc::block::BlockHeader {
 }
 
 impl StarknetBlock {
+    pub(crate) fn from_parts(
+        header: BlockHeader,
+        transaction_hashes: Vec<TransactionHash>,
+        status: BlockStatus,
+    ) -> Self {
+        Self { header, transaction_hashes, status }
+    }
+
     pub(crate) fn add_transaction(&mut self, transaction_hash: TransactionHash) {
         self.transaction_hashes.push(transaction_hash);
     }
