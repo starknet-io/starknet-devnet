@@ -372,7 +372,7 @@ pub struct RevertRequest {
     pub snapshot_id: String,
 }
 
-/// Parameters of `devnet_load`: a native dump object or a legacy event array.
+/// Parameters of `devnet_load`: a dump object or a legacy event array.
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct LoadRequest {

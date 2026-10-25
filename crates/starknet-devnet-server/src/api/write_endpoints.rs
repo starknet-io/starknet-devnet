@@ -197,11 +197,11 @@ impl JsonRpcHandler {
 
     /// devnet_dump
     pub async fn dump(&self) -> StrictRpcResult {
-        Ok(DevnetResponse::DevnetDump(Box::new(self.native_dump().await?)).into())
+        Ok(DevnetResponse::DevnetDump(Box::new(self.state_dump().await?)).into())
     }
 
     /// Encodes the instance, including the forking origin's L1-acceptance boundary.
-    pub async fn native_dump(&self) -> Result<StateDump, ApiError> {
+    pub async fn state_dump(&self) -> Result<StateDump, ApiError> {
         let origin_accepted_on_l1_through = match &self.origin_caller {
             Some(origin) => origin.acceptance_boundary().await,
             None => None,
@@ -224,12 +224,12 @@ impl JsonRpcHandler {
         Ok(JsonRpcResponse::Empty)
     }
 
-    /// Replaces the instance state with a native dump or a legacy event array. On failure, the
+    /// Replaces the instance state with a dump or a legacy event array. On failure, the
     /// state, snapshots and subscriptions are left unchanged.
     pub async fn load_dump(&self, dump: Value) -> Result<(), ApiError> {
         let result = match dump {
             Value::Array(_) => self.load_legacy_dump(dump).await,
-            dump => self.load_native_dump(dump).await,
+            dump => self.load_state_dump(dump).await,
         };
         if result.is_err() {
             // Building a replacement instance updates the global metrics.
@@ -238,7 +238,7 @@ impl JsonRpcHandler {
         result
     }
 
-    async fn load_native_dump(&self, dump: Value) -> Result<(), ApiError> {
+    async fn load_state_dump(&self, dump: Value) -> Result<(), ApiError> {
         let dump = StateDump::from_value(dump).map_err(load_error)?;
         let options = DumpLoadOptions {
             dump_on: self.api.config.dump_on,
