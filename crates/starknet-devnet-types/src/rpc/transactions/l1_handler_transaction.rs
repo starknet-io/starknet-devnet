@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use starknet_api::core::{
     ContractAddress as ApiContractAddress, EntryPointSelector as ApiEntryPointSelector,
     Nonce as ApiNonce,
@@ -20,8 +20,8 @@ use crate::error::{ConversionError, DevnetResult, Error};
 use crate::felt::{Calldata, EntryPointSelector, Nonce, TransactionVersion, try_felt_to_num};
 use crate::rpc::messaging::MessageToL2;
 
-#[derive(Debug, Clone, Default, Serialize, Eq, PartialEq)]
-#[cfg_attr(feature = "testing", derive(serde::Deserialize), serde(deny_unknown_fields))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]
 pub struct L1HandlerTransaction {
     /// The hash of the L1 transaction that triggered this L1 handler execution.
     /// Omissible if received via mock (devnet_postmanSendMessageToL2)

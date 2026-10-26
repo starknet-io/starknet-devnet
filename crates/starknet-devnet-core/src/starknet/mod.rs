@@ -86,7 +86,7 @@ use crate::state::state_diff::StateDiff;
 use crate::state::{CommittedClassStorage, CustomState, CustomStateReader, StarknetState};
 use crate::traits::{AccountGenerator, Deployed, HashIdentified, HashIdentifiedMut};
 use crate::transactions::{StarknetTransaction, StarknetTransactions};
-use crate::utils::{custom_bouncer_config, get_versioned_constants, maybe_extract_failure_reason};
+use crate::utils::{custom_bouncer_config, get_versioned_constants};
 
 mod add_declare_transaction;
 mod add_deploy_account_transaction;
@@ -95,6 +95,7 @@ mod add_l1_handler_transaction;
 mod cheats;
 mod checkpoint;
 pub(crate) mod defaulter;
+pub mod dump;
 mod estimations;
 pub mod events;
 mod get_class_impls;
@@ -126,6 +127,9 @@ pub struct Starknet {
     pub(crate) messaging: MessagingBroker,
     rpc_contract_classes: Arc<RwLock<CommittedClassStorage>>,
     cheats: Cheats,
+    /// Identifies the genesis state produced by the configuration. Dumps record it and
+    /// load only into an instance with the same genesis.
+    genesis_fingerprint: Felt,
 }
 
 impl Default for Starknet {
@@ -163,6 +167,7 @@ impl Default for Starknet {
             messaging: Default::default(),
             rpc_contract_classes: Default::default(),
             cheats: Default::default(),
+            genesis_fingerprint: Felt::ZERO,
         }
     }
 }
@@ -265,6 +270,7 @@ impl Starknet {
         let last_block_hash = config.fork_config.block_hash;
 
         let pre_confirmed_state_diff = state.commit_diff(starting_block_number)?;
+        let genesis_fingerprint = dump::genesis_fingerprint(&state, &rpc_contract_classes.read());
 
         let mut this = Self {
             latest_state: Default::default(), // temporary - overwritten on genesis block creation
@@ -299,6 +305,7 @@ impl Starknet {
             messaging: Default::default(),
             rpc_contract_classes,
             cheats: Default::default(),
+            genesis_fingerprint,
         };
 
         this.restart_pre_confirmed_block();
@@ -381,8 +388,11 @@ impl Starknet {
             tracing::error!("Failed to pre-process block: {e}");
         }
 
-        if let Err(e) = self.commit_diff() {
-            tracing::error!("Failed to commit pre-processed block hashes to state: {e}");
+        // Commit under the new pre-confirmed block, whose state diff receives these writes. The
+        // pre-confirmed block itself is only restarted below.
+        match self.pre_confirmed_state.commit_diff(next_block_number.0) {
+            Ok(state_diff) => self.pre_confirmed_state_diff.extend(&state_diff),
+            Err(e) => tracing::error!("Failed to commit pre-processed block hashes to state: {e}"),
         }
 
         Self::set_block_context_gas(&mut self.block_context, &self.next_block_gas);
@@ -1788,7 +1798,7 @@ impl Starknet {
                             transaction_hash: *l2_tx_hash,
                             finality_status: l2_tx.finality_status,
                             execution_status: l2_tx.execution_result.status(),
-                            failure_reason: maybe_extract_failure_reason(&l2_tx.execution_info),
+                            failure_reason: l2_tx.output.revert_error.clone(),
                         }),
                         // should never happen due to handling in add_l1_handler_transaction
                         None => return None,
@@ -2329,6 +2339,31 @@ mod tests {
             }
             unexpected => panic!("Got unexpected response: {unexpected:?}"),
         }
+    }
+
+    #[test]
+    fn stored_block_hash_is_attributed_to_the_block_whose_state_diff_writes_it() {
+        let buffer = blockifier::abi::constants::STORED_BLOCK_HASH_BUFFER;
+        let mut starknet =
+            Starknet::new(&StarknetConfig { lite_mode: true, ..Default::default() }).unwrap();
+        for _ in 0..buffer {
+            starknet.create_block();
+        }
+
+        let pre_confirmed_number = starknet.blocks.pre_confirmed_block.block_number().0;
+        let block_hash_contract = ContractAddress::new(Felt::ONE).unwrap();
+        let key = starknet_types::patricia_key::PatriciaKey::new(Felt::from(
+            pre_confirmed_number - buffer,
+        ))
+        .unwrap();
+        assert!(
+            starknet.pre_confirmed_state_diff.storage_updates[&block_hash_contract]
+                .contains_key(&key)
+        );
+        assert_eq!(
+            starknet.latest_state.get_storage_last_update_block(block_hash_contract, key),
+            Some(pre_confirmed_number)
+        );
     }
 
     #[test]

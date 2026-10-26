@@ -1,6 +1,5 @@
 use blockifier::blockifier_versioned_constants::VersionedConstants;
 use blockifier::bouncer::{BouncerConfig, BouncerWeights, BuiltinInstanceLimits};
-use blockifier::transaction::objects::TransactionExecutionInfo;
 use starknet_api::block::StarknetVersion;
 use starknet_api::versioned_constants_logic::VersionedConstantsTrait;
 use starknet_rs_core::types::Felt;
@@ -71,12 +70,6 @@ macro_rules! nonzero_gas_price {
         let gas_price = starknet_api::block::GasPrice(($value).get());
         starknet_api::block::NonzeroGasPrice::new(gas_price).unwrap()
     }};
-}
-
-pub(crate) fn maybe_extract_failure_reason(
-    execution_info: &TransactionExecutionInfo,
-) -> Option<String> {
-    execution_info.revert_error.as_ref().map(|err| err.to_string())
 }
 
 #[cfg(test)]

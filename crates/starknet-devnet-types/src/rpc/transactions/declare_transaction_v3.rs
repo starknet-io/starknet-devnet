@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use starknet_api::data_availability::DataAvailabilityMode;
 use starknet_api::transaction::fields::Tip;
 use starknet_types_core::felt::Felt;
@@ -8,12 +8,8 @@ use super::broadcasted_declare_transaction_v3::BroadcastedDeclareTransactionV3;
 use crate::contract_address::ContractAddress;
 use crate::felt::{ClassHash, CompiledClassHash, Nonce, TransactionSignature, TransactionVersion};
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(
-    feature = "testing",
-    derive(serde::Deserialize, PartialEq, Eq),
-    serde(deny_unknown_fields)
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "testing", derive(PartialEq, Eq), serde(deny_unknown_fields))]
 pub struct DeclareTransactionV3 {
     version: TransactionVersion,
     pub(crate) signature: TransactionSignature,
