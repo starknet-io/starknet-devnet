@@ -223,6 +223,16 @@ impl BackgroundDevnet {
         final_args
     }
 
+    /// Runs Devnet with `args` and the default test arguments until it exits on its own, as
+    /// one-off commands do.
+    pub(crate) fn run_to_completion(args: &[&str]) -> Result<Output, TestError> {
+        ensure_release_binary()?;
+        Command::new(DEVNET_EXECUTABLE_BINARY_PATH)
+            .args(Self::add_default_args(args))
+            .output()
+            .map_err(|e| TestError::DevnetNotStartable(e.to_string()))
+    }
+
     async fn start_safe_process(args: &[&str]) -> Result<SafeChild, TestError> {
         ensure_release_binary()?;
 

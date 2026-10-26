@@ -3,7 +3,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::metrics::{LIFECYCLE_LOCK_HOLD, LIFECYCLE_LOCK_WAIT};
 
-/// Coordinates state, journals, and ordered notification enqueueing across RPC transports.
+/// Coordinates state, snapshots, and ordered notification enqueueing across RPC transports.
 /// Timers distinguish lock contention from the work performed while holding the lock.
 #[derive(Default)]
 pub struct Lifecycle {

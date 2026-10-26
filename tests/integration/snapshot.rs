@@ -1,14 +1,9 @@
-use std::fs;
-use std::path::Path;
-
 use serde_json::json;
 use starknet_rs_core::types::{BlockTag, Felt, StarknetError};
 use starknet_rs_providers::{Provider, ProviderError};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::utils::{
-    FeeUnit, UniqueAutoDeletableFile, assert_tx_succeeded_accepted, send_text_rpc_via_ws,
-};
+use crate::common::utils::{FeeUnit, assert_tx_succeeded_accepted, send_text_rpc_via_ws};
 
 #[tokio::test]
 async fn restores_pre_confirmed_state_in_demand_and_interval_modes() {
@@ -118,14 +113,13 @@ async fn gauges_follow_restore_then_block_abortion() {
 
 #[tokio::test]
 async fn malformed_load_preserves_snapshots() {
-    let source = UniqueAutoDeletableFile::new("snapshot_malformed_import");
-    fs::write(&source.path, b"{not valid JSON").unwrap();
     let devnet = BackgroundDevnet::spawn().await.unwrap();
     let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
     devnet.mint(Felt::ONE, 3).await;
+    let incomplete = json!({ "format": "starknet-devnet-dump", "version": 1 });
     let error =
-        devnet.send_custom_rpc("devnet_load", json!({"path": source.path})).await.unwrap_err();
-    assert_eq!(error.code, -5);
+        devnet.send_custom_rpc("devnet_load", json!({ "dump": incomplete })).await.unwrap_err();
+    assert_eq!(error.code, -32602);
     assert_eq!(devnet.get_balance_latest(&Felt::ONE, FeeUnit::Fri).await.unwrap(), Felt::THREE);
     assert_eq!(
         devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap(),
@@ -166,40 +160,23 @@ async fn older_snapshot_survives_websocket_revert_and_continued_execution() {
 }
 
 #[tokio::test]
-async fn empty_journal_restore_allows_next_append_and_load_preserves_import_source() {
-    let dump = UniqueAutoDeletableFile::new("snapshot_empty_journal");
-    let source = UniqueAutoDeletableFile::new("snapshot_import_source");
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
-        "--dump-on",
-        "block",
-        "--dump-path",
-        &dump.path,
-    ])
-    .await
-    .unwrap();
-    let snapshot = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
+async fn load_invalidates_snapshots_without_reusing_ids() {
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    assert_eq!(devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap(), json!("0x1"));
     devnet.mint(Felt::ONE, 10).await;
-    let exported = fs::read(&dump.path).unwrap();
-    fs::write(&source.path, &exported).unwrap();
-    assert_eq!(
-        devnet.send_custom_rpc("devnet_revert", json!({"snapshot_id": snapshot})).await.unwrap(),
-        true
-    );
-    assert!(!Path::new(&dump.path).exists());
+    let dump = devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
     devnet.mint(Felt::ONE, 2).await;
-    let events: Vec<serde_json::Value> =
-        serde_json::from_slice(&fs::read(&dump.path).unwrap()).unwrap();
-    assert_eq!(events.len(), 1);
 
-    devnet.send_custom_rpc("devnet_load", json!({"path": source.path})).await.unwrap();
-    assert_eq!(fs::read(&source.path).unwrap(), exported);
+    devnet.send_custom_rpc("devnet_load", json!({ "dump": dump })).await.unwrap();
     assert_eq!(
         devnet.get_balance_latest(&Felt::ONE, FeeUnit::Fri).await.unwrap(),
         Felt::from(10_u32)
     );
-    let events: Vec<serde_json::Value> =
-        serde_json::from_slice(&fs::read(&dump.path).unwrap()).unwrap();
-    assert_eq!(events.len(), 1);
+    assert_eq!(
+        devnet.send_custom_rpc("devnet_revert", json!({ "snapshot_id": "0x1" })).await.unwrap(),
+        json!(false)
+    );
+    assert_eq!(devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap(), json!("0x2"));
 }
 
 #[tokio::test]
@@ -265,46 +242,8 @@ async fn validates_snapshot_id_format() {
 }
 
 #[tokio::test]
-async fn restores_block_dump_and_preserves_snapshot_after_rewrite_failure() {
-    let dump_file = UniqueAutoDeletableFile::new("snapshot_block_dump");
-    let devnet = BackgroundDevnet::spawn_with_additional_args(&[
-        "--dump-on",
-        "block",
-        "--dump-path",
-        &dump_file.path,
-    ])
-    .await
-    .unwrap();
-    devnet.mint(Felt::ONE, 1).await;
-    let snapshot_id = devnet.send_custom_rpc("devnet_snapshot", json!([])).await.unwrap();
-    devnet.mint(Felt::ONE, 2).await;
-
-    fs::remove_file(&dump_file.path).unwrap();
-    fs::create_dir(&dump_file.path).unwrap();
-    let error = devnet
-        .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, -5);
-
-    fs::remove_dir(&dump_file.path).unwrap();
-    assert_eq!(
-        devnet
-            .send_custom_rpc("devnet_revert", json!({ "snapshot_id": snapshot_id }))
-            .await
-            .unwrap(),
-        json!(true)
-    );
-    let events: Vec<serde_json::Value> =
-        serde_json::from_slice(&fs::read(&dump_file.path).unwrap()).unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(Path::new(&dump_file.path).is_file());
-}
-
-#[tokio::test]
-async fn load_invalidates_only_after_its_destructive_reset_begins() {
+async fn failed_loads_preserve_snapshots_and_state() {
     let devnet = BackgroundDevnet::spawn().await.unwrap();
-    let missing = UniqueAutoDeletableFile::new("missing_snapshot_load");
     let address = Felt::from(0x987_u64);
 
     // State and transactions created before the snapshot must be recovered by the revert.
@@ -317,9 +256,9 @@ async fn load_invalidates_only_after_its_destructive_reset_begins() {
     let mint_after_snapshot = devnet.mint(address, 20).await;
     assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(30_u8));
 
-    // Reading a missing file fails before any destructive action, so the snapshot survives and the
-    // live state is left untouched.
-    assert!(devnet.send_custom_rpc("devnet_load", json!({ "path": missing.path })).await.is_err());
+    // An invalid dump is rejected without changing the state or the snapshot.
+    let invalid = json!({ "format": "starknet-devnet-dump", "version": 2 });
+    assert!(devnet.send_custom_rpc("devnet_load", json!({ "dump": invalid })).await.is_err());
     assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(30_u8));
 
     assert_eq!(
@@ -345,32 +284,21 @@ async fn load_invalidates_only_after_its_destructive_reset_begins() {
     devnet.mint(address, 5).await;
     assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(15_u8));
 
+    // A legacy dump whose replay fails is replayed in isolation, so it leaves the state and the
+    // snapshot untouched too.
+    let failing_events = json!([{
+        "jsonrpc": "2.0",
+        "method": "devnet_unknown",
+        "params": [],
+        "id": 1
+    }]);
     assert!(
-        devnet
-            .send_custom_rpc(
-                "devnet_load",
-                json!({
-                    "events": [{
-                        "jsonrpc": "2.0",
-                        "method": "devnet_unknown",
-                        "params": [],
-                        "id": 1
-                    }]
-                }),
-            )
-            .await
-            .is_err()
+        devnet.send_custom_rpc("devnet_load", json!({ "dump": failing_events })).await.is_err()
     );
-
-    // The failing load already performed its destructive reset, so the second checkpoint is
-    // invalidated and the revert is a no-op reporting false; the reset must be observable.
-    assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::ZERO);
-    assert!(matches!(
-        devnet.json_rpc_client.get_transaction_by_hash(mint_before_snapshot, None).await,
-        Err(ProviderError::StarknetError(StarknetError::TransactionHashNotFound))
-    ));
+    assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(15_u8));
     assert_eq!(
         devnet.send_custom_rpc("devnet_revert", json!({ "snapshot_id": second })).await.unwrap(),
-        json!(false)
+        json!(true)
     );
+    assert_eq!(devnet.get_balance_latest(&address, FeeUnit::Fri).await.unwrap(), Felt::from(10_u8));
 }

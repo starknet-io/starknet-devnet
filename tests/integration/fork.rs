@@ -23,10 +23,10 @@ use crate::common::constants::{
     MAINNET_HTTPS_URL, MAINNET_URL, STRK_ERC20_CONTRACT_CLASS_HASH,
 };
 use crate::common::utils::{
-    FeeUnit, assert_cairo1_classes_equal, assert_contains, assert_tx_succeeded_accepted,
-    declare_v3_deploy_v3, extract_json_rpc_error, get_block_reader_contract_artifacts,
-    get_contract_balance, get_simple_contract_artifacts, new_contract_factory,
-    send_ctrl_c_signal_and_wait,
+    FeeUnit, UniqueAutoDeletableFile, assert_cairo1_classes_equal, assert_contains,
+    assert_tx_succeeded_accepted, declare_v3_deploy_v3, extract_json_rpc_error,
+    get_block_reader_contract_artifacts, get_contract_balance, get_simple_contract_artifacts,
+    new_contract_factory, send_ctrl_c_signal_and_wait,
 };
 
 #[tokio::test]
@@ -862,4 +862,70 @@ async fn get_block_accepted_on_l1_from_origin() {
     // Should be on origin.
     let l1_accepted_block = forked_devnet.get_l1_accepted_block_with_tx_hashes().await.unwrap();
     assert_eq!(l1_accepted_block.block_number, 0);
+}
+
+#[tokio::test]
+async fn forked_dump_loads_on_startup_only_from_the_same_origin() {
+    let origin = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
+    origin.mint(Felt::ONE, 10).await;
+
+    let dump_file = UniqueAutoDeletableFile::new("forked_dump");
+    let fork = BackgroundDevnet::spawn_with_additional_args(&[
+        "--fork-network",
+        &origin.url,
+        "--accounts",
+        "0",
+        "--dump-on",
+        "exit",
+        "--dump-path",
+        &dump_file.path,
+    ])
+    .await
+    .unwrap();
+    fork.mint(Felt::TWO, 5).await;
+    let fork_block = fork.get_latest_block_with_tx_hashes().await.unwrap();
+    send_ctrl_c_signal_and_wait(&fork.process).await;
+
+    // The recorded origin is used, and the origin given explicitly is accepted.
+    for args in [vec!["--accounts", "0"], vec!["--accounts", "0", "--fork-network", &origin.url]] {
+        let loaded = BackgroundDevnet::spawn_with_additional_args(
+            &[vec!["--load-path", dump_file.path.as_str()], args].concat(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(loaded.get_latest_block_with_tx_hashes().await.unwrap(), fork_block);
+        assert_eq!(
+            loaded.get_balance_latest(&Felt::ONE, FeeUnit::Fri).await.unwrap(),
+            Felt::from(10)
+        );
+        assert_eq!(
+            loaded.get_balance_latest(&Felt::TWO, FeeUnit::Fri).await.unwrap(),
+            Felt::from(5)
+        );
+        send_ctrl_c_signal_and_wait(&loaded.process).await;
+    }
+
+    // An origin whose block at the fork point differs is rejected. Devnet block hashes depend on
+    // the transaction count, so the other origin's block 1 holds two transactions.
+    let other_origin = BackgroundDevnet::spawn_with_additional_args(&[
+        "--state-archive-capacity",
+        "full",
+        "--block-generation-on",
+        "demand",
+    ])
+    .await
+    .unwrap();
+    other_origin.mint(Felt::ONE, 7).await;
+    other_origin.mint(Felt::ONE, 7).await;
+    other_origin.create_block().await.unwrap();
+    let mismatched = BackgroundDevnet::spawn_with_additional_args(&[
+        "--load-path",
+        &dump_file.path,
+        "--accounts",
+        "0",
+        "--fork-network",
+        &other_origin.url,
+    ])
+    .await;
+    assert!(mismatched.is_err());
 }

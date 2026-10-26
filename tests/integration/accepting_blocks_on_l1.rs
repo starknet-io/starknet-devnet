@@ -8,7 +8,7 @@ use starknet_rs_providers::{Provider, ProviderError};
 use crate::assert_eq_prop;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::errors::RpcError;
-use crate::common::utils::{UniqueAutoDeletableFile, send_ctrl_c_signal_and_wait};
+use crate::common::utils::send_ctrl_c_signal_and_wait;
 
 /// Returns the hash of the dummy tx
 async fn send_dummy_tx(devnet: &BackgroundDevnet) -> Felt {
@@ -360,23 +360,18 @@ async fn dump_and_load_should_reconstruct_origin_acceptance_overlay() {
     let origin_devnet = BackgroundDevnet::spawn_forkable_devnet().await.unwrap();
     let origin_tx = send_dummy_tx(&origin_devnet).await;
     let origin_block = origin_devnet.get_latest_block_with_tx_hashes().await.unwrap();
-    let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&[
-        "--fork-network",
-        &origin_devnet.url,
-        "--dump-on",
-        "request",
-    ])
-    .await
-    .unwrap();
-    let dump_file = UniqueAutoDeletableFile::new("fork_origin_acceptance");
+    let fork_devnet =
+        BackgroundDevnet::spawn_with_additional_args(&["--fork-network", &origin_devnet.url])
+            .await
+            .unwrap();
 
     fork_devnet.accept_on_l1(&BlockId::Number(origin_block.block_number)).await.unwrap();
-    fork_devnet.send_custom_rpc("devnet_dump", json!({ "path": dump_file.path })).await.unwrap();
+    let dump = fork_devnet.send_custom_rpc("devnet_dump", json!({})).await.unwrap();
 
     fork_devnet.restart().await;
     assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL2).await;
 
-    fork_devnet.send_custom_rpc("devnet_load", json!({ "path": dump_file.path })).await.unwrap();
+    fork_devnet.send_custom_rpc("devnet_load", json!({ "dump": dump })).await.unwrap();
     assert_block_status(&fork_devnet, origin_block.block_hash, BlockStatus::AcceptedOnL1).await;
     let tx_status = fork_devnet.json_rpc_client.get_transaction_status(origin_tx).await.unwrap();
     assert_eq!(tx_status.finality_status(), SequencerTransactionStatus::AcceptedOnL1);

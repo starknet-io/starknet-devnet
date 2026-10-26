@@ -22,7 +22,7 @@ use crate::state::state_readers::DictState;
 use crate::state::{CommittedClassStorage, StarknetState};
 
 /// A class definition, preserving the representation Devnet stores it in.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "definition", rename_all = "snake_case")]
 pub(super) enum ClassDump {
     Cairo0Json(serde_json::Value),
@@ -123,6 +123,17 @@ impl ClassesDump {
             .map(|(class_hash, class)| ClassDefinitionDump { class_hash, class })
             .collect();
         self
+    }
+
+    /// Returns copies of the stored definitions of `class_hashes`; others are left out.
+    pub(super) fn definitions_of(&self, class_hashes: &[Felt]) -> ClassDefinitions {
+        ClassDefinitions(
+            self.definitions
+                .iter()
+                .filter(|definition| class_hashes.contains(&definition.class_hash))
+                .map(|definition| (definition.class_hash, definition.class.clone().into()))
+                .collect(),
+        )
     }
 
     /// Returns the stored class definitions and the classes declared after genesis.

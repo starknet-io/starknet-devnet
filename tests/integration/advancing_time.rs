@@ -525,11 +525,10 @@ async fn advance_time_combination_test_with_dump_and_load() {
     .await
     .expect("Could not start Devnet");
 
+    // Loading restores blocks exactly, including their timestamps.
     let last_block_load = devnet_load.get_latest_block_with_tx_hashes().await.unwrap();
     assert_eq!(last_block.block_number, last_block_load.block_number);
-
-    let timestamp_diff = last_block_load.timestamp.abs_diff(last_block.timestamp);
-    assert!(timestamp_diff < BUFFER_TIME_SECONDS)
+    assert_eq!(last_block.timestamp, last_block_load.timestamp);
 }
 
 #[tokio::test]

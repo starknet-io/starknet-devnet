@@ -18,12 +18,11 @@ use crate::constants::{
     MAXIMUM_SIERRA_LENGTH, STRK_ERC20_CONTRACT_CLASS, STRK_ERC20_CONTRACT_CLASS_HASH,
 };
 
-#[derive(Copy, Clone, Debug, clap::ValueEnum, Serialize)]
+/// When Devnet writes a dump without being asked to. Dumps are otherwise produced on request.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DumpOn {
     Exit,
-    Block,
-    Request,
 }
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum, Serialize, Deserialize, Eq, PartialEq)]
