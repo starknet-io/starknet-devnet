@@ -150,3 +150,14 @@ async fn dumps_that_change_block_generation_load_only_at_startup() {
     let error = error(&target, "devnet_load", json!({ "dump": dump })).await;
     assert!(error.message.contains("load it at startup instead"), "{error:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_reports_the_loaded_configuration() {
+    let origin = handler_with(StarknetConfig { lite_mode: true, seed: 7, ..Default::default() });
+    let dump = success(&origin, "devnet_dump", json!([])).await;
+
+    let target = handler();
+    assert_ne!(success(&target, "devnet_getConfig", json!({})).await["seed"], 7);
+    success(&target, "devnet_load", json!({ "dump": dump })).await;
+    assert_eq!(success(&target, "devnet_getConfig", json!({})).await["seed"], 7);
+}

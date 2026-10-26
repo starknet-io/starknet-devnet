@@ -81,8 +81,6 @@ pub enum ApiError {
     ContractClassSizeIsTooLarge,
     #[error("Minting reverted")]
     MintingReverted { tx_hash: Felt, revert_reason: Option<String> },
-    #[error("The dump operation failed: {msg}")]
-    DumpError { msg: String },
     #[error("Messaging error: {msg}")]
     MessagingError { msg: String },
     #[error("Invalid address: {msg}")]
@@ -296,11 +294,6 @@ impl ApiError {
                 message: error_message.into(),
                 data: Some(serde_json::json!({ "tx_hash": tx_hash, "revert_reason": reason })),
             },
-            ApiError::DumpError { msg } => RpcError {
-                code: crate::rpc_core::error::ErrorCode::ServerError(-5),
-                message: msg.into(),
-                data: None,
-            },
             ApiError::MessagingError { msg } => RpcError {
                 code: crate::rpc_core::error::ErrorCode::ServerError(WILDCARD_RPC_ERROR_CODE),
                 message: msg.into(),
@@ -354,7 +347,6 @@ impl ApiError {
             | Self::MintingReverted { .. }
             | Self::ProvingError { .. }
             | Self::CompiledClassHashMismatch
-            | Self::DumpError { .. }
             | Self::MessagingError { .. }
             | Self::InvalidAddress { .. }
             | Self::InvalidProof => false,

@@ -95,68 +95,38 @@
     },
     {
       "name": "devnet_dump",
-      "summary": "Export the replay journal, optionally writing it to a file",
-      "params": [
-        {
-          "name": "path",
-          "description": "Path to a file to dump the state to",
-          "required": false,
-          "schema": {
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        {
-          "name": "inline",
-          "required": false,
-          "schema": {
-            "type": "boolean"
-          },
-          "description": "Ignore the startup dump path; an explicit request path still takes precedence"
-        }
-      ],
+      "summary": "Return a dump of Devnet state",
+      "description": "The dump holds the configuration and everything that happened after genesis. It loads only into a Devnet release with the same genesis for its configuration. No files are written.",
+      "params": [],
       "result": {
         "name": "result",
-        "description": "Dumped replay events",
+        "description": "Dump of Devnet state",
         "schema": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/DUMP_EVENT"
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/components/schemas/STATE_DUMP"
         }
       },
-      "errors": [
-        {
-          "$ref": "#/components/errors/DUMP_ERROR"
-        }
-      ]
+      "errors": []
     },
     {
       "name": "devnet_load",
-      "summary": "Replace Devnet state by replaying events from a file or the request",
+      "summary": "Replace Devnet state with a dump",
       "params": [
         {
-          "name": "path",
-          "required": false,
+          "name": "dump",
+          "description": "A dump returned by devnet_dump, or a legacy event array, which is replayed",
+          "required": true,
           "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "events",
-          "required": false,
-          "schema": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DUMP_EVENT"
-            }
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/STATE_DUMP"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DUMP_EVENT"
+                }
+              }
+            ]
           }
         }
       ],
@@ -169,10 +139,10 @@
       },
       "errors": [
         {
-          "$ref": "#/components/errors/DUMP_ERROR"
+          "$ref": "#/components/errors/INVALID_PARAMS"
         }
       ],
-      "description": "Exactly one of path or events is required. Restart and load invalidate snapshots and clear subscriptions."
+      "description": "Invalid dumps, dumps whose block generation mode or forking origin differ from this instance, and legacy event arrays containing devnet_dump or devnet_load are rejected without changing state. A successful load invalidates snapshots and clears subscriptions. Errors of replayed legacy events are returned as they are."
     },
     {
       "name": "devnet_snapshot",
@@ -219,9 +189,6 @@
         },
         {
           "$ref": "#/components/errors/INTERNAL_ERROR"
-        },
-        {
-          "$ref": "#/components/errors/DUMP_ERROR"
         }
       ]
     },
@@ -1584,6 +1551,32 @@
         "pattern": "^0x[a-fA-F0-9]{64}$",
         "description": "A 256-bit hash encoded as 64 hexadecimal digits"
       },
+      "STATE_DUMP": {
+        "description": "A versioned dump of Devnet state. Its contents other than the listed properties are not part of the API.",
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": ["starknet-devnet-dump"]
+          },
+          "version": {
+            "type": "integer",
+            "enum": [1]
+          },
+          "devnet_version": {
+            "type": "string"
+          },
+          "genesis_fingerprint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "version",
+          "devnet_version",
+          "genesis_fingerprint"
+        ]
+      },
       "DUMP_EVENT": {
         "type": "object",
         "properties": {
@@ -1967,10 +1960,6 @@
       "MINTING_REVERTED": {
         "code": -1,
         "message": "Minting reverted"
-      },
-      "DUMP_ERROR": {
-        "code": -5,
-        "message": "Dump error: failed to access, parse, or write dump data, or dumping is not enabled."
       },
       "MESSAGING_ERROR": {
         "code": -1,

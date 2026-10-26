@@ -60,7 +60,7 @@ L1-L2 communication requires extra attention if Devnet is [run in a Docker conta
 
 :::info Dumping and Loading
 
-Loading a messaging contract is a dumpable event, meaning that, if you've enabled dumping, a messaging-contract-loading event will be dumped. Keep in mind that, if you rely on Devnet deploying a new contract, i.e. if you don't specify a contract address of an already deployed messaging contract, a new contract will be deployed at a new address on each loading of the dump. Read more about dumping [here](./dump-load-restart#dumping).
+A dump contains the L1 node URL and the address of the loaded messaging contract, so loading the dump restores the connection without contacting the L1 node or deploying a new contract. Keep the L1 node and its state available to keep exchanging messages. Read more about dumping [here](./dump-load-restart#dumping).
 
 :::
 
@@ -93,7 +93,7 @@ A running L1 node is required if `dry_run` is not set.
 
 :::info Dumping and Loading
 
-Flushing is not dumpable, meaning that, if you've enabled dumping, a flushing event will not itself be re-executed on loading. This is because it produces L2 messaging events that are themselves dumped. No L1-side actions are dumped, you need to take care of those yourself. Read more about dumping [here](./dump-load-restart#dumping).
+A dump contains the results of earlier flushes, such as the generated L2 transactions and Devnet's position in the L1 message history, but not the L1 node's state. Loading does not repeat L1-side actions; you need to take care of those yourself. Read more about dumping [here](./dump-load-restart#dumping).
 
 :::
 

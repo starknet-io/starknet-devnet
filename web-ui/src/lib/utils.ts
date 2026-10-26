@@ -78,3 +78,27 @@ export function parseGasPrice(value: string): number | undefined {
 export function formatBlockGeneration(mode: 'transaction' | 'demand' | { interval: number }): string {
   return typeof mode === 'object' && mode !== null ? `Every ${mode.interval}s` : mode === 'demand' ? 'On demand' : 'On transaction';
 }
+
+/** Checks that `text` is a dump `devnet_load` accepts: a dump object or a legacy event array. */
+export function validateDumpText(text: string): string | undefined {
+  if (!text.trim()) return 'Choose or paste a dump';
+  let dump: unknown;
+  try {
+    dump = JSON.parse(text);
+  } catch {
+    return 'The dump is not valid JSON';
+  }
+  return isRecord(dump) || Array.isArray(dump) ? undefined : 'A dump is a JSON object or a legacy event array';
+}
+
+/** Summarizes a dump returned by `devnet_dump`. */
+export function summarizeDump(dump: unknown): string {
+  if (!isRecord(dump) || !isRecord(dump.blocks)) return 'Dump downloaded';
+  const blocks = Array.isArray(dump.blocks.accepted) ? dump.blocks.accepted.length + 1 : undefined;
+  const transactions = Array.isArray(dump.transactions) ? dump.transactions.length : undefined;
+  const details = [
+    blocks === undefined ? undefined : `${blocks} block${blocks === 1 ? '' : 's'}`,
+    transactions === undefined ? undefined : `${transactions} transaction${transactions === 1 ? '' : 's'}`,
+  ].filter((detail) => detail !== undefined);
+  return details.length ? `Dump downloaded: ${details.join(', ')}` : 'Dump downloaded';
+}

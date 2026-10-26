@@ -67,15 +67,26 @@ export async function callRpc<T = unknown>(
   method: string,
   params?: unknown,
 ): Promise<T> {
+  return sendRpc<T>(JSON.stringify({ jsonrpc: '2.0', id: ++idCounter, method, params }));
+}
+
+/**
+ * Sends `rawParams`, a JSON document, as the request params without parsing it, so integers
+ * beyond JavaScript's safe range reach the server unchanged.
+ */
+export async function callRpcWithRawParams<T = unknown>(
+  method: string,
+  rawParams: string,
+): Promise<T> {
+  const envelope = JSON.stringify({ jsonrpc: '2.0', id: ++idCounter, method });
+  return sendRpc<T>(`${envelope.slice(0, -1)},"params":${rawParams}}`);
+}
+
+async function sendRpc<T>(body: string): Promise<T> {
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: ++idCounter,
-      method,
-      params,
-    }),
+    body,
   });
 
   if (!response.ok) {
