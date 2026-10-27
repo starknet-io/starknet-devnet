@@ -551,20 +551,34 @@ pub enum BroadcastedTransaction {
     DeployAccount(BroadcastedDeployAccountTransaction),
 }
 
+/// Execution flags of a broadcasted transaction. Whether it is executed as a query is not
+/// configurable: it follows from the transaction version, as does its hash.
+#[derive(Debug, Clone, Copy)]
+pub struct BroadcastedExecutionFlags {
+    pub charge_fee: bool,
+    pub validate: bool,
+    pub strict_nonce_check: bool,
+}
+
 impl BroadcastedTransaction {
     pub fn to_blockifier_account_transaction(
         &self,
         chain_id: &Felt,
-        execution_flags: ExecutionFlags,
+        execution_flags: BroadcastedExecutionFlags,
     ) -> DevnetResult<blockifier::transaction::account_transaction::AccountTransaction> {
         let sn_api_tx = self.to_sn_api_account_transaction(chain_id)?;
         Ok(blockifier::transaction::account_transaction::AccountTransaction {
             tx: sn_api_tx,
-            execution_flags,
+            execution_flags: ExecutionFlags {
+                only_query: self.is_only_query(),
+                charge_fee: execution_flags.charge_fee,
+                validate: execution_flags.validate,
+                strict_nonce_check: execution_flags.strict_nonce_check,
+            },
         })
     }
 
-    pub fn to_sn_api_account_transaction(
+    fn to_sn_api_account_transaction(
         &self,
         chain_id: &Felt,
     ) -> DevnetResult<starknet_api::executable_transaction::AccountTransaction> {
@@ -587,6 +601,14 @@ impl BroadcastedTransaction {
         };
 
         Ok(sn_api_tx)
+    }
+
+    pub fn is_only_query(&self) -> bool {
+        match self {
+            BroadcastedTransaction::Invoke(tx) => tx.is_only_query(),
+            BroadcastedTransaction::Declare(tx) => tx.is_only_query(),
+            BroadcastedTransaction::DeployAccount(tx) => tx.is_only_query(),
+        }
     }
 
     pub fn get_type(&self) -> TransactionType {

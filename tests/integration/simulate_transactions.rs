@@ -360,66 +360,84 @@ async fn simulate_invoke_v3() {
     assert_eq!(final_balance, vec![Felt::ZERO]);
 }
 
-#[tokio::test]
-async fn using_query_version_if_simulating() {
+/// Simulates an invoke, signed for the hash that matches `is_query`, of a contract that asserts
+/// the transaction version it sees.
+async fn simulate_version_assertion(is_query: bool, expected_version: Felt) {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
-
-    // get account
     let (account, signer) = devnet.get_first_predeployed_account_with_signer().await;
 
-    // get class
-    let (flattened_contract_artifact, casm_hash) =
+    let (contract_class, casm_hash) =
         get_flattened_sierra_contract_and_casm_hash(CAIRO_1_VERSION_ASSERTER_SIERRA_PATH);
-    let class_hash = flattened_contract_artifact.class_hash();
-
-    let (generated_class_hash, contract_address) =
-        declare_v3_deploy_v3(&account, flattened_contract_artifact, casm_hash, &[]).await.unwrap();
-    assert_eq!(generated_class_hash, class_hash);
+    let (_, contract_address) =
+        declare_v3_deploy_v3(&account, contract_class, casm_hash, &[]).await.unwrap();
 
     let calls = vec![Call {
         to: contract_address,
         selector: get_selector_from_name("assert_version").unwrap(),
-        calldata: vec![QUERY_VERSION_OFFSET + Felt::THREE], // expected version
+        calldata: vec![expected_version],
     }];
-
-    let execution = account.execute_v3(calls.clone());
-    let fee = LocalFee::from(execution.estimate_fee().await.unwrap());
     let nonce = Felt::TWO; // after declare+deploy
-    let invoke_request = execution
-        .l1_data_gas(fee.l1_data_gas)
-        .l1_gas(fee.l1_gas)
-        .l1_data_gas_price(fee.l1_data_gas_price)
-        .l1_gas_price(fee.l1_gas_price)
-        .l2_gas(fee.l2_gas)
-        .l2_gas_price(fee.l2_gas_price)
+    let prepared = account
+        .execute_v3(calls.clone())
+        .l1_gas(0)
+        .l1_gas_price(0)
+        .l2_gas(0)
+        .l2_gas_price(0)
+        .l1_data_gas(0)
+        .l1_data_gas_price(0)
         .nonce(nonce)
         .tip(0)
         .prepared()
         .unwrap();
+    let signature = signer.sign_hash(&prepared.transaction_hash(is_query)).await.unwrap();
 
-    let signature = signer.sign_hash(&invoke_request.transaction_hash(false)).await.unwrap();
-    let invoke_simulation_body = json!({
-        "block_id": "latest",
-        "simulation_flags": [],
-        "transactions": [
-            {
-                "type": "INVOKE",
-                "version": "0x3",
-                "signature": [signature.r, signature.s],
-                "nonce": nonce,
-                "calldata": account.encode_calls(&calls),
-                "sender_address": account.address(),
-                "resource_bounds": ResourceBoundsMapping::from(fee),
-                "tip":"0x0",
-                "paymaster_data":[],
-                "account_deployment_data":[],
-                "nonce_data_availability_mode":"L1",
-                "fee_data_availability_mode":"L1"
-            }
-        ]
-    });
+    let simulation = devnet
+        .json_rpc_client
+        .simulate_transaction(
+            BlockId::Tag(BlockTag::Latest),
+            BroadcastedTransaction::Invoke(BroadcastedInvokeTransaction {
+                broadcasted_invoke_txn_v3: BroadcastedInvokeTransactionV3 {
+                    sender_address: account.address(),
+                    calldata: account.encode_calls(&calls),
+                    signature: vec![signature.r, signature.s],
+                    nonce,
+                    resource_bounds: ResourceBoundsMapping {
+                        l1_gas: ResourceBounds { max_amount: 0, max_price_per_unit: 0 },
+                        l2_gas: ResourceBounds { max_amount: 0, max_price_per_unit: 0 },
+                        l1_data_gas: ResourceBounds { max_amount: 0, max_price_per_unit: 0 },
+                    },
+                    tip: 0,
+                    paymaster_data: vec![],
+                    account_deployment_data: vec![],
+                    nonce_data_availability_mode: DataAvailabilityMode::L1,
+                    fee_data_availability_mode: DataAvailabilityMode::L1,
+                    is_query,
+                    proof_facts: None,
+                },
+                proof: None,
+            }),
+            [SimulationFlag::SkipFeeCharge],
+        )
+        .await
+        .unwrap();
 
-    devnet.send_custom_rpc("starknet_simulateTransactions", invoke_simulation_body).await.unwrap();
+    match simulation.transaction_trace {
+        TransactionTrace::Invoke(InvokeTransactionTrace {
+            execute_invocation: ExecuteInvocation::Success(_),
+            ..
+        }) => (),
+        other_trace => panic!("Unexpected trace {other_trace:?}"),
+    }
+}
+
+#[tokio::test]
+async fn simulating_regular_transaction_uses_regular_version() {
+    simulate_version_assertion(false, Felt::THREE).await;
+}
+
+#[tokio::test]
+async fn simulating_query_transaction_uses_query_version() {
+    simulate_version_assertion(true, QUERY_VERSION_OFFSET + Felt::THREE).await;
 }
 
 #[tokio::test]

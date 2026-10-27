@@ -1,7 +1,6 @@
 use blockifier::fee::fee_utils::{self};
 use blockifier::state::cached_state::CachedState;
 use blockifier::state::state_api::StateReader;
-use blockifier::transaction::account_transaction::ExecutionFlags;
 use blockifier::transaction::objects::HasRelatedFeeType;
 use blockifier::transaction::transaction_execution::Transaction;
 use blockifier::transaction::transactions::ExecutableTransaction;
@@ -10,7 +9,7 @@ use starknet_rs_core::types::{Felt, MsgFromL1, PriceUnit};
 use starknet_types::contract_address::ContractAddress;
 use starknet_types::rpc::block::BlockId as CustomBlockId;
 use starknet_types::rpc::estimate_message_fee::{EstimateMessageFeeRequest, FeeEstimateWrapper};
-use starknet_types::rpc::transactions::BroadcastedTransaction;
+use starknet_types::rpc::transactions::{BroadcastedExecutionFlags, BroadcastedTransaction};
 
 use crate::error::{ContractExecutionError, DevnetResult, Error};
 use crate::starknet::Starknet;
@@ -44,10 +43,16 @@ pub fn estimate_fee(
                     .unwrap_or(true);
 
                 Ok((
-                    txn.to_sn_api_account_transaction(&chain_id)?,
-                    validate,
+                    txn.to_blockifier_account_transaction(
+                        &chain_id,
+                        BroadcastedExecutionFlags {
+                            charge_fee: charge_fee.unwrap_or(false),
+                            validate,
+                            strict_nonce_check: txn
+                                .requires_strict_nonce_check(using_pre_confirmed_block),
+                        },
+                    )?,
                     txn.gas_vector_computation_mode(),
-                    txn.requires_strict_nonce_check(using_pre_confirmed_block),
                 ))
             })
             .collect::<DevnetResult<Vec<_>>>()?
@@ -58,21 +63,11 @@ pub fn estimate_fee(
     transactions
         .into_iter()
         .enumerate()
-        .map(|(idx, (transaction, validate, gas_vector_computation_mode, strict_nonce_check))| {
+        .map(|(idx, (transaction, gas_vector_computation_mode))| {
             let estimate_fee_result = estimate_transaction_fee(
                 &mut transactional_state,
                 &block_context,
-                Transaction::Account(
-                    blockifier::transaction::account_transaction::AccountTransaction {
-                        tx: transaction,
-                        execution_flags: ExecutionFlags {
-                            only_query: true,
-                            charge_fee: charge_fee.unwrap_or(false),
-                            validate,
-                            strict_nonce_check,
-                        },
-                    },
-                ),
+                Transaction::Account(transaction),
                 return_error_on_reverted_execution,
                 gas_vector_computation_mode,
             );
