@@ -26,9 +26,9 @@ use crate::common::constants::{
 };
 use crate::common::utils::{
     LocalFee, assert_contains, assert_tx_reverted, assert_tx_succeeded_accepted,
-    extract_message_error, extract_nested_error, get_deployable_account_signer,
-    get_flattened_sierra_contract_and_casm_hash, get_simple_contract_artifacts,
-    new_contract_factory,
+    declare_v3_deploy_v3, extract_message_error, extract_nested_error,
+    get_deployable_account_signer, get_flattened_sierra_contract_and_casm_hash,
+    get_simple_contract_artifacts, new_contract_factory,
 };
 
 fn assert_fee_estimation(fee_estimation: &FeeEstimate) {
@@ -399,6 +399,36 @@ async fn using_query_version_if_estimating() {
         Ok(_) => (),
         other => panic!("Unexpected result: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn using_regular_version_if_estimating_regular_transaction() {
+    let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
+    let (account, signer) = devnet.get_first_predeployed_account_with_signer().await;
+
+    let (contract_class, casm_hash) =
+        get_flattened_sierra_contract_and_casm_hash(CAIRO_1_VERSION_ASSERTER_SIERRA_PATH);
+    let (_, contract_address) =
+        declare_v3_deploy_v3(&account, contract_class, casm_hash, &[]).await.unwrap();
+
+    let invoke = broadcasted_invoke_v3_for_estimation(
+        &account,
+        &signer,
+        contract_address,
+        get_selector_from_name("assert_version").unwrap(),
+        &[Felt::THREE], // expected version
+        Felt::TWO,      // after declare+deploy
+    )
+    .await
+    .unwrap();
+
+    devnet
+        .json_rpc_client
+        .estimate_fee([invoke], [], BlockId::Tag(BlockTag::Latest))
+        .await
+        .unwrap()
+        .iter()
+        .for_each(assert_fee_estimation);
 }
 
 async fn broadcasted_invoke_v3_for_estimation(
