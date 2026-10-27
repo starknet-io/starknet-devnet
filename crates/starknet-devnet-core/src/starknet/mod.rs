@@ -6,7 +6,7 @@ use blockifier::context::{BlockContext, ChainInfo, TransactionContext};
 use blockifier::execution::common_hints::ExecutionMode;
 use blockifier::state::cached_state::CachedState;
 use blockifier::state::state_api::StateReader;
-use blockifier::transaction::account_transaction::{AccountTransaction, ExecutionFlags};
+use blockifier::transaction::account_transaction::AccountTransaction;
 use blockifier::transaction::errors::TransactionExecutionError;
 use blockifier::transaction::objects::TransactionExecutionInfo;
 use blockifier::transaction::transactions::ExecutableTransaction;
@@ -49,7 +49,7 @@ use starknet_types::rpc::transactions::broadcasted_invoke_transaction_v3::Broadc
 use starknet_types::rpc::transactions::l1_handler_transaction::L1HandlerTransaction;
 use starknet_types::rpc::transactions::{
     BlockTraceResult, BlockTransactionTrace, BlockTransactionTracesWithInitialReads,
-    BroadcastedDeclareTransaction, BroadcastedDeployAccountTransaction,
+    BroadcastedDeclareTransaction, BroadcastedDeployAccountTransaction, BroadcastedExecutionFlags,
     BroadcastedInvokeTransaction, BroadcastedTransaction, BroadcastedTransactionCommonV3,
     L1HandlerTransactionStatus, ResourceBoundsWrapper, SimulatedTransaction, SimulationFlag,
     SimulationResult, TransactionFinalityStatus, TransactionStatus, TransactionTrace,
@@ -1559,8 +1559,7 @@ impl Starknet {
                         )?;
 
                     Ok((
-                        txn.to_blockifier_account_transaction(&chain_id, ExecutionFlags {
-                            only_query: true,
+                        txn.to_blockifier_account_transaction(&chain_id, BroadcastedExecutionFlags {
                             charge_fee: !skip_fee_charge,
                             validate: !(skip_validate || skip_validate_due_to_impersonation),
                             strict_nonce_check: txn.requires_strict_nonce_check(using_pre_confirmed_block),
