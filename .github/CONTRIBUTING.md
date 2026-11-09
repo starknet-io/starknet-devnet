@@ -53,7 +53,7 @@ The repository's `scripts/` directory contains the supported development command
 
 - Use Node 24 and npm 11 to match CI.
 - Integration tests require [Foundry](https://book.getfoundry.sh/getting-started/installation); `anvil` must be on `PATH`.
-- All-features Rust checks require LLVM 19. In CI, `MLIR_SYS_190_PREFIX`, `LLVM_SYS_191_PREFIX`, and `TABLEGEN_190_PREFIX` point to `/usr/lib/llvm-19`.
+- All-features Rust checks require LLVM 19. In CI, `MLIR_SYS_190_PREFIX`, `LLVM_SYS_191_PREFIX`, and `TABLEGEN_190_PREFIX` point to `/usr/lib/llvm-19`, and `LIBCLANG_PATH` points to `/usr/lib/llvm-19/lib` so bindgen uses the matching libclang instead of a newer system one.
 
 ### Installation
 
