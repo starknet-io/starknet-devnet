@@ -11,7 +11,7 @@ use crate::assert_eq_prop;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
     ARGENT_ACCOUNT_CLASS_HASH, CAIRO_1_ACCOUNT_CONTRACT_SIERRA_HASH,
-    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH, INTEGRATION_SEPOLIA_HTTP_URL,
+    CAIRO_1_ACCOUNT_CONTRACT_SIERRA_PATH, INTEGRATION_SEPOLIA_URL,
 };
 use crate::common::utils::{
     FeeUnit, assert_contains, assert_tx_succeeded_accepted, deploy_argent_account,
@@ -128,9 +128,10 @@ async fn argent_account_undeployable_by_default() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 /// Relying on forking: the origin network is expected to have the account class declared.
 async fn can_deploy_instance_of_argent_account_via_fork() {
-    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_HTTP_URL];
+    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL];
     let devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
     let account_hash = Felt::from_hex_unchecked(ARGENT_ACCOUNT_CLASS_HASH);

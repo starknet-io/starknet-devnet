@@ -5024,6 +5024,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serial_test",
  "starknet-devnet-core",
  "starknet-rust-accounts",
  "starknet-rust-contract",

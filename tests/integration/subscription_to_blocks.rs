@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::common::background_devnet::BackgroundDevnet;
-use crate::common::constants::MAINNET_HTTPS_URL;
+use crate::common::constants::MAINNET_URL;
 use crate::common::errors::RpcError;
 use crate::common::utils::{
     SubscriptionId, assert_no_notifications, receive_notification, subscribe_new_heads, unsubscribe,
@@ -394,9 +394,10 @@ async fn test_fork_subscription_to_blocks_by_hash() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn test_fork_subscription_to_old_blocks_should_fail() {
     // Setup original devnet with some blocks
-    let origin_url = MAINNET_HTTPS_URL;
+    let origin_url = MAINNET_URL;
     let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&["--fork-network", origin_url])
         .await
         .unwrap();

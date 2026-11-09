@@ -25,6 +25,7 @@ rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serial_test = { workspace = true }
 starknet-rs-accounts = { workspace = true }
 starknet-rs-contract = { workspace = true }
 starknet-rs-core = { workspace = true }
