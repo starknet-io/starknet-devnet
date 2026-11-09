@@ -133,7 +133,7 @@ For the startup command shown above, the initial result is:
   "pre_confirmed_tx_count": 0,
   "chain_id": "SN_SEPOLIA",
   "protocol_version": "0.10.2",
-  "devnet_version": "0.10.1",
+  "devnet_version": "0.11.0",
   "is_forked": false,
   "impersonated_accounts": [],
   "auto_impersonate": false
