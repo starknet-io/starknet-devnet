@@ -1,6 +1,7 @@
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de::{Error as _, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize};
 use starknet_types::messaging::MessageToL2;
 
 use crate::error::Error;
@@ -96,8 +97,8 @@ pub enum Request {
 }
 
 /// Request parameters
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub enum RequestParams {
     /// no parameters provided
     None,
@@ -105,6 +106,33 @@ pub enum RequestParams {
     Array(Vec<serde_json::Value>),
     /// a map of JSON values
     Object(serde_json::Map<String, serde_json::Value>),
+}
+
+/// Deserializes through [serde_json::Value] rather than `#[serde(untagged)]`: untagged enums
+/// buffer their input in serde's internal content type, which cannot hold integers above
+/// [u64::MAX] when serde_json's `arbitrary_precision` is enabled. Such integers then fail to
+/// deserialize from an already parsed [serde_json::Value], e.g. a large `devnet_mint` amount in a
+/// legacy dump.
+impl<'de> Deserialize<'de> for RequestParams {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::Null => Ok(RequestParams::None),
+            serde_json::Value::Array(array) => Ok(RequestParams::Array(array)),
+            serde_json::Value::Object(object) => Ok(RequestParams::Object(object)),
+            other => Err(D::Error::invalid_type(
+                unexpected_scalar(&other),
+                &"null, an array or an object",
+            )),
+        }
+    }
+}
+
+fn unexpected_scalar(value: &serde_json::Value) -> Unexpected<'_> {
+    match value {
+        serde_json::Value::Bool(b) => Unexpected::Bool(*b),
+        serde_json::Value::String(s) => Unexpected::Str(s),
+        _ => Unexpected::Other("a number"),
+    }
 }
 
 impl From<RequestParams> for serde_json::Value {
@@ -278,6 +306,29 @@ mod tests {
         let s = r#"{"jsonrpc": "2.0", "method": "eth_method", "params": [999,1337], "id": 1}"#;
         let obj: Result<RpcNotification, _> = serde_json::from_str(s);
         assert!(obj.is_err());
+    }
+
+    #[test]
+    fn method_calls_with_integers_above_u64_deserialize_from_value() {
+        let amount = r#"123456789123456789123"#;
+        let s = format!(
+            r#"[{{"jsonrpc":"2.0","id":1,"method":"devnet_mint","params":{{"amount":{amount}}}}},{{"jsonrpc":"2.0","id":2,"method":"m","params":[{amount}]}}]"#
+        );
+        let value: serde_json::Value = serde_json::from_str(&s).unwrap();
+
+        let calls: Vec<RpcMethodCall> = serde_json::from_value(value).unwrap();
+
+        let RequestParams::Object(params) = &calls[0].params else { panic!("expected object") };
+        assert_eq!(params["amount"].to_string(), amount);
+        let RequestParams::Array(params) = &calls[1].params else { panic!("expected array") };
+        assert_eq!(params[0].to_string(), amount);
+    }
+
+    #[test]
+    fn request_params_reject_scalars() {
+        for s in [r#""text""#, "1", "true"] {
+            assert!(serde_json::from_str::<RequestParams>(s).is_err());
+        }
     }
 
     #[test]
