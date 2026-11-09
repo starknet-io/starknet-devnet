@@ -332,6 +332,22 @@ async fn legacy_dumps_load_via_rpc_and_on_startup() {
 }
 
 #[tokio::test]
+async fn legacy_dump_with_integer_above_u64_loads_via_rpc() {
+    let amount = u128::from(u64::MAX) * 10;
+    let events = json!([{
+        "jsonrpc": "2.0", "id": 1, "method": "devnet_mint",
+        "params": { "address": format!("{DUMMY_ADDRESS:#x}"), "amount": amount, "unit": "FRI" }
+    }]);
+
+    let devnet = BackgroundDevnet::spawn().await.unwrap();
+    devnet.send_custom_rpc("devnet_load", json!({ "dump": events })).await.unwrap();
+
+    let balance =
+        devnet.get_balance_latest(&Felt::from(DUMMY_ADDRESS), FeeUnit::Fri).await.unwrap();
+    assert_eq!(balance, Felt::from(amount));
+}
+
+#[tokio::test]
 async fn dump_endpoint_works_without_startup_options() {
     let devnet = BackgroundDevnet::spawn().await.expect("Could not start Devnet");
     for params in [json!({}), json!([]), serde_json::Value::Null] {
