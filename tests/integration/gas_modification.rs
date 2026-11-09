@@ -241,6 +241,7 @@ async fn set_gas() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn set_gas_fork() {
     let fork_block = &INTEGRATION_SAFE_BLOCK.to_string();
     let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL, "--fork-block", fork_block];

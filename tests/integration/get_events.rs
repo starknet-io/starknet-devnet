@@ -535,6 +535,7 @@ const FORK_BLOCK_NUMBER: u64 = 1374700;
 const EVENTS_IN_FORK_BLOCK: usize = 330;
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn get_events_from_forked_devnet_when_last_queried_block_on_origin() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();
 
@@ -563,6 +564,7 @@ async fn get_events_from_forked_devnet_when_last_queried_block_on_origin() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn get_events_from_forked_devnet_when_first_queried_block_on_devnet() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();
 
@@ -600,6 +602,7 @@ async fn get_events_from_forked_devnet_when_first_queried_block_on_devnet() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn get_events_from_forked_devnet_when_first_queried_block_on_origin_and_last_on_devnet() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();
 
@@ -636,6 +639,7 @@ async fn get_events_from_forked_devnet_when_first_queried_block_on_origin_and_la
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn get_events_since_accepted_on_l1_on_origin() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();
 
@@ -670,6 +674,7 @@ async fn get_events_since_accepted_on_l1_on_origin() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn get_events_from_forked_devnet_since_locally_present_accepted_on_l1() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();
 
@@ -699,6 +704,7 @@ async fn get_events_from_forked_devnet_since_locally_present_accepted_on_l1() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 /// This is to prevent a bug which appeared specifically if block_id is block hash
 async fn get_events_from_forked_devnet_by_block_hash_with_all_events_present_locally() {
     let fork_devnet = fork_mainnet_at(FORK_BLOCK_NUMBER).await.unwrap();

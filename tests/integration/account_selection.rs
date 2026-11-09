@@ -128,6 +128,7 @@ async fn argent_account_undeployable_by_default() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 /// Relying on forking: the origin network is expected to have the account class declared.
 async fn can_deploy_instance_of_argent_account_via_fork() {
     let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL];

@@ -394,6 +394,7 @@ async fn test_fork_subscription_to_blocks_by_hash() {
 }
 
 #[tokio::test]
+#[serial_test::serial(public_fork_origin)]
 async fn test_fork_subscription_to_old_blocks_should_fail() {
     // Setup original devnet with some blocks
     let origin_url = MAINNET_URL;
