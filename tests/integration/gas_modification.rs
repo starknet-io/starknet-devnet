@@ -14,7 +14,7 @@ use starknet_rs_signers::Signer;
 use crate::assert_eq_prop;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
-    self, CAIRO_1_CONTRACT_PATH, INTEGRATION_SAFE_BLOCK, INTEGRATION_SEPOLIA_HTTP_URL,
+    self, CAIRO_1_CONTRACT_PATH, INTEGRATION_SAFE_BLOCK, INTEGRATION_SEPOLIA_URL,
 };
 use crate::common::errors::RpcError;
 use crate::common::fees::assert_difference_if_validation;
@@ -243,7 +243,7 @@ async fn set_gas() {
 #[tokio::test]
 async fn set_gas_fork() {
     let fork_block = &INTEGRATION_SAFE_BLOCK.to_string();
-    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_HTTP_URL, "--fork-block", fork_block];
+    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL, "--fork-block", fork_block];
     let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
     // Sepolia fork gas modification test scenario

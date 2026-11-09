@@ -19,8 +19,8 @@ use starknet_rs_signers::Signer;
 use crate::common::background_devnet::BackgroundDevnet;
 use crate::common::constants::{
     self, CAIRO_1_ACCOUNT_CONTRACT_0_8_0_SIERRA_PATH, ETH_ERC20_CONTRACT_CLASS_HASH,
-    INTEGRATION_GENESIS_BLOCK_HASH, INTEGRATION_SAFE_BLOCK, INTEGRATION_SEPOLIA_HTTP_URL,
-    MAINNET_HTTPS_URL, MAINNET_URL, STRK_ERC20_CONTRACT_CLASS_HASH,
+    INTEGRATION_GENESIS_BLOCK_HASH, INTEGRATION_SAFE_BLOCK, INTEGRATION_SEPOLIA_URL, MAINNET_URL,
+    STRK_ERC20_CONTRACT_CLASS_HASH,
 };
 use crate::common::utils::{
     FeeUnit, UniqueAutoDeletableFile, assert_cairo1_classes_equal, assert_contains,
@@ -53,7 +53,7 @@ async fn test_fork_status() {
 #[tokio::test]
 async fn test_forking_sepolia_genesis_block() {
     let fork_block = &INTEGRATION_SAFE_BLOCK.to_string();
-    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_HTTP_URL, "--fork-block", fork_block];
+    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL, "--fork-block", fork_block];
     let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
     let block_hash = BlockId::Hash(Felt::from_hex_unchecked(INTEGRATION_GENESIS_BLOCK_HASH));
@@ -68,7 +68,7 @@ async fn test_forking_sepolia_genesis_block() {
 #[tokio::test]
 async fn test_getting_non_existent_block_from_origin() {
     let fork_block = &INTEGRATION_SAFE_BLOCK.to_string();
-    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_HTTP_URL, "--fork-block", fork_block];
+    let cli_args = ["--fork-network", INTEGRATION_SEPOLIA_URL, "--fork-block", fork_block];
     let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&cli_args).await.unwrap();
 
     let non_existent_block_hash = "0x123456";
@@ -703,7 +703,7 @@ async fn test_block_count_increased_on_state() {
 
 #[tokio::test]
 async fn test_forking_https() {
-    let origin_url = MAINNET_HTTPS_URL;
+    let origin_url = MAINNET_URL;
     let fork_block = 2;
     let fork_devnet = BackgroundDevnet::spawn_with_additional_args(&[
         "--fork-network",

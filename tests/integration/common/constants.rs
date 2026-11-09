@@ -90,11 +90,10 @@ pub const ARGENT_ACCOUNT_CLASS_HASH: &str =
     "0x036078334509b514626504edc9fb252328d1a240e4e948bef8d0c08dff45927f";
 
 // Forking
-pub const INTEGRATION_SEPOLIA_HTTP_URL: &str =
-    "http://rpc.pathfinder.swmansion.com/integration-sepolia/rpc/v0_10";
+pub const INTEGRATION_SEPOLIA_URL: &str =
+    "https://rpc.pathfinder.swmansion.com/integration-sepolia/rpc/v0_10";
 
-pub const MAINNET_URL: &str = "http://rpc.pathfinder.swmansion.com/mainnet/rpc/v0_10";
-pub const MAINNET_HTTPS_URL: &str = "https://rpc.pathfinder.swmansion.com/mainnet/rpc/v0_10";
+pub const MAINNET_URL: &str = "https://rpc.pathfinder.swmansion.com/mainnet/rpc/v0_10";
 pub const INTEGRATION_GENESIS_BLOCK_HASH: &str =
     "0x19f675d3fb226821493a6ab9a1955e384bba80f130de625621a418e9a7c0ca3";
 /// The number of the last block at which forking can be done; prior to v0.13.4.
