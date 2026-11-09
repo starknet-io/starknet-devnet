@@ -93,11 +93,11 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact-name: starknet-devnet-x86_64-unknown-linux-musl
           
-          - os: macos-14
+          - os: macos-26
             target: x86_64-apple-darwin
             artifact-name: starknet-devnet-x86_64-apple-darwin
           
-          - os: macos-14
+          - os: macos-26
             target: aarch64-apple-darwin
             artifact-name: starknet-devnet-aarch64-apple-darwin
 

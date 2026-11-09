@@ -7932,7 +7932,7 @@ dependencies = [
 
 [[package]]
 name = "starknet-devnet"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -7957,7 +7957,7 @@ dependencies = [
 
 [[package]]
 name = "starknet-devnet-core"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "alloy",
  "blockifier",
@@ -7991,7 +7991,7 @@ dependencies = [
 
 [[package]]
 name = "starknet-devnet-server"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8022,7 +8022,7 @@ dependencies = [
 
 [[package]]
 name = "starknet-devnet-types"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "ahash",
  "apollo_compilation_utils",
